@@ -41,7 +41,9 @@ if df_plagas is not None:
 
 sectores_fenologia = []
 if df_fenologia is not None:
-    sectores_fenologia = df_fenologia['Sector'].unique().tolist()
+    # Asumiendo que el archivo de fenología también tiene una columna 'Sector'
+    if 'Sector' in df_fenologia.columns:
+        sectores_fenologia = df_fenologia['Sector'].unique().tolist()
 
 # Combinamos las listas de ambos archivos y eliminamos duplicados
 todos_los_sectores = sorted(list(set(sectores_plagas + sectores_fenologia)))
@@ -55,28 +57,19 @@ sector_seleccionado = st.sidebar.selectbox(
     options=todos_los_sectores
 )
 
-)
-
 st.header(f"Análisis para el Sector: {sector_seleccionado}")
 st.divider()
 
-# --- Módulo NUEVO: Alertas y Umbrales ---
+# --- Módulo de Alertas y Umbrales ---
 st.subheader("🚨 Alertas Críticas")
 
 if df_plagas is not None:
-    # Nos aseguramos que la columna Fecha sea de tipo datetime
     df_plagas['Fecha'] = pd.to_datetime(df_plagas['Fecha'])
-    
-    # Encontramos el último registro para CADA trampa
     ultimos_registros = df_plagas.loc[df_plagas.groupby('Codigo_Trampa')['Fecha'].idxmax()]
-    
-    # Filtramos las trampas que superan el umbral
     trampas_en_alerta = ultimos_registros[ultimos_registros['Total_Capturas'] >= umbral_alerta_plagas]
     
     if not trampas_en_alerta.empty:
         st.warning(f"¡Atención! Se han detectado {len(trampas_en_alerta)} trampas que superan el umbral de {umbral_alerta_plagas} capturas.")
-        
-        # Mostramos las alertas en columnas para que se vea más ordenado
         alert_cols = st.columns(3)
         col_idx = 0
         for index, row in trampas_en_alerta.iterrows():
@@ -97,32 +90,14 @@ else:
 
 st.divider()
 
-
-# --- Módulo de Gráficos (El código anterior, sin cambios mayores) ---
+# --- Módulo de Gráficos ---
 
 # Análisis de Monitoreo de Plagas
 st.subheader("🪰 Evolución de Capturas de Mosca de la Fruta")
-if df_plagas is not None and not df_plagas[df_plagas['Sector'] == sector_seleccionado].empty:
+if df_plagas is not None and sector_seleccionado in df_plagas['Sector'].unique():
     df_plagas_sector = df_plagas[df_plagas['Sector'] == sector_seleccionado]
     df_plagas_sector['Fecha'] = pd.to_datetime(df_plagas_sector['Fecha'])
     capturas_por_dia = df_plagas_sector.groupby('Fecha')['Total_Capturas'].sum().reset_index()
     fig_plagas = px.line(capturas_por_dia, x='Fecha', y='Total_Capturas', title=f'Total de Capturas Diarias en el Sector {sector_seleccionado}', markers=True)
     st.plotly_chart(fig_plagas, use_container_width=True)
 else:
-    st.info(f"No hay registros de monitoreo de plagas para el sector '{sector_seleccionado}'.")
-
-st.divider()
-
-# Análisis de Fenología
-st.subheader("🌱 Distribución Fenológica Reciente")
-if df_fenologia is not None and not df_fenologia[df_fenologia['Sector'] == sector_seleccionado].empty:
-    df_fenologia_sector = df_fenologia[df_fenologia['Sector'] == sector_seleccionado]
-    ultima_fecha = df_fenologia_sector['Fecha'].max()
-    st.write(f"Mostrando la última evaluación realizada el: **{pd.to_datetime(ultima_fecha).strftime('%d/%m/%Y')}**")
-    df_ultima_evaluacion = df_fenologia_sector[df_fenologia_sector['Fecha'] == ultima_fecha]
-    columnas_estados = ['Punta algodón', 'Punta verde', 'Salida de hojas', 'Hojas extendidas', 'Racimos visibles']
-    resumen_fenologia = df_ultima_evaluacion[columnas_estados].sum()
-    fig_fenologia = px.pie(values=resumen_fenologia.values, names=resumen_fenologia.index, title=f'Distribución de Estados Fenológicos en el Sector {sector_seleccionado}')
-    st.plotly_chart(fig_fenologia, use_container_width=True)
-else:
-    st.info(f"No hay registros de evaluación fenológica para el sector '{sector_seleccionado}'.")

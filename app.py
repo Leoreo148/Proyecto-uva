@@ -1,4 +1,32 @@
 import streamlit as st
+# (Aquí van tus otras importaciones como pandas, joblib, etc.)
+
+# --- BARRA LATERAL (SIDEBAR) ---
+
+st.sidebar.header('Selección de Sector')
+
+# Lista de todos los sectores del fundo
+# (Puedes modificar esta lista cuando quieras)
+sectores_del_fundo = ['W1', 'W2', 'W3', 'K1', 'K2', 'K3', 'General']
+
+# Creamos el menú desplegable en la barra lateral
+sector_seleccionado = st.sidebar.selectbox(
+    'Seleccione el Sector de Trabajo:',
+    options=sectores_del_fundo
+)
+
+# Mostramos el sector que el usuario eligió en la barra lateral
+st.sidebar.success(f"Sector seleccionado: **{sector_seleccionado}**")
+
+# --- FIN DE LA BARRA LATERAL ---
+
+
+# --- PÁGINA PRINCIPAL ---
+# El título ahora puede mostrar el sector seleccionado dinámicamente
+st.title(f"Panel de Control del Fundo")
+st.header(f"Mostrando datos para el sector: {sector_seleccionado}")
+
+# ... aquí continúa el resto del código de tu página principal ...import streamlit as st
 import pandas as pd
 import joblib
 

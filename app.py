@@ -1,61 +1,38 @@
 import streamlit as st
-# (Aquí van tus otras importaciones como pandas, joblib, etc.)
-
-# --- BARRA LATERAL (SIDEBAR) ---
-
-st.sidebar.header('Selección de Sector')
-
-# Lista de todos los sectores del fundo
-# (Puedes modificar esta lista cuando quieras)
-sectores_del_fundo = ['W1', 'W2', 'W3', 'K1', 'K2', 'K3', 'General']
-
-# Creamos el menú desplegable en la barra lateral
-sector_seleccionado = st.sidebar.selectbox(
-    'Seleccione el Sector de Trabajo:',
-    options=sectores_del_fundo,
-    key='sector'
-)
-
-# Mostramos el sector que el usuario eligió en la barra lateral
-st.sidebar.success(f"Sector seleccionado: **{sector_seleccionado}**")
-
-# --- FIN DE LA BARRA LATERAL ---
-
-
-# --- PÁGINA PRINCIPAL ---
-# El título ahora puede mostrar el sector seleccionado dinámicamente
-st.title(f"Panel de Control del Fundo")
-st.header(f"Mostrando datos para el sector: {sector_seleccionado}")
-
-# ... aquí continúa el resto del código de tu página principal ...import streamlit as st
 import pandas as pd
 import joblib
 
-# --- Cargar el modelo y las bases de datos ---
-try:
-    model = joblib.load('modelo_oidio.joblib')
-except FileNotFoundError:
-    st.error("Error: No se encontró el archivo del modelo 'modelo_oidio.joblib'. Asegúrate de que esté en la misma carpeta.")
-    st.stop()
+# --- 1. INICIALIZACIÓN Y CONFIGURACIÓN ---
+
+# Inicializamos la memoria de sesión para que 'sector' siempre tenga un valor
+if 'sector' not in st.session_state:
+    st.session_state.sector = 'General' # Le damos un valor por defecto
+
+# --- 2. DEFINICIÓN DE FUNCIONES ---
+
+def cargar_modelo():
+    """Carga el modelo de Machine Learning desde el archivo."""
+    try:
+        modelo = joblib.load('modelo_oidio.joblib')
+        return modelo
+    except FileNotFoundError:
+        st.error("Error Crítico: No se encontró el archivo del modelo 'modelo_oidio.joblib'. La aplicación no puede funcionar.")
+        st.stop()
 
 def cargar_inventario():
+    """Carga el inventario de productos desde el archivo Excel."""
     try:
         return pd.read_excel("Inventario_Productos.xlsx")
     except FileNotFoundError:
-        # Retorna un DataFrame vacío si el inventario aún no existe
         return pd.DataFrame(columns=['Producto', 'Tipo_Accion', 'Modo_Accion'])
 
-# --- Función del "Cerebro de Recomendaciones" ---
 def obtener_recomendacion(prediccion, inventario_df):
-    """
-    Genera una recomendación basada en la predicción del modelo y el inventario de productos.
-    """
+    """Genera una recomendación basada en la predicción y el inventario."""
     if prediccion == 0:
         return "🟢 **RIESGO BAJO:** No se requiere acción inmediata. Continuar con el monitoreo regular del campo."
 
     elif prediccion == 1:
         recomendacion = "🟡 **RIESGO MEDIO:** Condiciones favorables para una infección inicial.\n\n**Acción Sugerida:** Aplicación **Preventiva**."
-        # Filtrar productos preventivos o curativos de bajo impacto
         productos_sugeridos = inventario_df[inventario_df['Tipo_Accion'].isin(['Preventivo', 'Curativo'])]
         if not productos_sugeridos.empty:
             recomendacion += "\n\n**Productos de tu inventario:**\n- " + "\n- ".join(productos_sugeridos['Producto'].tolist())
@@ -63,7 +40,6 @@ def obtener_recomendacion(prediccion, inventario_df):
 
     elif prediccion >= 2:
         recomendacion = "🔴 **RIESGO ALTO:** Condiciones óptimas para la propagación de la enfermedad.\n\n**Acción Sugerida:** Aplicación **Curativa** o **Erradicante**."
-        # Filtrar productos curativos o erradicantes
         productos_sugeridos = inventario_df[inventario_df['Tipo_Accion'].isin(['Curativo', 'Erradicante'])]
         if not productos_sugeridos.empty:
             recomendacion += "\n\n**Productos de tu inventario:**\n- " + "\n- ".join(productos_sugeridos['Producto'].tolist())
@@ -71,13 +47,20 @@ def obtener_recomendacion(prediccion, inventario_df):
             recomendacion += "\n\n*No se encontraron productos curativos/erradicantes en tu inventario.*"
         return recomendacion
 
-# --- Interfaz de la Aplicación ---
-st.title('🍇 Modelo Predictivo de Oídio en Uva')
-
-st.sidebar.header('Parámetros del Clima para Mañana')
-
-def user_input_features():
-    # (Esta función no cambia, la dejamos como estaba)
+def construir_sidebar():
+    """Crea y gestiona todos los elementos de la barra lateral."""
+    st.sidebar.header('Selección de Sector')
+    sectores_del_fundo = ['W1', 'W2', 'W3', 'K1', 'K2', 'K3', 'General']
+    
+    # Usamos st.session_state.sector para que la selección se recuerde entre páginas
+    st.sidebar.selectbox(
+        'Seleccione el Sector de Trabajo:',
+        options=sectores_del_fundo,
+        key='sector' # La clave 'sector' es la que guarda el valor en la memoria
+    )
+    st.sidebar.success(f"Sector seleccionado: **{st.session_state.sector}**")
+    
+    st.sidebar.header('Parámetros del Clima para Mañana')
     temp_max = st.sidebar.number_input('Temperatura Máxima (°C)', 10.0, 40.0, 27.0)
     temp_min = st.sidebar.number_input('Temperatura Mínima (°C)', 0.0, 30.0, 19.0)
     temp_prom = st.sidebar.number_input('Temperatura Promedio (°C)', 5.0, 35.0, 23.0)
@@ -86,11 +69,25 @@ def user_input_features():
     viento = st.sidebar.number_input('Velocidad del Viento (km/h)', 0.0, 50.0, 14.0)
     sol = st.sidebar.number_input('Horas de Sol', 0.0, 14.0, 8.0)
     
-    data = {'Temp_Max_C': temp_max, 'Temp_Min_C': temp_min, 'Temp_Prom_C': temp_prom, 'HR_Prom_Porc': hr_prom, 'Precipitacion_mm': precipitacion, 'Vel_Viento_Prom_kmh': viento, 'Horas_Sol': sol}
+    data = {
+        'Temp_Max_C': temp_max, 'Temp_Min_C': temp_min, 'Temp_Prom_C': temp_prom,
+        'HR_Prom_Porc': hr_prom, 'Precipitacion_mm': precipitacion,
+        'Vel_Viento_Prom_kmh': viento, 'Horas_Sol': sol
+    }
     features = pd.DataFrame(data, index=[0])
     return features
 
-input_df = user_input_features()
+# --- 3. CONSTRUCCIÓN DE LA APLICACIÓN ---
+
+# Cargar el modelo una sola vez al inicio
+modelo = cargar_modelo()
+
+# Construir la barra lateral y obtener los inputs del usuario
+input_df = construir_sidebar()
+
+# --- Página Principal ---
+st.title('🍇 Panel de Control del Fundo')
+st.header(f"Predicción de Riesgo para el Sector: {st.session_state.sector}")
 
 st.subheader('Parámetros Ingresados:')
 st.write(input_df)
@@ -103,7 +100,7 @@ if st.button('Predecir Riesgo y Obtener Recomendación'):
         st.warning("⚠️ Tu inventario de productos está vacío. Las recomendaciones serán genéricas. Ve a la página de 'Inventario' para añadir productos.")
     
     # Hacer la predicción
-    prediction = model.predict(input_df)
+    prediction = modelo.predict(input_df)
     
     # Obtener y mostrar la recomendación
     recomendacion_texto = obtener_recomendacion(prediction[0], inventario_df)

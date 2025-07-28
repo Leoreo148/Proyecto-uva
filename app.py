@@ -13,6 +13,7 @@ sectores_del_fundo = ['W1', 'W2', 'W3', 'K1', 'K2', 'K3', 'General']
 sector_seleccionado = st.sidebar.selectbox(
     'Seleccione el Sector de Trabajo:',
     options=sectores_del_fundo
+     key='sector'
 )
 
 # Mostramos el sector que el usuario eligió en la barra lateral

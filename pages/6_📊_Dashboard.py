@@ -34,15 +34,27 @@ umbral_alerta_plagas = st.sidebar.number_input(
     help="Número de capturas totales en una trampa para generar una alerta."
 )
 
-# Creamos una lista de sectores disponibles a partir de los datos existentes
+# --- Lógica MEJORADA para obtener TODOS los sectores ---
+sectores_plagas = []
 if df_plagas is not None:
-    sectores_disponibles = sorted(df_plagas['Sector'].unique().tolist())
-else:
-    sectores_disponibles = ['General']
+    sectores_plagas = df_plagas['Sector'].unique().tolist()
+
+sectores_fenologia = []
+if df_fenologia is not None:
+    sectores_fenologia = df_fenologia['Sector'].unique().tolist()
+
+# Combinamos las listas de ambos archivos y eliminamos duplicados
+todos_los_sectores = sorted(list(set(sectores_plagas + sectores_fenologia)))
+
+# Si después de todo no hay sectores, usamos una lista por defecto
+if not todos_los_sectores:
+    todos_los_sectores = ['General']
 
 sector_seleccionado = st.sidebar.selectbox(
     "Seleccione un Sector para Analizar:",
-    options=sectores_disponibles
+    options=todos_los_sectores
+)
+
 )
 
 st.header(f"Análisis para el Sector: {sector_seleccionado}")

@@ -69,4 +69,3 @@ if registros_pendientes:
                 st.error(f"Error al guardar en el servidor: {mensaje}. Sus datos locales están a salvo.")
 else:
     st.info("✅ Todos los registros de oídio están sincronizados.")
-

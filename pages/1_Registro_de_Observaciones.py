@@ -1,56 +1,80 @@
-import streamlit as st
+mport streamlit as st
 import pandas as pd
+import os
 from datetime import datetime
 
-# Nombre del archivo Excel que funciona como base de datos
-DB_FILE = "Observaciones_Campo.xlsx"
+# --- CONFIGURACIÓN DE LA PÁGINA ---
+st.set_page_config(page_title="Observaciones de Oídio", page_icon="📋")
+st.title("📋 Registro de Observaciones de Oídio")
+st.write("Registre la presencia y severidad del oídio en los diferentes sectores del fundo.")
 
-# --- Función para Cargar o Crear la Base de Datos ---
-def cargar_db():
-    try:
-        # Intenta leer el archivo si ya existe
-        df = pd.read_excel(DB_FILE)
-    except FileNotFoundError:
-        # Si no existe, crea un DataFrame vacío con las columnas correctas
-        df = pd.DataFrame(columns=['Fecha', 'Estado_Fenologico_Codigo', 'Presencia_Oidio', 'Severidad_Oidio_Escala', 'Notas_Observacion'])
-    return df
+# --- NOMBRE DEL ARCHIVO ---
+ARCHIVO_OBSERVACIONES = 'Observaciones_Campo.xlsx'
 
-# --- Título de la Página ---
-st.title("📋 Registro de Observaciones de Campo")
+# --- FUNCIONES PARA CARGAR Y GUARDAR ---
+def cargar_datos():
+    columnas = ['Sector', 'Fecha', 'Estado_Fenologico', 'Presencia_Oidio', 'Severidad_Oidio', 'Notas']
+    if os.path.exists(ARCHIVO_OBSERVACIONES):
+        return pd.read_excel(ARCHIVO_OBSERVACIONES)
+    else:
+        return pd.DataFrame(columns=columnas)
 
-# --- Formulario para Ingresar Datos ---
-with st.form("observation_form", clear_on_submit=True):
-    fecha = st.date_input("Fecha de Observación", datetime.now())
-    estado_fenologico = st.selectbox("Estado Fenológico", [1, 2, 3, 4, 5, 6], help="1: Brotación, 2: Crec. Pámpanos, 3: Floración, 4: Cuajado, 5: Envero, 6: Maduración")
-    presencia_oidio = st.radio("¿Presencia de Oídio?", ["No", "Sí"])
-    severidad = st.slider("Nivel de Severidad", 0, 4, 0, help="0: Nulo, 1: Inicial, 2: Moderado, 3: Severo, 4: Muy Severo")
-    notas = st.text_area("Notas Adicionales")
+def guardar_datos(df):
+    df.to_excel(ARCHIVO_OBSERVACIONES, index=False)
+
+# --- Cargar datos al inicio ---
+df_observaciones = cargar_datos()
+
+# --- FORMULARIO DE INGRESO ---
+with st.form("observacion_form", clear_on_submit=True):
     
+    # Fila 1: Sector y Fecha
+    col1, col2 = st.columns(2)
+    with col1:
+        sectores_del_fundo = ['J-3', 'W1', 'W2', 'K1', 'K2', 'General']
+        sector = st.selectbox("Seleccione el Sector", options=sectores_del_fundo)
+    with col2:
+        fecha = st.date_input("Fecha de Observación", datetime.now())
+
+    # Fila 2: Datos de la Observación
+    estado_fenologico = st.selectbox(
+        "Estado Fenológico Principal",
+        options=[1, 2, 3, 4, 5, 6],
+        help="1: Brotación, 2: Crec. pámpanos, 3: Floración, 4: Cuajado, 5: Envero, 6: Maduración"
+    )
+    
+    presencia_oidio = st.radio("¿Presencia de Oídio?", ["No", "Sí"], horizontal=True)
+    
+    severidad_oidio = st.slider(
+        "Nivel de Severidad (0=Nulo, 4=Muy Severo)",
+        min_value=0, max_value=4, value=0, step=1
+    )
+    
+    notas = st.text_area("Notas Adicionales")
+
     submitted = st.form_submit_button("Guardar Observación")
 
-# --- Lógica para Guardar los Datos ---
+# --- LÓGICA DE GUARDADO ---
 if submitted:
-    df = cargar_db()
-    
-    # Crear un nuevo registro como un DataFrame
     nuevo_registro = pd.DataFrame([{
-        'Fecha': fecha,
-        'Estado_Fenologico_Codigo': estado_fenologico,
+        'Sector': sector,
+        'Fecha': fecha.strftime("%Y-%m-%d"),
+        'Estado_Fenologico': estado_fenologico,
         'Presencia_Oidio': presencia_oidio,
-        'Severidad_Oidio_Escala': severidad,
-        'Notas_Observacion': notas
+        'Severidad_Oidio': severidad_oidio,
+        'Notas': notas
     }])
     
-    # Concatenar el DataFrame existente con el nuevo registro
-    df_actualizado = pd.concat([df, nuevo_registro], ignore_index=True)
+    df_final = pd.concat([df_observaciones, nuevo_registro], ignore_index=True)
+    guardar_datos(df_final)
     
-    # Guardar el DataFrame actualizado de vuelta al archivo Excel
-    df_actualizado.to_excel(DB_FILE, index=False)
-    
-    st.success("✅ ¡Observación guardada correctamente!")
+    st.success(f"¡Observación para el sector '{sector}' guardada exitosamente!")
 
+# --- VISUALIZACIÓN DEL HISTORIAL ---
+st.divider()
+st.subheader("Historial de Observaciones Recientes")
+if not df_observaciones.empty:
+    st.dataframe(df_observaciones.tail(10).iloc[::-1], use_container_width=True)
+else:
+    st.info("Aún no se han guardado observaciones.")
 
-# --- Mostrar el Historial de Observaciones ---
-st.header("Historial de Observaciones")
-df_historial = cargar_db()
-st.dataframe(df_historial)

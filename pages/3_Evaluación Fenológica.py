@@ -43,7 +43,7 @@ def to_excel(df):
 with st.expander("➕ Registrar Nueva Evaluación"):
     col1, col2 = st.columns(2)
     with col1:
-        sectores_del_fundo = ['J-3', 'W1', 'W2', 'K1', 'K2', 'General']
+        sectores_del_fundo = ['J1', 'J2', 'R1', 'R2', 'W1', 'W2', 'W3', 'K1', 'K2','K3']
         sector_seleccionado = st.selectbox('Seleccione el Sector de Evaluación:', options=sectores_del_fundo)
     with col2:
         fecha_evaluacion = st.date_input("Fecha de Evaluación", datetime.now())

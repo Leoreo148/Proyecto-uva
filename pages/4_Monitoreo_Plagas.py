@@ -13,17 +13,16 @@ localS = LocalStorage()
 ARCHIVO_PLAGAS = 'Monitoreo_Plagas_Detallado.xlsx'
 LOCAL_STORAGE_KEY = 'plagas_offline'
 
-def cargar_datos_excel():
-    columnas = ["Fecha", "Sector", "Codigo_Trampa", "A_fraterculus", "A_distinta", "C_capitata", "Total_Capturas"]
-    if os.path.exists(ARCHIVO_PLAGAS):
-        return pd.read_excel(ARCHIVO_PLAGAS)
-    else:
-        return pd.DataFrame(columns=columnas)
-
 def guardar_datos_excel(df_nuevos):
-    df_existente = cargar_datos_excel()
-    df_final = pd.concat([df_existente, df_nuevos], ignore_index=True)
-    df_final.to_excel(ARCHIVO_PLAGAS, index=False, engine='openpyxl')
+    try:
+        df_existente = None
+        if os.path.exists(ARCHIVO_PLAGAS):
+            df_existente = pd.read_excel(ARCHIVO_PLAGAS)
+        df_final = pd.concat([df_existente, df_nuevos], ignore_index=True) if df_existente is not None else df_nuevos
+        df_final.to_excel(ARCHIVO_PLAGAS, index=False, engine='openpyxl')
+        return True, "Guardado exitoso."
+    except Exception as e:
+        return False, str(e)
 
 with st.form("monitoreo_plagas_form"):
     st.subheader("Nuevo Registro de Trampa")
@@ -70,16 +69,13 @@ if registros_pendientes:
     st.warning(f"Hay **{len(registros_pendientes)}** conteos de plagas guardados localmente pendientes de sincronizar.")
     if st.button("Sincronizar Ahora"):
         with st.spinner("Sincronizando..."):
-            try:
-                df_pendientes = pd.DataFrame(registros_pendientes)
-                guardar_datos_excel(df_pendientes)
-                if os.path.exists(ARCHIVO_PLAGAS):
-                    localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
-                    st.success("¡Sincronización completada!")
-                    st.rerun()
-                else:
-                    st.error("Error: No se pudo guardar el archivo en el servidor. Sus datos locales están a salvo.")
-            except Exception as e:
-                st.error(f"Error de conexión o escritura. Sus datos locales están a salvo. Detalles: {e}")
+            df_pendientes = pd.DataFrame(registros_pendientes)
+            exito, mensaje = guardar_datos_excel(df_pendientes)
+            if exito:
+                localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
+                st.success("¡Sincronización completada!")
+                st.rerun()
+            else:
+                st.error(f"Error al guardar en el servidor: {mensaje}. Sus datos locales están a salvo.")
 else:
     st.info("✅ Todos los registros de plagas están sincronizados.")

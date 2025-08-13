@@ -21,29 +21,32 @@ def cargar_datos(nombre_archivo):
 # --- Carga de Datos ---
 df_plagas = cargar_datos('Monitoreo_Plagas_Detallado.xlsx')
 df_fenologia = cargar_datos('Evaluacion_Fenologica_Detallada.xlsx')
+df_observaciones = cargar_datos('Observaciones_Campo.xlsx') # <-- NUEVO: Cargamos los datos de oídio
 
 # --- Barra Lateral con Filtros ---
-st.sidebar.header("Filtros del Dashboard")
+st.sidebar.header("Filtros y Umbrales del Dashboard")
 
+# Umbral de alerta para plagas
 umbral_alerta_plagas = st.sidebar.number_input(
     "Umbral de Alerta para Capturas Totales:",
-    min_value=1,
-    value=7,
-    step=1,
+    min_value=1, value=7, step=1,
     help="Número de capturas totales en una trampa para generar una alerta."
 )
 
+# Umbral de alerta para oídio
+umbral_alerta_oidio = st.sidebar.slider(
+    "Umbral de Alerta para Severidad de Oídio:",
+    min_value=1, max_value=4, value=3, # Alerta si la severidad es 3 o más
+    help="Nivel de severidad para generar una alerta de oídio."
+)
+
+
 # --- Lógica para obtener TODOS los sectores ---
-sectores_plagas = []
-if df_plagas is not None:
-    sectores_plagas = df_plagas['Sector'].unique().tolist()
+sectores_plagas = df_plagas['Sector'].unique().tolist() if df_plagas is not None else []
+sectores_fenologia = df_fenologia['Sector'].unique().tolist() if df_fenologia is not None and 'Sector' in df_fenologia.columns else []
+sectores_observaciones = df_observaciones['Sector'].unique().tolist() if df_observaciones is not None else []
 
-sectores_fenologia = []
-if df_fenologia is not None and 'Sector' in df_fenologia.columns:
-    sectores_fenologia = df_fenologia['Sector'].unique().tolist()
-
-todos_los_sectores = sorted(list(set(sectores_plagas + sectores_fenologia)))
-
+todos_los_sectores = sorted(list(set(sectores_plagas + sectores_fenologia + sectores_observaciones)))
 if not todos_los_sectores:
     todos_los_sectores = ['General']
 
@@ -55,36 +58,46 @@ sector_seleccionado = st.sidebar.selectbox(
 st.header(f"Análisis para el Sector: {sector_seleccionado}")
 st.divider()
 
-# --- Módulo de Alertas ---
+# --- Módulo de Alertas Críticas ---
 st.subheader("🚨 Alertas Críticas")
-if df_plagas is not None:
-    df_plagas['Fecha'] = pd.to_datetime(df_plagas['Fecha'])
-    ultimos_registros = df_plagas.loc[df_plagas.groupby('Codigo_Trampa')['Fecha'].idxmax()]
-    trampas_en_alerta = ultimos_registros[ultimos_registros['Total_Capturas'] >= umbral_alerta_plagas]
-    
-    if not trampas_en_alerta.empty:
-        st.warning(f"¡Atención! Se han detectado {len(trampas_en_alerta)} trampas que superan el umbral de {umbral_alerta_plagas} capturas.")
-        alert_cols = st.columns(3)
-        col_idx = 0
-        for index, row in trampas_en_alerta.iterrows():
-            with alert_cols[col_idx % 3]:
-                st.error(
-                    f"""
-                    **Trampa:** {row['Codigo_Trampa']}  
-                    **Sector:** {row['Sector']}  
-                    **Capturas:** {row['Total_Capturas']}  
-                    **Fecha:** {row['Fecha'].strftime('%d/%m/%Y')}
-                    """
-                )
-            col_idx += 1
+
+# --- Alertas de Oídio ---
+col_oidio, col_plagas = st.columns(2)
+with col_oidio:
+    st.markdown("##### Alertas de Oídio")
+    if df_observaciones is not None:
+        df_observaciones['Fecha'] = pd.to_datetime(df_observaciones['Fecha'])
+        ultimas_obs = df_observaciones.loc[df_observaciones.groupby('Sector')['Fecha'].idxmax()]
+        sectores_en_alerta = ultimas_obs[ultimas_obs['Severidad_Oidio'] >= umbral_alerta_oidio]
+        
+        if not sectores_en_alerta.empty:
+            for index, row in sectores_en_alerta.iterrows():
+                st.error(f"**Sector:** {row['Sector']} | **Severidad:** {row['Severidad_Oidio']} | **Fecha:** {row['Fecha'].strftime('%d/%m/%Y')}")
+        else:
+            st.success("✅ Sin alertas de oídio.")
     else:
-        st.success("✅ No hay trampas que superen el umbral de alerta.")
-else:
-    st.info("No hay datos de monitoreo de plagas para generar alertas.")
+        st.info("No hay datos de oídio.")
+
+# --- Alertas de Plagas ---
+with col_plagas:
+    st.markdown("##### Alertas de Plagas")
+    if df_plagas is not None:
+        df_plagas['Fecha'] = pd.to_datetime(df_plagas['Fecha'])
+        ultimos_registros = df_plagas.loc[df_plagas.groupby('Codigo_Trampa')['Fecha'].idxmax()]
+        trampas_en_alerta = ultimos_registros[ultimos_registros['Total_Capturas'] >= umbral_alerta_plagas]
+        
+        if not trampas_en_alerta.empty:
+            for index, row in trampas_en_alerta.iterrows():
+                st.warning(f"**Trampa:** {row['Codigo_Trampa']} | **Capturas:** {row['Total_Capturas']} | **Sector:** {row['Sector']}")
+        else:
+            st.success("✅ Sin alertas de plagas.")
+    else:
+        st.info("No hay datos de plagas.")
 
 st.divider()
 
-# --- Módulo de Gráficos ---
+# --- Módulo de Gráficos (sin cambios) ---
+# ... (El resto del código para los gráficos se mantiene igual) ...
 st.subheader("🪰 Evolución de Capturas de Mosca de la Fruta")
 if df_plagas is not None and sector_seleccionado in df_plagas['Sector'].unique():
     df_plagas_sector = df_plagas[df_plagas['Sector'] == sector_seleccionado]
@@ -109,4 +122,3 @@ if df_fenologia is not None and sector_seleccionado in df_fenologia['Sector'].un
     st.plotly_chart(fig_fenologia, use_container_width=True)
 else:
     st.info(f"No hay registros de evaluación fenológica para el sector '{sector_seleccionado}'.")
-

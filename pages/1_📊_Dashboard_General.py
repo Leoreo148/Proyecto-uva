@@ -4,9 +4,9 @@ import os
 import plotly.express as px
 
 # --- Configuración de la Página ---
-st.set_page_config(page_title="Dashboard de Análisis", page_icon="📊", layout="wide")
-st.title("📊 Dashboard de Análisis del Fundo")
-st.write("Visualice las tendencias, el estado del cultivo y las alertas críticas.")
+st.set_page_config(page_title="Dashboard General", page_icon="📊", layout="wide")
+st.title("📊 Dashboard General del Fundo")
+st.write("Métricas clave, tendencias y alertas críticas para una visión completa.")
 
 # --- Función para Cargar Datos de Forma Segura ---
 def cargar_datos(nombre_archivo):
@@ -22,11 +22,12 @@ def cargar_datos(nombre_archivo):
 df_plagas = cargar_datos('Monitoreo_Plagas_Detallado.xlsx')
 df_fenologia = cargar_datos('Evaluacion_Fenologica_Detallada.xlsx')
 df_observaciones = cargar_datos('Observaciones_Campo.xlsx')
+df_inventario = cargar_datos('Inventario_Productos.xlsx')
 
 # --- Barra Lateral con Filtros ---
-st.sidebar.header("Filtros y Umbrales del Dashboard")
-umbral_alerta_plagas = st.sidebar.number_input("Umbral de Alerta para Capturas Totales:", min_value=1, value=7, step=1)
-umbral_alerta_oidio = st.sidebar.slider("Umbral de Alerta para Severidad de Oídio:", min_value=1, max_value=4, value=3)
+st.sidebar.header("Filtros y Umbrales")
+umbral_alerta_plagas = st.sidebar.number_input("Umbral de Alerta de Capturas:", min_value=1, value=7, step=1)
+umbral_alerta_oidio = st.sidebar.slider("Umbral de Alerta de Oídio:", min_value=1, max_value=4, value=3)
 
 # --- Lógica para obtener TODOS los sectores ---
 sectores_plagas = df_plagas['Sector'].unique().tolist() if df_plagas is not None else []
@@ -40,7 +41,46 @@ sector_seleccionado = st.sidebar.selectbox("Seleccione un Sector para Analizar:"
 st.header(f"Análisis para el Sector: {sector_seleccionado}")
 st.divider()
 
-# --- MÓDULO DE CONCLUSIONES GENERALES ---
+# --- MÉTRICAS CLAVE (KPIs) - OPTIMIZADO PARA MÓVIL ---
+st.subheader("📈 Resumen de Métricas Clave")
+
+# Para una mejor visualización en teléfonos, mostramos las métricas verticalmente.
+col1, col2, col3 = st.columns(3)
+
+# KPI 1: Trampas de Plagas en Alerta
+with col1:
+    if df_plagas is not None:
+        df_plagas['Fecha'] = pd.to_datetime(df_plagas['Fecha'])
+        ultimos_registros_plagas = df_plagas.loc[df_plagas.groupby('Codigo_Trampa')['Fecha'].idxmax()]
+        trampas_en_alerta_total = ultimos_registros_plagas[ultimos_registros_plagas['Total_Capturas'] >= umbral_alerta_plagas]
+        st.metric(label="Trampas de Plagas en Alerta", value=len(trampas_en_alerta_total))
+    else:
+        st.metric(label="Trampas de Plagas en Alerta", value="N/A")
+
+# KPI 2: Sectores con Oídio Activo
+with col2:
+    if df_observaciones is not None:
+        df_observaciones['Fecha'] = pd.to_datetime(df_observaciones['Fecha'])
+        ultimas_obs_oidio = df_observaciones.loc[df_observaciones.groupby('Sector')['Fecha'].idxmax()]
+        sectores_con_oidio = ultimas_obs_oidio[ultimas_obs_oidio['Severidad_Oidio'] > 0]
+        st.metric(label="Sectores con Oídio Detectado", value=len(sectores_con_oidio))
+    else:
+        st.metric(label="Sectores con Oídio Detectado", value="N/A")
+
+# KPI 3: Producto con Menor Stock
+with col3:
+    if df_inventario is not None and not df_inventario.empty:
+        producto_menor_stock = df_inventario.loc[df_inventario['Cantidad_Stock'].idxmin()]
+        nombre_prod = producto_menor_stock['Producto']
+        stock_prod = producto_menor_stock['Cantidad_Stock']
+        unidad_prod = producto_menor_stock['Unidad']
+        st.metric(label=f"Producto con Menor Stock", value=f"{stock_prod} {unidad_prod}", help=f"Producto: {nombre_prod}")
+    else:
+        st.metric(label="Producto con Menor Stock", value="N/A")
+
+st.divider()
+
+# --- CONCLUSIONES AGRONÓMICAS ---
 st.subheader("💡 Conclusiones Agronómicas")
 col_conc_1, col_conc_2 = st.columns(2)
 
@@ -86,9 +126,9 @@ with col_conc_2:
                 st.info(mensaje)
 
                 if max_capturas >= umbral_alerta_plagas:
-                    st.warning(f"Este valor supera el umbral de alerta ({umbral_alerta_plagas}). Se recomienda revisar las trampas cercanas a la '{codigo_trampa_max}'.")
+                    st.warning(f"Este valor supera el umbral de alerta ({umbral_alerta_plagas}).")
                 else:
-                    st.success("La presión de la plaga en este sector se encuentra por debajo del umbral de alerta.")
+                    st.success("La presión de la plaga está por debajo del umbral.")
             else:
                 st.info("Sin datos de plagas para este sector.")
         else:
@@ -96,8 +136,7 @@ with col_conc_2:
 
 st.divider()
 
-# --- Módulo de Alertas Críticas y Gráficos ---
-# (El resto del código se mantiene exactamente igual)
+# --- ALERTAS CRÍTICAS ---
 st.subheader("🚨 Alertas Críticas")
 col_oidio, col_plagas = st.columns(2)
 with col_oidio:
@@ -128,6 +167,8 @@ with col_plagas:
     else:
         st.info("No hay datos de plagas.")
 st.divider()
+
+# --- GRÁFICOS ---
 st.subheader("🪰 Evolución de Capturas de Mosca de la Fruta")
 if df_plagas is not None and sector_seleccionado in df_plagas['Sector'].unique():
     df_plagas_sector = df_plagas[df_plagas['Sector'] == sector_seleccionado]
@@ -150,4 +191,3 @@ if df_fenologia is not None and sector_seleccionado in df_fenologia['Sector'].un
     st.plotly_chart(fig_fenologia, use_container_width=True)
 else:
     st.info(f"No hay registros de evaluación fenológica para el sector '{sector_seleccionado}'.")
-

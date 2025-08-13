@@ -13,15 +13,16 @@ localS = LocalStorage()
 ARCHIVO_FENOLOGIA = 'Evaluacion_Fenologica_Detallada.xlsx'
 LOCAL_STORAGE_KEY = 'fenologia_offline'
 
-def cargar_datos_excel():
-    if os.path.exists(ARCHIVO_FENOLOGIA):
-        return pd.read_excel(ARCHIVO_FENOLOGIA)
-    return None
-
 def guardar_datos_excel(df_nuevos):
-    df_existente = cargar_datos_excel()
-    df_final = pd.concat([df_existente, df_nuevos], ignore_index=True) if df_existente is not None else df_nuevos
-    df_final.to_excel(ARCHIVO_FENOLOGIA, index=False, engine='openpyxl')
+    try:
+        df_existente = None
+        if os.path.exists(ARCHIVO_FENOLOGIA):
+            df_existente = pd.read_excel(ARCHIVO_FENOLOGIA)
+        df_final = pd.concat([df_existente, df_nuevos], ignore_index=True) if df_existente is not None else df_nuevos
+        df_final.to_excel(ARCHIVO_FENOLOGIA, index=False, engine='openpyxl')
+        return True, "Guardado exitoso."
+    except Exception as e:
+        return False, str(e)
 
 col1, col2 = st.columns(2)
 with col1:
@@ -60,17 +61,14 @@ if registros_pendientes:
     st.warning(f"Hay **{len(registros_pendientes)}** evaluaciones guardadas localmente pendientes de sincronizar.")
     if st.button("Sincronizar Ahora"):
         with st.spinner("Sincronizando..."):
-            try:
-                flat_list = [item for sublist in registros_pendientes for item in sublist]
-                df_pendientes = pd.DataFrame(flat_list)
-                guardar_datos_excel(df_pendientes)
-                if os.path.exists(ARCHIVO_FENOLOGIA):
-                    localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
-                    st.success("¡Sincronización completada!")
-                    st.rerun()
-                else:
-                    st.error("Error: No se pudo guardar el archivo en el servidor. Sus datos locales están a salvo.")
-            except Exception as e:
-                st.error(f"Error de conexión o escritura. Sus datos locales están a salvo. Detalles: {e}")
+            flat_list = [item for sublist in registros_pendientes for item in sublist]
+            df_pendientes = pd.DataFrame(flat_list)
+            exito, mensaje = guardar_datos_excel(df_pendientes)
+            if exito:
+                localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
+                st.success("¡Sincronización completada!")
+                st.rerun()
+            else:
+                st.error(f"Error al guardar en el servidor: {mensaje}. Sus datos locales están a salvo.")
 else:
     st.info("✅ Todos los registros de fenología están sincronizados.")

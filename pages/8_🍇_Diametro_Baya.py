@@ -15,7 +15,7 @@ localS = LocalStorage()
 
 # --- Nombres de Archivos y Claves ---
 ARCHIVO_DIAMETRO = 'Registro_Diametro_Baya_Detallado.xlsx'
-LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2' # Nueva clave para no mezclar con datos antiguos
+LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2'
 
 # --- Funciones para Cargar y Guardar en Servidor (Excel) ---
 def cargar_datos_excel():
@@ -73,12 +73,13 @@ if st.button("💾 Guardar Medición Localmente"):
     try:
         registros_locales_str = localS.getItem(LOCAL_STORAGE_KEY)
         registros_locales = json.loads(registros_locales_str) if registros_locales_str else []
-    except:
-        registros_locales = []
         
-    registros_locales.append(registros_json)
-    localS.setItem(LOCAL_STORAGE_KEY, json.dumps(registros_locales))
-    st.info(f"¡Medición guardada en el dispositivo! Hay {len(registros_locales)} mediciones pendientes de sincronizar.")
+        registros_locales.append(registros_json)
+        localS.setItem(LOCAL_STORAGE_KEY, json.dumps(registros_locales))
+        st.info(f"¡Medición guardada en el dispositivo! Hay {len(registros_locales)} mediciones pendientes de sincronizar.")
+    except Exception as e:
+        st.error(f"Error al guardar localmente. Refresque la página e intente de nuevo. Detalle: {e}")
+
 
 # --- Sección de Sincronización ---
 st.divider()
@@ -101,6 +102,11 @@ if registros_pendientes:
             localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
             st.success("¡Sincronización completada!")
             st.rerun()
+        except Exception as e:
+            st.error(f"Error de conexión. Inténtelo más tarde. Detalles: {e}")
+else:
+    st.info("✅ Todas las mediciones de diámetro están sincronizadas.")
+
         except Exception as e:
             st.error(f"Error de conexión. Inténtelo más tarde. Detalles: {e}")
 else:

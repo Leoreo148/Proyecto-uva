@@ -8,6 +8,7 @@ from datetime import datetime
 st.set_page_config(page_title="Gestión de Tractor", page_icon="🚜", layout="wide")
 st.title("🚜 Gestión de Aplicación con Tractor")
 st.write("El tractorista completa los detalles de la aplicación y la marca como finalizada.")
+st.info("ℹ️ **Importante:** Para finalizar una tarea y guardar los datos, necesitará conexión a internet.")
 
 # --- NOMBRES DE ARCHIVOS ---
 ARCHIVO_ORDENES = 'Ordenes_de_Trabajo.xlsx'
@@ -32,7 +33,7 @@ df_ordenes = cargar_datos(ARCHIVO_ORDENES, columnas_ordenes)
 
 # --- SECCIÓN 1: TAREAS LISTAS PARA APLICAR ---
 st.subheader("✅ Tareas Listas para Aplicar")
-st.info("Aquí aparecen las órdenes que ya tienen la mezcla preparada.")
+st.write("Aquí aparecen las órdenes que ya tienen la mezcla preparada. Puede verlas sin conexión si cargó la página previamente.")
 
 tareas_para_aplicar = df_ordenes[df_ordenes['Status'] == 'Lista para Aplicar']
 
@@ -120,11 +121,20 @@ else:
 st.divider()
 
 # --- HISTORIAL DE APLICACIONES COMPLETADAS ---
-st.subheader("📚 Historial de Aplicaciones Completadas Recientemente")
+st.subheader("📚 Historial de Aplicaciones Completadas")
 historial_tractor = df_ordenes[df_ordenes['Status'] == 'Completada']
 if not historial_tractor.empty:
+    # Mostramos todas las columnas relevantes del historial
+    columnas_a_mostrar = [
+        'Fecha_Programada', 'Sector_Aplicacion', 'Objetivo', 
+        'Tractor_Responsable', 'Aplicacion_Hora_Inicio', 'Aplicacion_Hora_Fin', 
+        'Observaciones'
+    ]
+    # Filtramos para asegurarnos de que solo mostramos columnas que existen
+    columnas_existentes = [col for col in columnas_a_mostrar if col in historial_tractor.columns]
+    
     st.dataframe(
-        historial_tractor[['Fecha_Programada', 'Sector_Aplicacion', 'Tractor_Responsable', 'Objetivo']].tail(10).iloc[::-1],
+        historial_tractor[columnas_existentes].tail(10).iloc[::-1],
         use_container_width=True
     )
 else:

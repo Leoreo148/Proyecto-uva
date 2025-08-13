@@ -39,7 +39,7 @@ with st.form("programar_form"):
     with col1:
         fecha_aplicacion = st.date_input("Fecha Programada")
     with col2:
-        sectores_del_fundo = ['W3', 'J-3', 'W1', 'W2', 'K1', 'K2', 'General']
+        sectores_del_fundo = ['J1', 'J2', 'R1', 'R2', 'W1', 'W2', 'W3', 'K1', 'K2','K3']
         sector_aplicacion = st.selectbox("Lote / Sector", options=sectores_del_fundo)
     with col3:
         turno = st.selectbox("Turno", ["Día", "Noche"])

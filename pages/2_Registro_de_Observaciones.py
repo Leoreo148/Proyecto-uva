@@ -73,4 +73,4 @@ if registros_pendientes:
                 st.error(f"Error de conexión o escritura. Sus datos locales están a salvo. Detalles: {e}")
 else:
     st.info("✅ Todos los registros de oídio están sincronizados.")
-```python
+

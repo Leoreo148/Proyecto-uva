@@ -15,7 +15,7 @@ localS = LocalStorage()
 
 # --- Nombres de Archivos y Claves ---
 ARCHIVO_DIAMETRO = 'Registro_Diametro_Baya_Detallado.xlsx'
-LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2' # Nueva clave para no mezclar con datos antiguos
+LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2'
 
 # --- Funciones para Cargar y Guardar en Servidor (Excel) ---
 def cargar_datos_excel():
@@ -44,7 +44,6 @@ st.divider()
 # --- Tabla Editable para Ingreso de Datos ---
 st.subheader("Tabla de Ingreso de Diámetros (mm)")
 
-# Creamos una plantilla para las 25 plantas y 6 mediciones por planta
 plant_numbers = [f"Planta {i+1}" for i in range(25)]
 columnas_medicion = [
     "Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior",
@@ -52,11 +51,9 @@ columnas_medicion = [
 ]
 df_plantilla = pd.DataFrame(0.0, index=plant_numbers, columns=columnas_medicion)
 
-# Usamos st.data_editor para una interfaz tipo Excel
 df_editada = st.data_editor(df_plantilla, use_container_width=True)
 
 if st.button("💾 Guardar Medición Localmente"):
-    # 1. Calcular el promedio general de las bayas que se midieron
     valores_medidos = df_editada.to_numpy().flatten()
     valores_no_cero = valores_medidos[valores_medidos > 0]
     
@@ -66,19 +63,20 @@ if st.button("💾 Guardar Medición Localmente"):
     else:
         st.warning("No se ingresaron valores para calcular el promedio.")
 
-    # 2. Preparar los datos para guardarlos
     df_para_guardar = df_editada.copy()
     df_para_guardar['Sector'] = sector_seleccionado
     df_para_guardar['Fecha'] = fecha_medicion.strftime("%Y-%m-%d")
     
-    # Convertir a formato JSON para el almacenamiento local
     registros_json = df_para_guardar.reset_index().rename(columns={'index': 'Planta'}).to_dict('records')
 
-    # 3. Guardar en el almacenamiento local del navegador
-    registros_locales_str = localS.getItem(LOCAL_STORAGE_KEY)
-    registros_locales = json.loads(registros_locales_str) if registros_locales_str else []
+    # CORRECCIÓN: Usamos try-except para evitar el error de inicialización
+    try:
+        registros_locales_str = localS.getItem(LOCAL_STORAGE_KEY)
+        registros_locales = json.loads(registros_locales_str) if registros_locales_str else []
+    except:
+        registros_locales = []
+        
     registros_locales.append(registros_json)
-    
     localS.setItem(LOCAL_STORAGE_KEY, json.dumps(registros_locales))
     st.info(f"¡Medición guardada en el dispositivo! Hay {len(registros_locales)} mediciones pendientes de sincronizar.")
 
@@ -86,14 +84,17 @@ if st.button("💾 Guardar Medición Localmente"):
 st.divider()
 st.subheader("📡 Sincronización con el Servidor")
 
-registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
-registros_pendientes = json.loads(registros_pendientes_str) if registros_pendientes_str else []
+# CORRECCIÓN: Usamos try-except aquí también
+try:
+    registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
+    registros_pendientes = json.loads(registros_pendientes_str) if registros_pendientes_str else []
+except:
+    registros_pendientes = []
 
 if registros_pendientes:
     st.warning(f"Hay **{len(registros_pendientes)}** mediciones completas (de 25 plantas) guardadas localmente pendientes de sincronizar.")
     if st.button("Sincronizar Ahora"):
         try:
-            # Aplanar la lista de listas de diccionarios
             flat_list = [item for sublist in registros_pendientes for item in sublist]
             df_pendientes = pd.DataFrame(flat_list)
             guardar_datos_excel(df_pendientes)

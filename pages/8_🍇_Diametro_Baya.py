@@ -69,7 +69,6 @@ if st.button("💾 Guardar Medición Localmente"):
     
     registros_json = df_para_guardar.reset_index().rename(columns={'index': 'Planta'}).to_dict('records')
 
-    # CORRECCIÓN: Usamos try-except para evitar el error de inicialización
     try:
         registros_locales_str = localS.getItem(LOCAL_STORAGE_KEY)
         registros_locales = json.loads(registros_locales_str) if registros_locales_str else []
@@ -85,7 +84,6 @@ if st.button("💾 Guardar Medición Localmente"):
 st.divider()
 st.subheader("📡 Sincronización con el Servidor")
 
-# CORRECCIÓN: Usamos try-except aquí también
 try:
     registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
     registros_pendientes = json.loads(registros_pendientes_str) if registros_pendientes_str else []
@@ -93,16 +91,26 @@ except:
     registros_pendientes = []
 
 if registros_pendientes:
-    st.warning(f"Hay **{len(registros_pendientes)}** mediciones completas (de 25 plantas) guardadas localmente pendientes de sincronizar.")
+    st.warning(f"Hay **{len(registros_pendientes)}** mediciones completas guardadas localmente pendientes de sincronizar.")
     if st.button("Sincronizar Ahora"):
         try:
             flat_list = [item for sublist in registros_pendientes for item in sublist]
             df_pendientes = pd.DataFrame(flat_list)
+            
+            # 1. Intentar guardar en el servidor
             guardar_datos_excel(df_pendientes)
-            localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
-            st.success("¡Sincronización completada!")
-            st.rerun()
+            
+            # 2. VERIFICACIÓN CRÍTICA: Comprobar si el archivo se guardó antes de borrar los datos locales
+            if os.path.exists(ARCHIVO_DIAMETRO):
+                # Si el guardado fue exitoso, limpiar el almacenamiento local
+                localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
+                st.success("¡Sincronización completada!")
+                st.rerun()
+            else:
+                # Si el guardado falló silenciosamente
+                st.error("Error Crítico: No se pudo guardar el archivo en el servidor. Sus datos locales no han sido borrados. Por favor, intente de nuevo.")
+
         except Exception as e:
-            st.error(f"Error de conexión. Inténtelo más tarde. Detalles: {e}")
+            st.error(f"Error de conexión o escritura. No se pudo sincronizar. Sus datos locales están a salvo. Detalles: {e}")
 else:
     st.info("✅ Todas las mediciones de diámetro están sincronizadas.")

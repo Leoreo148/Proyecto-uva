@@ -2,35 +2,32 @@ import streamlit as st
 import pandas as pd
 import os
 
-# --- Nombre del archivo Excel ---
+st.set_page_config(page_title="Gestión de Inventario", page_icon="📦", layout="wide")
+st.title("📦 Gestión de Inventario de Productos")
+st.write("Añada, vea y actualice el stock de sus productos. Esta sección requiere conexión a internet.")
+
 DB_FILE = "Inventario_Productos.xlsx"
 
-# --- Función para Cargar o Crear la Base de Datos ---
 def cargar_db():
-    # Columnas que debe tener nuestro inventario
-    columnas_requeridas = [
+    columnas = [
         'Producto', 'Tipo_Accion', 'Modo_Accion', 'Grupo_FRAC', 
         'Notas_Uso', 'Cantidad_Stock', 'Unidad', 'Stock_Minimo_Alerta'
     ]
     try:
         df = pd.read_excel(DB_FILE)
     except FileNotFoundError:
-        # Si el archivo no existe, crea un DataFrame vacío con todas las columnas
-        df = pd.DataFrame(columns=columnas_requeridas)
+        df = pd.DataFrame(columns=columnas)
     return df
 
-# --- Función para Guardar la Base de Datos ---
 def guardar_db(df):
-    df.to_excel(DB_FILE, index=False)
+    try:
+        df.to_excel(DB_FILE, index=False, engine='openpyxl')
+        return True, "Guardado exitoso."
+    except Exception as e:
+        return False, str(e)
 
-# --- Cargar los datos al inicio ---
 df_inventario = cargar_db()
 
-# --- Título de la Página ---
-st.set_page_config(page_title="Gestión de Inventario", page_icon="📦", layout="wide")
-st.title("📦 Gestión de Inventario de Productos")
-
-# --- Formulario para Añadir un Nuevo Producto ---
 with st.expander("➕ Añadir Nuevo Producto al Inventario"):
     with st.form("nuevo_producto_form", clear_on_submit=True):
         st.subheader("Datos del Producto")
@@ -50,44 +47,30 @@ with st.expander("➕ Añadir Nuevo Producto al Inventario"):
 
 if submitted_nuevo:
     if producto:
-        nuevo_producto = pd.DataFrame([{
-            'Producto': producto,
-            'Tipo_Accion': tipo_accion,
-            'Modo_Accion': modo_accion,
-            'Grupo_FRAC': grupo_frac,
-            'Notas_Uso': notas,
-            'Cantidad_Stock': cantidad_inicial,
-            'Unidad': unidad,
-            'Stock_Minimo_Alerta': stock_minimo
-        }])
+        nuevo_producto = pd.DataFrame([{'Producto': producto, 'Tipo_Accion': tipo_accion, 'Modo_Accion': modo_accion, 'Grupo_FRAC': grupo_frac, 'Notas_Uso': notas, 'Cantidad_Stock': cantidad_inicial, 'Unidad': unidad, 'Stock_Minimo_Alerta': stock_minimo}])
         df_inventario = pd.concat([df_inventario, nuevo_producto], ignore_index=True)
-        guardar_db(df_inventario)
-        st.success(f"✅ ¡Producto '{producto}' añadido al inventario!")
-        st.rerun() # Recarga la página para mostrar la tabla actualizada
+        exito, mensaje = guardar_db(df_inventario)
+        if exito:
+            st.success(f"✅ ¡Producto '{producto}' añadido al inventario!")
+            st.rerun()
+        else:
+            st.error(f"Error al guardar: {mensaje}")
     else:
         st.warning("⚠️ Por favor, ingrese el nombre del producto.")
 
 st.divider()
-
-# --- Mostrar y Editar el Inventario Actual ---
 st.header("Inventario Actual")
 if not df_inventario.empty:
     df_editado = st.data_editor(
         df_inventario,
-        column_config={
-            "Producto": st.column_config.TextColumn("Producto", disabled=True),
-            "Tipo_Accion": st.column_config.TextColumn("Tipo", disabled=True),
-            "Cantidad_Stock": st.column_config.NumberColumn("Stock Actual", min_value=0.0, format="%.2f"),
-            "Stock_Minimo_Alerta": st.column_config.NumberColumn("Alerta de Stock Mínimo", min_value=0.0, format="%.2f"),
-        },
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic", # Permite añadir y eliminar filas
-        key="editor_inventario"
+        column_config={"Producto": st.column_config.TextColumn("Producto", disabled=True), "Tipo_Accion": st.column_config.TextColumn("Tipo", disabled=True), "Cantidad_Stock": st.column_config.NumberColumn("Stock Actual", min_value=0.0, format="%.2f"), "Stock_Minimo_Alerta": st.column_config.NumberColumn("Alerta de Stock Mínimo", min_value=0.0, format="%.2f")},
+        use_container_width=True, hide_index=True, num_rows="dynamic", key="editor_inventario"
     )
-
     if st.button("Guardar Cambios"):
-        guardar_db(df_editado)
-        st.success("💾 ¡Inventario actualizado exitosamente!")
+        exito, mensaje = guardar_db(df_editado)
+        if exito:
+            st.success("💾 ¡Inventario actualizado exitosamente!")
+        else:
+            st.error(f"Error al guardar: {mensaje}")
 else:
     st.info("El inventario está vacío. Añada un producto usando el formulario de arriba.")

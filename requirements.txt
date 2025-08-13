@@ -5,3 +5,4 @@ joblib
 plotly
 streamlit-local-storage
 openpyxl
+XlsxWriter

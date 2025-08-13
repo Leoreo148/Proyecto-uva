@@ -33,11 +33,13 @@ def guardar_datos_excel(df_nuevos):
     except Exception as e:
         return False, str(e)
 
+# --- Función para convertir un DataFrame a un archivo Excel en memoria ---
 def to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Reporte')
-    return output.getvalue()
+    processed_data = output.getvalue()
+    return processed_data
 
 # --- INTERFAZ DE REGISTRO ---
 with st.expander("➕ Registrar Nueva Observación"):
@@ -68,4 +70,51 @@ with st.expander("➕ Registrar Nueva Observación"):
 st.divider()
 st.subheader("📡 Sincronización con el Servidor")
 try:
-    registros_pendientes_str = lo
+    registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
+    registros_pendientes = json.loads(registros_pendientes_str) if registros_pendientes_str else []
+except:
+    registros_pendientes = []
+if registros_pendientes:
+    st.warning(f"Hay **{len(registros_pendientes)}** registros guardados localmente pendientes de sincronizar.")
+    if st.button("Sincronizar Ahora"):
+        with st.spinner("Sincronizando..."):
+            df_pendientes = pd.DataFrame(registros_pendientes)
+            exito, mensaje = guardar_datos_excel(df_pendientes)
+            if exito:
+                localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
+                st.success("¡Sincronización completada!")
+                st.rerun()
+            else:
+                st.error(f"Error al guardar en el servidor: {mensaje}. Sus datos locales están a salvo.")
+else:
+    st.info("✅ Todos los registros de oídio están sincronizados.")
+
+st.divider()
+
+# --- NUEVA SECCIÓN: HISTORIAL Y DESCARGA INDIVIDUAL ---
+st.subheader("📚 Historial de Observaciones")
+df_historial = cargar_datos_excel()
+
+if not df_historial.empty:
+    st.write("A continuación se muestran las últimas observaciones registradas.")
+    # Mostramos un resumen de cada observación con su botón de descarga
+    for index, observacion in df_historial.sort_values(by='Fecha', ascending=False).head(10).iterrows():
+        with st.container(border=True):
+            col1, col2, col3 = st.columns([2, 2, 1])
+            with col1:
+                st.metric("Fecha", pd.to_datetime(observacion['Fecha']).strftime('%d/%m/%Y'))
+            with col2:
+                st.metric("Sector", observacion['Sector'])
+            with col3:
+                # Botón de descarga para cada observación individual
+                reporte_individual = to_excel(pd.DataFrame([observacion]))
+                st.download_button(
+                    label="📥 Reporte",
+                    data=reporte_individual,
+                    file_name=f"Reporte_Oidio_{observacion['Sector']}_{pd.to_datetime(observacion['Fecha']).strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"download_{index}"
+                )
+else:
+    st.info("Aún no se ha sincronizado ninguna observación.")
+

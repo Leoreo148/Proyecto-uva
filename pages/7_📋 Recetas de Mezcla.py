@@ -85,7 +85,7 @@ with st.expander("👨‍🔬 Programar Nueva Receta de Mezcla (Ingeniero)"):
 st.divider()
 
 # --- SECCIÓN 2 (PARA EL ENCARGADO DE MEZCLA): TAREAS PENDIENTES ---
-st.subheader("📋 Recetas Pendientes de Preparar (Miguel Torres)")
+st.subheader("📋 Recetas Pendientes de Preparar (Encargado de Mezcla)")
 
 tareas_pendientes = df_ordenes[df_ordenes['Status'] == 'Pendiente de Mezcla']
 
@@ -133,3 +133,20 @@ if not tareas_pendientes.empty:
                     st.warning("Por favor, ingrese el nombre del responsable.")
 else:
     st.info("No hay recetas pendientes de preparar.")
+
+st.divider()
+
+# --- NUEVA SECCIÓN: HISTORIAL DE MEZCLAS PREPARADAS ---
+st.subheader("📚 Historial de Mezclas Preparadas Recientemente")
+
+# Filtramos las órdenes que ya no están pendientes de mezcla
+historial_mezclas = df_ordenes[df_ordenes['Status'] != 'Pendiente de Mezcla']
+
+if not historial_mezclas.empty:
+    # Mostramos las últimas 10, de la más nueva a la más antigua
+    st.dataframe(
+        historial_mezclas[['Fecha_Programada', 'Sector_Aplicacion', 'Mezcla_Responsable', 'Status']].tail(10).iloc[::-1],
+        use_container_width=True
+    )
+else:
+    st.info("Aún no se ha preparado ninguna mezcla.")

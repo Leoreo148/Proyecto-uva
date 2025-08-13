@@ -1,4 +1,4 @@
-mport streamlit as st
+import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime
@@ -77,4 +77,3 @@ if not df_observaciones.empty:
     st.dataframe(df_observaciones.tail(10).iloc[::-1], use_container_width=True)
 else:
     st.info("Aún no se han guardado observaciones.")
-

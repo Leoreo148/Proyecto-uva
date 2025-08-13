@@ -85,7 +85,7 @@ with st.expander("👨‍🔬 Programar Nueva Receta de Mezcla (Ingeniero)"):
 st.divider()
 
 # --- SECCIÓN 2 (PARA EL ENCARGADO DE MEZCLA): TAREAS PENDIENTES ---
-st.subheader("📋 Recetas Pendientes de Preparar (Encargado de Mezcla)")
+st.subheader("📋 Recetas Pendientes de Preparar (Miguel Torres)")
 
 tareas_pendientes = df_ordenes[df_ordenes['Status'] == 'Pendiente de Mezcla']
 

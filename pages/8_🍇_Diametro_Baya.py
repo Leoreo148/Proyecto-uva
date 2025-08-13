@@ -15,7 +15,7 @@ localS = LocalStorage()
 
 # --- Nombres de Archivos y Claves ---
 ARCHIVO_DIAMETRO = 'Registro_Diametro_Baya_Detallado.xlsx'
-LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2'
+LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2' # Nueva clave para no mezclar con datos antiguos
 
 # --- Funciones para Cargar y Guardar en Servidor (Excel) ---
 def cargar_datos_excel():
@@ -105,4 +105,3 @@ if registros_pendientes:
             st.error(f"Error de conexión. Inténtelo más tarde. Detalles: {e}")
 else:
     st.info("✅ Todas las mediciones de diámetro están sincronizadas.")
-

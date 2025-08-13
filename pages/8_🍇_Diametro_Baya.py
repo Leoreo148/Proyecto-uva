@@ -24,61 +24,51 @@ def cargar_datos_excel():
     return None
 
 def guardar_datos_excel(df_nuevos):
-    df_existente = cargar_datos_excel()
-    if df_existente is not None:
-        df_final = pd.concat([df_existente, df_nuevos], ignore_index=True)
-    else:
-        df_final = df_nuevos
-    df_final.to_excel(ARCHIVO_DIAMETRO, index=False)
+    # Esta función ahora devolverá True si tuvo éxito, o un mensaje de error si falló
+    try:
+        df_existente = cargar_datos_excel()
+        if df_existente is not None:
+            df_final = pd.concat([df_existente, df_nuevos], ignore_index=True)
+        else:
+            df_final = df_nuevos
+        df_final.to_excel(ARCHIVO_DIAMETRO, index=False, engine='openpyxl')
+        return True, "Guardado exitoso."
+    except Exception as e:
+        return False, str(e)
 
 # --- Interfaz de Registro ---
+# (El resto del código del formulario se mantiene igual)
 col1, col2 = st.columns(2)
 with col1:
     sectores_baya = ['W1', 'W2', 'W3', 'J1', 'J2', 'J3', 'K1', 'K2', 'K3']
     sector_seleccionado = st.selectbox('Seleccione el Sector de Medición:', options=sectores_baya)
 with col2:
     fecha_medicion = st.date_input("Fecha de Medición", datetime.now())
-
 st.divider()
-
-# --- Tabla Editable para Ingreso de Datos ---
 st.subheader("Tabla de Ingreso de Diámetros (mm)")
-
 plant_numbers = [f"Planta {i+1}" for i in range(25)]
-columnas_medicion = [
-    "Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior",
-    "Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"
-]
+columnas_medicion = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior", "Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"]
 df_plantilla = pd.DataFrame(0.0, index=plant_numbers, columns=columnas_medicion)
-
 df_editada = st.data_editor(df_plantilla, use_container_width=True)
-
 if st.button("💾 Guardar Medición Localmente"):
+    # (Lógica de guardado local sin cambios)
     valores_medidos = df_editada.to_numpy().flatten()
     valores_no_cero = valores_medidos[valores_medidos > 0]
-    
     if len(valores_no_cero) > 0:
         promedio_general = valores_no_cero.mean()
-        st.success(f"Promedio General de Diámetro (solo bayas medidas): **{promedio_general:.2f} mm**")
-    else:
-        st.warning("No se ingresaron valores para calcular el promedio.")
-
+        st.success(f"Promedio General: **{promedio_general:.2f} mm**")
     df_para_guardar = df_editada.copy()
     df_para_guardar['Sector'] = sector_seleccionado
     df_para_guardar['Fecha'] = fecha_medicion.strftime("%Y-%m-%d")
-    
     registros_json = df_para_guardar.reset_index().rename(columns={'index': 'Planta'}).to_dict('records')
-
     try:
         registros_locales_str = localS.getItem(LOCAL_STORAGE_KEY)
         registros_locales = json.loads(registros_locales_str) if registros_locales_str else []
-        
         registros_locales.append(registros_json)
         localS.setItem(LOCAL_STORAGE_KEY, json.dumps(registros_locales))
-        st.info(f"¡Medición guardada en el dispositivo! Hay {len(registros_locales)} mediciones pendientes de sincronizar.")
+        st.info(f"¡Medición guardada en el dispositivo! Hay {len(registros_locales)} mediciones pendientes.")
     except Exception as e:
-        st.error(f"Error al guardar localmente. Refresque la página e intente de nuevo. Detalle: {e}")
-
+        st.error(f"Error al guardar localmente: {e}")
 
 # --- Sección de Sincronización ---
 st.divider()
@@ -93,24 +83,18 @@ except:
 if registros_pendientes:
     st.warning(f"Hay **{len(registros_pendientes)}** mediciones completas guardadas localmente pendientes de sincronizar.")
     if st.button("Sincronizar Ahora"):
-        try:
+        with st.spinner("Sincronizando..."):
             flat_list = [item for sublist in registros_pendientes for item in sublist]
             df_pendientes = pd.DataFrame(flat_list)
             
-            # 1. Intentar guardar en el servidor
-            guardar_datos_excel(df_pendientes)
+            # Lógica de guardado mejorada
+            exito, mensaje = guardar_datos_excel(df_pendientes)
             
-            # 2. VERIFICACIÓN CRÍTICA: Comprobar si el archivo se guardó antes de borrar los datos locales
-            if os.path.exists(ARCHIVO_DIAMETRO):
-                # Si el guardado fue exitoso, limpiar el almacenamiento local
+            if exito:
                 localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
                 st.success("¡Sincronización completada!")
                 st.rerun()
             else:
-                # Si el guardado falló silenciosamente
-                st.error("Error Crítico: No se pudo guardar el archivo en el servidor. Sus datos locales no han sido borrados. Por favor, intente de nuevo.")
-
-        except Exception as e:
-            st.error(f"Error de conexión o escritura. No se pudo sincronizar. Sus datos locales están a salvo. Detalles: {e}")
+                st.error(f"Error al guardar en el servidor: {mensaje}. Sus datos locales están a salvo.")
 else:
     st.info("✅ Todas las mediciones de diámetro están sincronizadas.")

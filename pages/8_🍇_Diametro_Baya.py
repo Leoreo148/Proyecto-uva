@@ -106,8 +106,3 @@ if registros_pendientes:
             st.error(f"Error de conexión. Inténtelo más tarde. Detalles: {e}")
 else:
     st.info("✅ Todas las mediciones de diámetro están sincronizadas.")
-
-        except Exception as e:
-            st.error(f"Error de conexión. Inténtelo más tarde. Detalles: {e}")
-else:
-    st.info("✅ Todas las mediciones de diámetro están sincronizadas.")

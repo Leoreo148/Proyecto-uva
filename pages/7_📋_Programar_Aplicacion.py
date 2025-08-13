@@ -127,6 +127,3 @@ with st.form("programar_form"):
                 # No usamos st.rerun() dentro del form para que el mensaje de éxito se quede visible
             else:
                 st.error(f"No se pudo programar la aplicación. Error: {mensaje}")
-
-                else:
-                    st.error(f"No se pudo programar la aplicación. Error: {mensaje}")

@@ -20,7 +20,11 @@ def cargar_datos(nombre_archivo, columnas_defecto):
         return pd.DataFrame(columns=columnas_defecto)
 
 def guardar_datos(df, nombre_archivo):
-    df.to_excel(nombre_archivo, index=False, engine='openpyxl')
+    try:
+        df.to_excel(nombre_archivo, index=False, engine='openpyxl')
+        return True, "Guardado exitoso."
+    except Exception as e:
+        return False, str(e)
 
 # --- Cargar datos al inicio ---
 df_inventario = cargar_datos(ARCHIVO_INVENTARIO, ['Producto', 'Cantidad_Stock'])
@@ -30,7 +34,6 @@ df_tareas = cargar_datos(ARCHIVO_TAREAS, ['ID_Tarea', 'Status'])
 st.subheader("📌 Aplicaciones Pendientes")
 st.info("ℹ️ Abra esta página con internet para cargar las últimas tareas. Podrá verlas después sin conexión.")
 
-# Filtrar tareas que están "Programada"
 tareas_pendientes = df_tareas[df_tareas['Status'] == 'Programada']
 
 if not tareas_pendientes.empty:
@@ -44,18 +47,15 @@ if not tareas_pendientes.empty:
                 st.dataframe(pd.DataFrame(mezcla), use_container_width=True)
             
             with col2:
-                st.write("") # Espacio para alinear
+                st.write("")
                 if st.button("✅ Marcar como Terminado", key=f"complete_{tarea['ID_Tarea']}"):
-                    try:
+                    with st.spinner("Procesando..."):
                         # --- ESTA PARTE REQUIERE INTERNET ---
-                        # 1. Recargar los datos para asegurar que no han cambiado
                         df_tareas_actual = cargar_datos(ARCHIVO_TAREAS, ['ID_Tarea', 'Status'])
                         df_inventario_actual = cargar_datos(ARCHIVO_INVENTARIO, ['Producto', 'Cantidad_Stock'])
 
-                        # 2. Actualizar el estado de la tarea
                         df_tareas_actual.loc[df_tareas_actual['ID_Tarea'] == tarea['ID_Tarea'], 'Status'] = 'Completada'
                         
-                        # 3. Descontar del inventario
                         for producto_usado in mezcla:
                             nombre = producto_usado["Producto"]
                             cantidad_usada = producto_usado["Cantidad_Total_Usada"]
@@ -63,14 +63,14 @@ if not tareas_pendientes.empty:
                             nuevo_stock = stock_actual - cantidad_usada
                             df_inventario_actual.loc[df_inventario_actual['Producto'] == nombre, 'Cantidad_Stock'] = nuevo_stock
                         
-                        # 4. Guardar ambos archivos
-                        guardar_datos(df_tareas_actual, ARCHIVO_TAREAS)
-                        guardar_datos(df_inventario_actual, ARCHIVO_INVENTARIO)
+                        exito_tareas, msg_tareas = guardar_datos(df_tareas_actual, ARCHIVO_TAREAS)
+                        exito_inv, msg_inv = guardar_datos(df_inventario_actual, ARCHIVO_INVENTARIO)
                         
-                        st.success(f"¡Aplicación en sector {tarea['Sector']} completada y stock actualizado!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Se necesita conexión a internet para completar la tarea. Inténtelo de nuevo cuando tenga señal.")
+                        if exito_tareas and exito_inv:
+                            st.success(f"¡Aplicación en sector {tarea['Sector']} completada y stock actualizado!")
+                            st.rerun()
+                        else:
+                            st.error(f"Error al guardar. No se pudo completar la acción. Detalles: {msg_tareas} | {msg_inv}")
 
 else:
     st.info("No hay aplicaciones pendientes programadas.")
@@ -130,10 +130,11 @@ with st.expander("➕ Programar Nueva Aplicación (Requiere Conexión)"):
                 mezcla_json = json.dumps(st.session_state.mezcla_temporal)
                 nuevo_registro = pd.DataFrame([{"ID_Tarea": id_tarea, "Status": "Programada", "Fecha": fecha_aplicacion.strftime("%Y-%m-%d"), "Sector": sector_aplicacion, "Objetivo": objetivo_tratamiento, "Operario": nombre_operario, "Mezcla_Productos": mezcla_json}])
                 df_tareas_final = pd.concat([df_tareas, nuevo_registro], ignore_index=True)
-                guardar_datos(df_tareas_final, ARCHIVO_TAREAS)
-                st.success(f"¡Aplicación para el sector '{sector_aplicacion}' programada!")
-                st.session_state.mezcla_temporal = []
-                st.rerun()
-
-
-
+                
+                exito, mensaje = guardar_datos(df_tareas_final, ARCHIVO_TAREAS)
+                if exito:
+                    st.success(f"¡Aplicación para el sector '{sector_aplicacion}' programada!")
+                    st.session_state.mezcla_temporal = []
+                    st.rerun()
+                else:
+                    st.error(f"No se pudo programar la aplicación. Error: {mensaje}")

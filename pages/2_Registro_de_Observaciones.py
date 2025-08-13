@@ -13,17 +13,16 @@ localS = LocalStorage()
 ARCHIVO_OBSERVACIONES = 'Observaciones_Campo.xlsx'
 LOCAL_STORAGE_KEY = 'observaciones_offline'
 
-def cargar_datos_excel():
-    columnas = ['Sector', 'Fecha', 'Estado_Fenologico', 'Presencia_Oidio', 'Severidad_Oidio', 'Notas']
-    if os.path.exists(ARCHIVO_OBSERVACIONES):
-        return pd.read_excel(ARCHIVO_OBSERVACIONES)
-    else:
-        return pd.DataFrame(columns=columnas)
-
 def guardar_datos_excel(df_nuevos):
-    df_existente = cargar_datos_excel()
-    df_final = pd.concat([df_existente, df_nuevos], ignore_index=True)
-    df_final.to_excel(ARCHIVO_OBSERVACIONES, index=False, engine='openpyxl')
+    try:
+        df_existente = pd.DataFrame(columns=['Sector', 'Fecha', 'Estado_Fenologico', 'Presencia_Oidio', 'Severidad_Oidio', 'Notas'])
+        if os.path.exists(ARCHIVO_OBSERVACIONES):
+            df_existente = pd.read_excel(ARCHIVO_OBSERVACIONES)
+        df_final = pd.concat([df_existente, df_nuevos], ignore_index=True)
+        df_final.to_excel(ARCHIVO_OBSERVACIONES, index=False, engine='openpyxl')
+        return True, "Guardado exitoso."
+    except Exception as e:
+        return False, str(e)
 
 with st.form("observacion_form"):
     st.subheader("Nuevo Registro")
@@ -60,17 +59,14 @@ if registros_pendientes:
     st.warning(f"Hay **{len(registros_pendientes)}** registros guardados localmente pendientes de sincronizar.")
     if st.button("Sincronizar Ahora"):
         with st.spinner("Sincronizando..."):
-            try:
-                df_pendientes = pd.DataFrame(registros_pendientes)
-                guardar_datos_excel(df_pendientes)
-                if os.path.exists(ARCHIVO_OBSERVACIONES):
-                    localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
-                    st.success("¡Sincronización completada!")
-                    st.rerun()
-                else:
-                    st.error("Error: No se pudo guardar el archivo en el servidor. Sus datos locales están a salvo.")
-            except Exception as e:
-                st.error(f"Error de conexión o escritura. Sus datos locales están a salvo. Detalles: {e}")
+            df_pendientes = pd.DataFrame(registros_pendientes)
+            exito, mensaje = guardar_datos_excel(df_pendientes)
+            if exito:
+                localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
+                st.success("¡Sincronización completada!")
+                st.rerun()
+            else:
+                st.error(f"Error al guardar en el servidor: {mensaje}. Sus datos locales están a salvo.")
 else:
     st.info("✅ Todos los registros de oídio están sincronizados.")
 

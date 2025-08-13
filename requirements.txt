@@ -2,6 +2,6 @@ streamlit
 pandas
 scikit-learn
 joblib
-openpyxl
 plotly
 streamlit-local-storage
+openpyxl

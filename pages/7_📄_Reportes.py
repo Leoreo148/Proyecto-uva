@@ -41,7 +41,6 @@ st.sidebar.header("Selección de Reporte")
 tipo_reporte = st.sidebar.selectbox(
     "¿Qué historial desea consultar?",
     options=list(ARCHIVOS_DE_DATOS.keys())
-key='selector_reporte_sidebar' 
 )
 
 st.header(f"Historial de: {tipo_reporte}")
@@ -64,13 +63,11 @@ if df is not None:
         if sector_filtro != 'Todos':
             df_filtrado = df_filtrado[df_filtrado['Sector'] == sector_filtro]
 
-    # CORRECCIÓN: Añadimos 'and not df_filtrado.empty' para evitar errores con archivos vacíos
     if 'Fecha' in df_filtrado.columns and not df_filtrado.empty:
         df_filtrado['Fecha'] = pd.to_datetime(df_filtrado['Fecha'])
         fecha_min = df_filtrado['Fecha'].min().date()
         fecha_max = df_filtrado['Fecha'].max().date()
         
-        # Usamos un try-except por si las fechas son idénticas
         try:
             rango_fechas = st.sidebar.date_input(
                 "Filtrar por Rango de Fechas:",
@@ -82,7 +79,6 @@ if df is not None:
                 df_filtrado = df_filtrado[(df_filtrado['Fecha'].dt.date >= rango_fechas[0]) & (df_filtrado['Fecha'].dt.date <= rango_fechas[1])]
         except Exception:
             st.sidebar.warning("No hay suficientes datos de fecha para crear un rango.")
-
 
     # --- Mostrar la tabla con los datos filtrados ---
     st.dataframe(df_filtrado, use_container_width=True)
@@ -101,189 +97,6 @@ if df is not None:
         )
     else:
         st.sidebar.info("No hay datos filtrados para descargar.")
-
-else:
-    st.info(f"Aún no se han generado datos para '{tipo_reporte}'.")# --- Interfaz Principal ---
-
-# 1. Selección del tipo de reporte
-st.sidebar.header("Selección de Reporte")
-tipo_reporte = st.sidebar.selectbox(
-    "¿Qué historial desea consultar?",
-    options=list(ARCHIVOS_DE_DATOS.keys())
-)
-
-st.header(f"Historial de: {tipo_reporte}")
-
-# 2. Cargar el DataFrame seleccionado
-nombre_archivo_seleccionado = ARCHIVOS_DE_DATOS[tipo_reporte]
-df = cargar_datos(nombre_archivo_seleccionado)
-
-# 3. Mostrar filtros y datos si el archivo existe
-if df is not None:
-    # --- Filtros dinámicos ---
-    st.sidebar.divider()
-    st.sidebar.header("Filtros")
-    
-    df_filtrado = df.copy()
-
-    if 'Sector' in df_filtrado.columns:
-        sectores_unicos = ['Todos'] + sorted(df_filtrado['Sector'].unique().tolist())
-        sector_filtro = st.sidebar.selectbox("Filtrar por Sector:", sectores_unicos)
-        if sector_filtro != 'Todos':
-            df_filtrado = df_filtrado[df_filtrado['Sector'] == sector_filtro]
-
-    # CORRECCIÓN: Añadimos 'and not df_filtrado.empty' para evitar errores con archivos vacíos
-    if 'Fecha' in df_filtrado.columns and not df_filtrado.empty:
-        df_filtrado['Fecha'] = pd.to_datetime(df_filtrado['Fecha'])
-        fecha_min = df_filtrado['Fecha'].min().date()
-        fecha_max = df_filtrado['Fecha'].max().date()
-        
-        # Usamos un try-except por si las fechas son idénticas
-        try:
-            rango_fechas = st.sidebar.date_input(
-                "Filtrar por Rango de Fechas:",
-                value=(fecha_min, fecha_max),
-                min_value=fecha_min,
-                max_value=fecha_max
-            )
-            if len(rango_fechas) == 2:
-                df_filtrado = df_filtrado[(df_filtrado['Fecha'].dt.date >= rango_fechas[0]) & (df_filtrado['Fecha'].dt.date <= rango_fechas[1])]
-        except Exception:
-            st.sidebar.warning("No hay suficientes datos de fecha para crear un rango.")
-
-
-    # --- Mostrar la tabla con los datos filtrados ---
-    st.dataframe(df_filtrado, use_container_width=True)
-
-    # --- Botón de Descarga ---
-    st.sidebar.divider()
-    st.sidebar.header("Exportación")
-    
-    if not df_filtrado.empty:
-        df_para_descargar = to_excel(df_filtrado)
-        st.sidebar.download_button(
-            label=f"📥 Descargar Reporte Filtrado",
-            data=df_para_descargar,
-            file_name=f"Reporte_{tipo_reporte.replace(' ', '_')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-    else:
-        st.sidebar.info("No hay datos filtrados para descargar.")
-
-else:
-    st.info(f"Aún no se han generado datos para '{tipo_reporte}'.")# --- Interfaz Principal ---
-
-# 1. Selección del tipo de reporte
-st.sidebar.header("Selección de Reporte")
-tipo_reporte = st.sidebar.selectbox(
-    "¿Qué historial desea consultar?",
-    options=list(ARCHIVOS_DE_DATOS.keys())
-)
-
-st.header(f"Historial de: {tipo_reporte}")
-
-# 2. Cargar el DataFrame seleccionado
-nombre_archivo_seleccionado = ARCHIVOS_DE_DATOS[tipo_reporte]
-df = cargar_datos(nombre_archivo_seleccionado)
-
-# 3. Mostrar filtros y datos si el archivo existe
-if df is not None:
-    # --- Filtros dinámicos ---
-    st.sidebar.divider()
-    st.sidebar.header("Filtros")
-    
-    if 'Sector' in df.columns:
-        sectores_unicos = ['Todos'] + sorted(df['Sector'].unique().tolist())
-        sector_filtro = st.sidebar.selectbox("Filtrar por Sector:", sectores_unicos)
-        if sector_filtro != 'Todos':
-            df = df[df['Sector'] == sector_filtro]
-
-    if 'Fecha' in df.columns:
-        df['Fecha'] = pd.to_datetime(df['Fecha'])
-        fecha_min = df['Fecha'].min().date()
-        fecha_max = df['Fecha'].max().date()
-        
-        rango_fechas = st.sidebar.date_input(
-            "Filtrar por Rango de Fechas:",
-            value=(fecha_min, fecha_max),
-            min_value=fecha_min,
-            max_value=fecha_max
-        )
-        if len(rango_fechas) == 2:
-            df = df[(df['Fecha'].dt.date >= rango_fechas[0]) & (df['Fecha'].dt.date <= rango_fechas[1])]
-
-    # --- Mostrar la tabla con los datos filtrados ---
-    st.dataframe(df, use_container_width=True)
-
-    # --- Botón de Descarga ---
-    st.sidebar.divider()
-    st.sidebar.header("Exportación")
-    
-    df_para_descargar = to_excel(df)
-    st.sidebar.download_button(
-        label=f"📥 Descargar Reporte Filtrado",
-        data=df_para_descargar,
-        file_name=f"Reporte_{tipo_reporte.replace(' ', '_')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-else:
-    st.info(f"Aún no se han generado datos para '{tipo_reporte}'.")# 1. Selección del tipo de reporte
-st.sidebar.header("Selección de Reporte")
-tipo_reporte = st.sidebar.selectbox(
-    "¿Qué historial desea consultar?",
-    options=list(ARCHIVOS_DE_DATOS.keys())
-)
-
-st.header(f"Historial de: {tipo_reporte}")
-
-# 2. Cargar el DataFrame seleccionado
-nombre_archivo_seleccionado = ARCHIVOS_DE_DATOS[tipo_reporte]
-df = cargar_datos(nombre_archivo_seleccionado)
-
-# 3. Mostrar filtros y datos si el archivo existe
-if df is not None:
-    # --- Filtros dinámicos ---
-    st.sidebar.divider()
-    st.sidebar.header("Filtros")
-    
-    # Filtro por Sector (si la columna existe)
-    if 'Sector' in df.columns:
-        sectores_unicos = ['Todos'] + sorted(df['Sector'].unique().tolist())
-        sector_filtro = st.sidebar.selectbox("Filtrar por Sector:", sectores_unicos)
-        if sector_filtro != 'Todos':
-            df = df[df['Sector'] == sector_filtro]
-
-    # Filtro por Fecha (si la columna existe)
-    if 'Fecha' in df.columns:
-        # Asegurarse que la columna Fecha sea de tipo datetime
-        df['Fecha'] = pd.to_datetime(df['Fecha'])
-        fecha_min = df['Fecha'].min().date()
-        fecha_max = df['Fecha'].max().date()
-        
-        rango_fechas = st.sidebar.date_input(
-            "Filtrar por Rango de Fechas:",
-            value=(fecha_min, fecha_max),
-            min_value=fecha_min,
-            max_value=fecha_max
-        )
-        if len(rango_fechas) == 2:
-            df = df[(df['Fecha'].dt.date >= rango_fechas[0]) & (df['Fecha'].dt.date <= rango_fechas[1])]
-
-    # --- Mostrar la tabla con los datos filtrados ---
-    st.dataframe(df, use_container_width=True)
-
-    # --- Botón de Descarga ---
-    st.sidebar.divider()
-    st.sidebar.header("Exportación")
-    
-    df_para_descargar = to_excel(df)
-    st.sidebar.download_button(
-        label=f"📥 Descargar Reporte Filtrado",
-        data=df_para_descargar,
-        file_name=f"Reporte_{tipo_reporte.replace(' ', '_')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
 
 else:
     st.info(f"Aún no se han generado datos para '{tipo_reporte}'.")

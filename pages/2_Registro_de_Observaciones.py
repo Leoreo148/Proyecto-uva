@@ -99,46 +99,5 @@ if registros_pendientes:
     with st.expander("Ver registros pendientes"):
         st.dataframe(pd.DataFrame(registros_pendientes))
 else:
-    st.info("✅ Todos los registros están sincronizados con el servidor.")        fecha = st.date_input("Fecha de Observación", datetime.now())
+    st.info("✅ Todos los registros están sincronizados con el servidor.")
 
-    # Fila 2: Datos de la Observación
-    estado_fenologico = st.selectbox(
-        "Estado Fenológico Principal",
-        options=[1, 2, 3, 4, 5, 6],
-        help="1: Brotación, 2: Crec. pámpanos, 3: Floración, 4: Cuajado, 5: Envero, 6: Maduración"
-    )
-    
-    presencia_oidio = st.radio("¿Presencia de Oídio?", ["No", "Sí"], horizontal=True)
-    
-    severidad_oidio = st.slider(
-        "Nivel de Severidad (0=Nulo, 4=Muy Severo)",
-        min_value=0, max_value=4, value=0, step=1
-    )
-    
-    notas = st.text_area("Notas Adicionales")
-
-    submitted = st.form_submit_button("Guardar Observación")
-
-# --- LÓGICA DE GUARDADO ---
-if submitted:
-    nuevo_registro = pd.DataFrame([{
-        'Sector': sector,
-        'Fecha': fecha.strftime("%Y-%m-%d"),
-        'Estado_Fenologico': estado_fenologico,
-        'Presencia_Oidio': presencia_oidio,
-        'Severidad_Oidio': severidad_oidio,
-        'Notas': notas
-    }])
-    
-    df_final = pd.concat([df_observaciones, nuevo_registro], ignore_index=True)
-    guardar_datos(df_final)
-    
-    st.success(f"¡Observación para el sector '{sector}' guardada exitosamente!")
-
-# --- VISUALIZACIÓN DEL HISTORIAL ---
-st.divider()
-st.subheader("Historial de Observaciones Recientes")
-if not df_observaciones.empty:
-    st.dataframe(df_observaciones.tail(10).iloc[::-1], use_container_width=True)
-else:
-    st.info("Aún no se han guardado observaciones.")

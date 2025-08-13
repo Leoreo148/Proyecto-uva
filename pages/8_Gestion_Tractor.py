@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import json
 from datetime import datetime
+from io import BytesIO
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión de Tractor", page_icon="🚜", layout="wide")
@@ -27,6 +28,14 @@ def guardar_datos(df, nombre_archivo):
     except Exception as e:
         return False, str(e)
 
+# --- Función para convertir DataFrame a Excel en memoria ---
+def to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Reporte')
+    processed_data = output.getvalue()
+    return processed_data
+
 # --- Cargar datos al inicio ---
 columnas_ordenes = ["ID_Orden", "Status", "Fecha_Programada", "Sector_Aplicacion", "Objetivo", "Receta_Mezcla", "Mezcla_Responsable"]
 df_ordenes = cargar_datos(ARCHIVO_ORDENES, columnas_ordenes)
@@ -50,7 +59,6 @@ if not tareas_para_aplicar.empty:
             with st.form(key=f"form_tractor_{tarea['ID_Orden']}"):
                 st.subheader("Registro de Maquinaria y Aplicación")
                 
-                # Fila 1: Datos generales de la aplicación
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     tipo_aplicacion = st.selectbox("Tipo de Aplicación", ["Nebulizador (Turbo)", "Barras", "Pistolas/Drench"])
@@ -59,7 +67,6 @@ if not tareas_para_aplicar.empty:
                 with col3:
                     tractor_utilizado = st.text_input("Tractor Utilizado", "CASE")
 
-                # Fila 2: Parámetros de la máquina
                 col4, col5, col6 = st.columns(3)
                 with col4:
                     presion_bar = st.number_input("Presión (bar)", min_value=0.0, value=9.0, format="%.1f")
@@ -68,7 +75,6 @@ if not tareas_para_aplicar.empty:
                 with col6:
                     tractor_responsable = st.text_input("Nombre del Tractorista", "Antonio Carraro")
 
-                # Fila 3: Boquillas
                 st.subheader("Ubicación y Color de Boquillas")
                 c1, c2, c3, c4 = st.columns(4)
                 with c1:
@@ -80,7 +86,6 @@ if not tareas_para_aplicar.empty:
                 with c4:
                     boquilla_total = st.number_input("N° Boquillas Total", min_value=0, value=18)
 
-                # Fila 4: Horarios y Observaciones
                 col7, col8 = st.columns(2)
                 with col7:
                     hora_inicio = st.time_input("Hora de Inicio")
@@ -120,22 +125,35 @@ else:
 
 st.divider()
 
-# --- HISTORIAL DE APLICACIONES COMPLETADAS ---
+# --- HISTORIAL Y DESCARGA DE APLICACIONES COMPLETADAS ---
 st.subheader("📚 Historial de Aplicaciones Completadas")
 historial_tractor = df_ordenes[df_ordenes['Status'] == 'Completada']
 if not historial_tractor.empty:
-    # Mostramos todas las columnas relevantes del historial
-    columnas_a_mostrar = [
-        'Fecha_Programada', 'Sector_Aplicacion', 'Objetivo', 
-        'Tractor_Responsable', 'Aplicacion_Hora_Inicio', 'Aplicacion_Hora_Fin', 
-        'Observaciones'
-    ]
-    # Filtramos para asegurarnos de que solo mostramos columnas que existen
-    columnas_existentes = [col for col in columnas_a_mostrar if col in historial_tractor.columns]
     
-    st.dataframe(
-        historial_tractor[columnas_existentes].tail(10).iloc[::-1],
-        use_container_width=True
+    # Limpiamos y preparamos el historial para mostrarlo y descargarlo
+    historial_limpio = historial_tractor.copy()
+    
+    # "Desempaquetamos" los datos JSON para mostrarlos en columnas separadas
+    tractor_info_df = pd.json_normalize(historial_limpio['Tractor_Info'].apply(json.loads))
+    receta_info_df = pd.json_normalize(historial_limpio['Receta_Mezcla'].apply(json.loads))
+    
+    # Unimos todo en una sola tabla
+    historial_completo = pd.concat([
+        historial_limpio.drop(columns=['Tractor_Info', 'Receta_Mezcla']).reset_index(drop=True),
+        tractor_info_df,
+        receta_info_df
+    ], axis=1)
+
+    st.dataframe(historial_completo, use_container_width=True)
+    
+    # Botón de descarga para el historial completo
+    df_para_descargar = to_excel(historial_completo)
+    st.download_button(
+        label="📥 Descargar Historial Completo de Aplicaciones",
+        data=df_para_descargar,
+        file_name="Historial_Aplicaciones_Tractor.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 else:
     st.info("Aún no se ha completado ninguna aplicación.")
+

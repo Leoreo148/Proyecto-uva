@@ -32,7 +32,7 @@ umbral_alerta_oidio = st.sidebar.slider("Umbral de Alerta de Oídio:", min_value
 # --- Lógica para obtener TODOS los sectores ---
 sectores_plagas = df_plagas['Sector'].unique().tolist() if df_plagas is not None else []
 sectores_fenologia = df_fenologia['Sector'].unique().tolist() if df_fenologia is not None and 'Sector' in df_fenologia.columns else []
-sectores_observaciones = df_observaciones['Sector'].unique().tolist() if df_observaciones is not None else []
+sectores_observaciones = df_observaciones['Sector'].unique().tolist() if df_observaciones is not None and 'Sector' in df_observaciones.columns else []
 todos_los_sectores = sorted(list(set(sectores_plagas + sectores_fenologia + sectores_observaciones)))
 if not todos_los_sectores:
     todos_los_sectores = ['General']
@@ -44,7 +44,6 @@ st.divider()
 # --- MÉTRICAS CLAVE (KPIs) - OPTIMIZADO PARA MÓVIL ---
 st.subheader("📈 Resumen de Métricas Clave")
 
-# Para una mejor visualización en teléfonos, mostramos las métricas verticalmente.
 col1, col2, col3 = st.columns(3)
 
 # KPI 1: Trampas de Plagas en Alerta
@@ -59,7 +58,8 @@ with col1:
 
 # KPI 2: Sectores con Oídio Activo
 with col2:
-    if df_observaciones is not None:
+    # CORRECCIÓN: Añadimos la verificación de la columna aquí también
+    if df_observaciones is not None and 'Severidad_Oidio' in df_observaciones.columns:
         df_observaciones['Fecha'] = pd.to_datetime(df_observaciones['Fecha'])
         ultimas_obs_oidio = df_observaciones.loc[df_observaciones.groupby('Sector')['Fecha'].idxmax()]
         sectores_con_oidio = ultimas_obs_oidio[ultimas_obs_oidio['Severidad_Oidio'] > 0]
@@ -88,7 +88,8 @@ col_conc_1, col_conc_2 = st.columns(2)
 with col_conc_1:
     with st.container(border=True):
         st.markdown("##### Diagnóstico de Oídio")
-        if df_observaciones is not None and sector_seleccionado in df_observaciones['Sector'].unique():
+        # CORRECCIÓN: Añadimos la verificación de la columna aquí también
+        if df_observaciones is not None and sector_seleccionado in df_observaciones['Sector'].unique() and 'Severidad_Oidio' in df_observaciones.columns:
             ultima_obs_oidio = df_observaciones[df_observaciones['Sector'] == sector_seleccionado].sort_values(by='Fecha', ascending=False).iloc[0]
             severidad_actual = ultima_obs_oidio['Severidad_Oidio']
             fecha_obs_oidio = pd.to_datetime(ultima_obs_oidio['Fecha']).strftime('%d/%m/%Y')

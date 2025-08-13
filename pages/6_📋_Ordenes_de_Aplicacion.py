@@ -77,19 +77,21 @@ if tareas_completadas_local:
 
                 # Procesar cada tarea completada
                 for tarea_id in tareas_completadas_local:
-                    tarea_info = df_tareas_actual[df_tareas_actual['ID_Tarea'] == tarea_id].iloc[0]
-                    mezcla = json.loads(tarea_info['Mezcla_Productos'])
-                    
-                    # Descontar del inventario
-                    for producto_usado in mezcla:
-                        nombre = producto_usado["Producto"]
-                        cantidad_usada = producto_usado["Cantidad_Total_Usada"]
-                        stock_actual = df_inventario_actual.loc[df_inventario_actual['Producto'] == nombre, 'Cantidad_Stock'].iloc[0]
-                        nuevo_stock = stock_actual - cantidad_usada
-                        df_inventario_actual.loc[df_inventario_actual['Producto'] == nombre, 'Cantidad_Stock'] = nuevo_stock
-                    
-                    # Actualizar estado de la tarea
-                    df_tareas_actual.loc[df_tareas_actual['ID_Tarea'] == tarea_id, 'Status'] = 'Completada'
+                    # Asegurarse de que la tarea exista antes de procesarla
+                    if tarea_id in df_tareas_actual['ID_Tarea'].values:
+                        tarea_info = df_tareas_actual[df_tareas_actual['ID_Tarea'] == tarea_id].iloc[0]
+                        mezcla = json.loads(tarea_info['Mezcla_Productos'])
+                        
+                        # Descontar del inventario
+                        for producto_usado in mezcla:
+                            nombre = producto_usado["Producto"]
+                            cantidad_usada = producto_usado["Cantidad_Total_Usada"]
+                            stock_actual = df_inventario_actual.loc[df_inventario_actual['Producto'] == nombre, 'Cantidad_Stock'].iloc[0]
+                            nuevo_stock = stock_actual - cantidad_usada
+                            df_inventario_actual.loc[df_inventario_actual['Producto'] == nombre, 'Cantidad_Stock'] = nuevo_stock
+                        
+                        # Actualizar estado de la tarea
+                        df_tareas_actual.loc[df_tareas_actual['ID_Tarea'] == tarea_id, 'Status'] = 'Completada'
 
                 # Guardar ambos archivos
                 guardar_datos(df_tareas_actual, ARCHIVO_TAREAS)
@@ -112,7 +114,6 @@ with st.expander("➕ Programar Nueva Aplicación"):
     # (El código para programar nuevas aplicaciones se mantiene igual)
     if 'mezcla_temporal' not in st.session_state:
         st.session_state.mezcla_temporal = []
-    # ... (resto del código de la sección de programar) ...
     st.markdown("##### 1. Construir Caldo de Aplicación")
     col_info1, col_info2 = st.columns(2)
     with col_info1:

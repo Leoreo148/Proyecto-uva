@@ -41,6 +41,7 @@ st.sidebar.header("Selección de Reporte")
 tipo_reporte = st.sidebar.selectbox(
     "¿Qué historial desea consultar?",
     options=list(ARCHIVOS_DE_DATOS.keys())
+key='selector_reporte_sidebar' 
 )
 
 st.header(f"Historial de: {tipo_reporte}")

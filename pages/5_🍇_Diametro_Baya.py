@@ -5,39 +5,25 @@ from datetime import datetime
 import json
 from streamlit_local_storage import LocalStorage
 
-# --- Configuración de la Página ---
 st.set_page_config(page_title="Diámetro de Baya", page_icon="🍇", layout="wide")
 st.title("🍇 Medición de Diámetro de Baya (Detallado)")
 st.write("Registre el diámetro (mm) de 3 bayas (superior, medio, inferior) para 2 racimos por cada una de las 25 plantas.")
 
-# --- Inicialización del Almacenamiento Local ---
 localS = LocalStorage()
-
-# --- Nombres de Archivos y Claves ---
 ARCHIVO_DIAMETRO = 'Registro_Diametro_Baya_Detallado.xlsx'
 LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2'
 
-# --- Funciones para Cargar y Guardar en Servidor (Excel) ---
-def cargar_datos_excel():
-    if os.path.exists(ARCHIVO_DIAMETRO):
-        return pd.read_excel(ARCHIVO_DIAMETRO)
-    return None
-
 def guardar_datos_excel(df_nuevos):
-    # Esta función ahora devolverá True si tuvo éxito, o un mensaje de error si falló
     try:
-        df_existente = cargar_datos_excel()
-        if df_existente is not None:
-            df_final = pd.concat([df_existente, df_nuevos], ignore_index=True)
-        else:
-            df_final = df_nuevos
+        df_existente = None
+        if os.path.exists(ARCHIVO_DIAMETRO):
+            df_existente = pd.read_excel(ARCHIVO_DIAMETRO)
+        df_final = pd.concat([df_existente, df_nuevos], ignore_index=True) if df_existente is not None else df_nuevos
         df_final.to_excel(ARCHIVO_DIAMETRO, index=False, engine='openpyxl')
         return True, "Guardado exitoso."
     except Exception as e:
         return False, str(e)
 
-# --- Interfaz de Registro ---
-# (El resto del código del formulario se mantiene igual)
 col1, col2 = st.columns(2)
 with col1:
     sectores_baya = ['W1', 'W2', 'W3', 'J1', 'J2', 'J3', 'K1', 'K2', 'K3']
@@ -51,7 +37,6 @@ columnas_medicion = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Infe
 df_plantilla = pd.DataFrame(0.0, index=plant_numbers, columns=columnas_medicion)
 df_editada = st.data_editor(df_plantilla, use_container_width=True)
 if st.button("💾 Guardar Medición Localmente"):
-    # (Lógica de guardado local sin cambios)
     valores_medidos = df_editada.to_numpy().flatten()
     valores_no_cero = valores_medidos[valores_medidos > 0]
     if len(valores_no_cero) > 0:
@@ -70,26 +55,20 @@ if st.button("💾 Guardar Medición Localmente"):
     except Exception as e:
         st.error(f"Error al guardar localmente: {e}")
 
-# --- Sección de Sincronización ---
 st.divider()
 st.subheader("📡 Sincronización con el Servidor")
-
 try:
     registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
     registros_pendientes = json.loads(registros_pendientes_str) if registros_pendientes_str else []
 except:
     registros_pendientes = []
-
 if registros_pendientes:
     st.warning(f"Hay **{len(registros_pendientes)}** mediciones completas guardadas localmente pendientes de sincronizar.")
     if st.button("Sincronizar Ahora"):
         with st.spinner("Sincronizando..."):
             flat_list = [item for sublist in registros_pendientes for item in sublist]
             df_pendientes = pd.DataFrame(flat_list)
-            
-            # Lógica de guardado mejorada
             exito, mensaje = guardar_datos_excel(df_pendientes)
-            
             if exito:
                 localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
                 st.success("¡Sincronización completada!")

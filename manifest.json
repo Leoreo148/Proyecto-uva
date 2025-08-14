@@ -7,7 +7,7 @@
     "theme_color": "#4A7729",
     "description": "Aplicación de gestión agrícola para el fundo.",
     "icons": [{
-        "src": "/static/icon.png",
+        "src": "/icon.png",
         "sizes": "512x512",
         "type": "image/png"
     }]

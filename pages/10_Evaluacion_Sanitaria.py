@@ -64,18 +64,35 @@ with st.expander("➕ Registrar Nueva Evaluación Sanitaria"):
         tab_plagas, tab_enfermedades, tab_perimetro = st.tabs(["PLAGAS", "ENFERMEDADES", "EVALUACIÓN DE PERÍMETRO"])
 
         with tab_plagas:
-            st.subheader("2. Evaluación de Plagas")
-            plagas_plantilla = {"Plaga": ["Trips", "Mosca Blanca", "Arañita Roja", "Cochinilla Harinosa"], "% Incidencia": [0.0] * 4, "N° Indiv / Hoja": [0] * 4, "Observaciones": [""] * 4}
+            st.subheader("2. Evaluación de Plagas (para 25 plantas)")
+            # Plantilla basada en tu cartilla
+            plagas_plantilla = {
+                'Plaga': ['Trips', 'Mosca Blanca', 'Araña Roja', 'Cochinilla Harinosa', 'Pulgón', 'Empoasca'],
+                'N° Indiv/Racimo': [0]*6,
+                'N° Indiv/Hoja': [0]*6,
+                'N° Indiv/Brot': [0]*6,
+                '% Incidencia': [0.0]*6
+            }
             df_plagas = st.data_editor(pd.DataFrame(plagas_plantilla), num_rows="dynamic", use_container_width=True, key="editor_plagas")
 
         with tab_enfermedades:
-            st.subheader("3. Evaluación de Enfermedades")
-            enfermedades_plantilla = {"Enfermedad": ["Oidiosis", "Mildiu", "Botrytis", "Pudrición"], "% Incidencia Hojas": [0.0] * 4, "% Incidencia Racimos": [0.0] * 4, "Observaciones": [""] * 4}
+            st.subheader("3. Evaluación de Enfermedades (para 25 plantas)")
+            enfermedades_plantilla = {
+                'Enfermedad': ['Oidiosis', 'Mildiu', 'Botrytis', 'Pudrición Ácida'],
+                '% Hojas Afectadas': [0.0]*4,
+                '% Racimos Afectados': [0.0]*4
+            }
             df_enfermedades = st.data_editor(pd.DataFrame(enfermedades_plantilla), num_rows="dynamic", use_container_width=True, key="editor_enfermedades")
         
         with tab_perimetro:
             st.subheader("4. Evaluación de Perímetro")
-            perimetro_plantilla = {"Plaga/Enfermedad": ["Oidium", "Mildiu", "Arañita Roja", "Cochinilla Harinosa"], "1er Perímetro (Incidencia %)": [0.0] * 4, "2do Perímetro (Incidencia %)": [0.0] * 4}
+            perimetro_plantilla = {
+                'Plaga/Enfermedad': ['Oidium', 'Mildiu', 'Arañita Roja', 'Cochinilla Harinosa'],
+                '1er Perímetro - Hojas (%)': [0.0]*4,
+                '1er Perímetro - Racimos (%)': [0.0]*4,
+                '2do Perímetro - Hojas (%)': [0.0]*4,
+                '2do Perímetro - Racimos (%)': [0.0]*4
+            }
             df_perimetro = st.data_editor(pd.DataFrame(perimetro_plantilla), use_container_width=True, key="editor_perimetro")
 
         submitted = st.form_submit_button("✅ Guardar Evaluación Completa")
@@ -116,3 +133,4 @@ if df_historial is not None and not df_historial.empty:
                 )
 else:
     st.info("Aún no se ha registrado ninguna evaluación sanitaria.")
+

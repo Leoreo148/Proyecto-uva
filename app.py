@@ -3,13 +3,8 @@ import pandas as pd
 import joblib
 
 # --- CONFIGURACIÓN DE LA PÁGINA Y PWA ---
-
-# Paso 1: Configurar la página. Esta línea debe ser la primera función de Streamlit que se llama.
-# Define el título que aparece en la pestaña del navegador y el ícono.
 st.set_page_config(page_title="Panel del Fundo", page_icon="🍇", layout="wide")
 
-# Paso 2: Código para PWA. Se inyecta el código HTML para activar el manifest y el service worker.
-# Las rutas apuntan a la carpeta /static que creamos.
 pwa_code = """
     <link rel="manifest" href="/static/manifest.json">
     <script>

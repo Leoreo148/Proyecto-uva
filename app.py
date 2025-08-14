@@ -2,26 +2,8 @@ import streamlit as st
 import pandas as pd
 import joblib
 
-# --- CONFIGURACIÓN DE LA PÁGINA Y PWA ---
+# --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Panel del Fundo", page_icon="🍇", layout="wide")
-
-# Rutas simplificadas, sin la carpeta /static
-pwa_code = """
-    <link rel="manifest" href="/manifest.json">
-    <script>
-        if ('serviceWorker' in navigator) {
-            navigator.service-worker.register('/sw.js').then(function(registration) {
-                console.log('ServiceWorker registration successful with scope: ', registration.scope);
-            }).catch(function(err) {
-                console.log('ServiceWorker registration failed: ', err);
-            });
-        }
-    </script>
-"""
-st.html(pwa_code)
-
-# --- FIN DE LA CONFIGURACIÓN ---
-
 
 # --- FUNCIONES AUXILIARES ---
 def cargar_modelo():

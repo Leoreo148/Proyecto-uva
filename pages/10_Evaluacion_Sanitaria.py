@@ -31,15 +31,9 @@ def guardar_datos_excel(df_nuevos):
 def to_excel_detailed(evaluacion_row):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # Hoja 1: Resumen General
-        resumen_df = pd.DataFrame({
-            "Fecha": [pd.to_datetime(evaluacion_row['Fecha']).strftime('%d/%m/%Y')],
-            "Sector": [evaluacion_row['Sector']],
-            "Evaluador": [evaluacion_row['Evaluador']]
-        })
+        resumen_df = pd.DataFrame([{"Fecha": evaluacion_row['Fecha'], "Sector": evaluacion_row['Sector'], "Evaluador": evaluacion_row['Evaluador']}])
         resumen_df.to_excel(writer, index=False, sheet_name='Resumen')
         
-        # Hojas con los datos detallados de cada pestaña
         pd.read_json(evaluacion_row['Datos_Plagas']).set_index('Planta').to_excel(writer, sheet_name='Plagas')
         pd.read_json(evaluacion_row['Datos_Enfermedades']).set_index('Planta').to_excel(writer, sheet_name='Enfermedades')
         pd.read_json(evaluacion_row['Datos_Perimetro']).set_index('Plaga/Enfermedad').to_excel(writer, sheet_name='Perimetro')
@@ -66,17 +60,37 @@ with st.expander("➕ Registrar Nueva Evaluación Sanitaria", expanded=True):
 
         with tab_plagas:
             st.subheader("Evaluación de Plagas (para 25 plantas)")
-            plagas_plantilla = {'Planta': [f"Planta {i+1}" for i in range(25)], 'TRIPS - N° Ind/Racimo': [0]*25, 'TRIPS - N° Ind/Hoja': [0]*25, 'MOSCA BLANCA - % Adulto/Hoja': [0.0]*25, 'ARAÑITA ROJA - % Adulto/Hoja': [0.0]*25, 'ARAÑITA ROJA - % Adulto/Racimo': [0.0]*25}
+            plagas_plantilla = {
+                'Planta': [f"P.{i+1}" for i in range(25)],
+                'TRIPS N° Ind/Racimo': [0]*25, 'TRIPS N° Ind/Hoja': [0]*25, 'TRIPS N° Ind/Brot': [0]*25,
+                'M. BLANCA % Adulto/Hoja': [0.0]*25,
+                'A. ROJA % Adultos/Hoja': [0.0]*25, 'A. ROJA % Adultos/Racimo': [0.0]*25,
+                'COCHINILLA H. % Hojas': [0.0]*25, 'COCHINILLA H. % Racimo': [0.0]*25,
+                'PULGÓN % Hojas': [0.0]*25, 'PULGÓN % Racimo': [0.0]*25,
+                'EMPOASCA N° Ind/Hoja': [0]*25
+            }
             df_plagas = st.data_editor(pd.DataFrame(plagas_plantilla).set_index('Planta'), use_container_width=True, key="editor_plagas")
 
         with tab_enfermedades:
             st.subheader("Evaluación de Enfermedades (para 25 plantas)")
-            enfermedades_plantilla = {'Planta': [f"Planta {i+1}" for i in range(25)], 'OIDIOSIS - % Hojas': [0.0]*25, 'OIDIOSIS - % Racimos': [0.0]*25, 'MILDIU - % Hojas': [0.0]*25, 'MILDIU - % Rac. Floral': [0.0]*25, 'BOTRYTIS - % Racimos': [0.0]*25}
+            enfermedades_plantilla = {
+                'Planta': [f"P.{i+1}" for i in range(25)],
+                'OIDIOSIS % Hojas': [0.0]*25, 'OIDIOSIS % Racimos': [0.0]*25,
+                'MILDIU % Hojas': [0.0]*25, 'MILDIU % Rac. Floral': [0.0]*25,
+                'BOTRYTIS % Racimos': [0.0]*25,
+                'PUD. ACIDA % Racimos': [0.0]*25,
+                'PENICILLIUM % Racimos': [0.0]*25,
+                'HONG. VASC % Plantas': [0.0]*25
+            }
             df_enfermedades = st.data_editor(pd.DataFrame(enfermedades_plantilla).set_index('Planta'), use_container_width=True, key="editor_enfermedades")
         
         with tab_perimetro:
-            st.subheader("Evaluación de Perímetro")
-            perimetro_plantilla = {'Plaga/Enfermedad': ['Oidium', 'Mildiu', 'Arañita Roja', 'Cochinilla Harinosa'], '1er Perímetro - Hojas (%)': [0.0]*4, '1er Perímetro - Racimos (%)': [0.0]*4, '2do Perímetro - Hojas (%)': [0.0]*4, '2do Perímetro - Racimos (%)': [0.0]*4}
+            st.subheader("Evaluación de Perímetro o Lindero")
+            perimetro_plantilla = {
+                'Plaga/Enfermedad': ['OIDIUM', 'MILDIU', 'ARAÑITA ROJA', 'ACARO HIALINO', 'COCHINILLA HARINOSA', 'PICADURA AVES'],
+                '1ER. PERIMETRO - HOJA': [0.0]*6, '1ER. PERIMETRO - RACIMOS': [0.0]*6,
+                '2DO. PERIMETRO - HOJA': [0.0]*6, '2DO. PERIMETRO - RACIMOS': [0.0]*6
+            }
             df_perimetro = st.data_editor(pd.DataFrame(perimetro_plantilla).set_index('Plaga/Enfermedad'), use_container_width=True, key="editor_perimetro")
 
         st.divider()
@@ -120,12 +134,3 @@ if df_historial is not None and not df_historial.empty:
                 )
 else:
     st.info("Aún no se ha registrado ninguna evaluación sanitaria.")
-
-
-
-
-
-
-
-
-

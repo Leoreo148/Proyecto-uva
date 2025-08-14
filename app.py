@@ -2,12 +2,13 @@ import streamlit as st
 import pandas as pd
 import joblib
 
-# --- CÓDIGO PARA PWA ---
+st.set_page_config(page_title="Panel del Fundo", page_icon="🍇", layout="wide")
+
 pwa_code = """
-    <link rel="manifest" href="/manifest.json">
+    <link rel="manifest" href="/static/manifest.json">
     <script>
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js').then(function(registration) {
+            navigator.serviceWorker.register('/static/sw.js').then(function(registration) {
                 console.log('ServiceWorker registration successful with scope: ', registration.scope);
             }).catch(function(err) {
                 console.log('ServiceWorker registration failed: ', err);
@@ -74,3 +75,4 @@ if st.button('Predecir Riesgo'):
     prediction = modelo.predict(input_df)
     recomendacion_texto = obtener_recomendacion(prediction[0], inventario_df)
     st.info(recomendacion_texto)
+

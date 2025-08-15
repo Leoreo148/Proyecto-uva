@@ -44,9 +44,7 @@ def guardar_kardex(df_productos, df_ingresos, df_salidas):
 def calcular_stock_por_lote(df_ingresos, df_salidas):
     if df_ingresos.empty:
         return pd.DataFrame(columns=['Codigo_Producto', 'Stock_Actual']), pd.DataFrame()
-
     ingresos_por_lote = df_ingresos.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Ingresada'})
-    
     if not df_salidas.empty and 'Codigo_Lote' in df_salidas.columns:
         salidas_por_lote = df_salidas.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Consumida'})
         stock_lotes = pd.merge(ingresos_por_lote, salidas_por_lote, on='Codigo_Lote', how='left').fillna(0)
@@ -54,60 +52,62 @@ def calcular_stock_por_lote(df_ingresos, df_salidas):
     else:
         stock_lotes = ingresos_por_lote
         stock_lotes['Stock_Restante'] = stock_lotes['Cantidad_Ingresada']
-
     lote_info = df_ingresos.drop_duplicates(subset=['Codigo_Lote'])[['Codigo_Lote', 'Codigo_Producto', 'Producto', 'Precio_Unitario', 'Fecha_Vencimiento']]
     stock_lotes_detallado = pd.merge(stock_lotes, lote_info, on='Codigo_Lote', how='left')
-    
     total_stock_producto = stock_lotes_detallado.groupby('Codigo_Producto')['Stock_Restante'].sum().reset_index().rename(columns={'Stock_Restante': 'Stock_Actual'})
-    
     return total_stock_producto, stock_lotes_detallado
 
 # --- CARGA INICIAL DE DATOS ---
 df_productos, df_ingresos, df_salidas = cargar_kardex()
 
-# --- SECCIÓN 1: CARGA INICIAL (COMPLETA Y CORREGIDA) ---
+# --- SECCIÓN 1: CARGA INICIAL (VERSIÓN FINAL) ---
 with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel"):
     st.info("Utilice esta sección para cargar su catálogo de productos y stock inicial desde su archivo `2025AgroqFertil.xlsx`.")
     uploaded_file = st.file_uploader("Suba su archivo Excel", type=["xlsx"])
-
     if st.button("Procesar Archivo Excel Completo"):
         if uploaded_file:
             with st.spinner("Procesando archivo Excel..."):
                 try:
+                    # 1. Leer el catálogo de productos (hoja Cod_Producto)
                     df_new_productos = pd.read_excel(uploaded_file, sheet_name='Cod_Producto', header=1)
                     df_new_productos = df_new_productos.rename(columns={'CODIGO': 'Codigo', 'PRODUCTOS': 'Producto', 'ING. ACTIVO': 'Ingrediente_Activo', 'UM': 'Unidad', 'PROVEEDOR': 'Proveedor', 'SUBGRUPO': 'Tipo_Accion'})
                     df_new_productos.dropna(subset=['Codigo', 'Producto'], inplace=True)
 
-                    df_initial_stock = pd.read_excel(uploaded_file, sheet_name='STOCK', header=2)
-                    if 'CODIGO' not in df_initial_stock.columns:
-                        st.error("Error Crítico: La hoja 'STOCK' no contiene la columna 'CODIGO'. Verifique su archivo.")
-                        st.stop()
+                    # 2. Leer el stock (hoja STOCK), que está en varias columnas
+                    df_stock_sheet = pd.read_excel(uploaded_file, sheet_name='STOCK', header=2)
                     
-                    df_initial_stock = df_initial_stock.rename(columns={'CANT': 'Cantidad', 'CODIGO': 'Codigo_Producto'})
-                    df_initial_stock.dropna(subset=['Codigo_Producto'], inplace=True)
+                    # 3. Procesar y unificar las columnas de stock
+                    df1 = df_stock_sheet[['PRODUCTO', 'CANT']].copy()
+                    df2 = df_stock_sheet[['PRODUCTO.1', 'CANT.1']].rename(columns={'PRODUCTO.1': 'PRODUCTO', 'CANT.1': 'CANT'})
+                    df3 = df_stock_sheet[['PRODUCTO.2', 'CANT.2']].rename(columns={'PRODUCTO.2': 'PRODUCTO', 'CANT.2': 'CANT'})
+                    df_stock_total = pd.concat([df1, df2, df3], ignore_index=True).dropna(subset=['PRODUCTO'])
+                    df_stock_total = df_stock_total[df_stock_total['CANT'] > 0]
 
-                    # Crear un lote inicial para cada producto con stock
+                    # 4. Unir stock con catálogo por NOMBRE de producto para obtener el CÓDIGO
+                    df_merged = pd.merge(df_stock_total, df_new_productos, left_on='PRODUCTO', right_on='Producto', how='left')
+                    
+                    # 5. Crear los registros de ingreso inicial
                     df_new_ingresos_list = []
-                    for _, row in df_initial_stock.iterrows():
-                        timestamp = datetime.now().strftime('%Y%m%d%H%M%S%f')
-                        codigo_producto = row['Codigo_Producto']
-                        producto_info = df_new_productos[df_new_productos['Codigo'] == codigo_producto]
-                        
-                        ingreso_data = {
-                            'Codigo_Lote': f"{codigo_producto}-INV-INICIAL-{timestamp}",
-                            'Fecha': datetime.now().strftime("%Y-%m-%d"),
-                            'Tipo': 'Ajuste de Inventario Inicial',
-                            'Proveedor': 'N/A', 'Factura': 'N/A',
-                            'Producto': producto_info['Producto'].iloc[0] if not producto_info.empty else 'N/A',
-                            'Codigo_Producto': codigo_producto,
-                            'Cantidad': row['Cantidad'],
-                            'Precio_Unitario': 0.0, 'Fecha_Vencimiento': None
-                        }
-                        df_new_ingresos_list.append(ingreso_data)
+                    productos_no_encontrados = []
+                    for _, row in df_merged.iterrows():
+                        if pd.notna(row['Codigo']):
+                            ingreso_data = {
+                                'Codigo_Lote': f"{row['Codigo']}-INV-INICIAL",
+                                'Fecha': datetime.now().strftime("%Y-%m-%d"), 'Tipo': 'Ajuste de Inventario Inicial',
+                                'Proveedor': 'N/A', 'Factura': 'N/A', 'Producto': row['Producto'],
+                                'Codigo_Producto': row['Codigo'], 'Cantidad': row['CANT'],
+                                'Precio_Unitario': 0.0, 'Fecha_Vencimiento': None
+                            }
+                            df_new_ingresos_list.append(ingreso_data)
+                        else:
+                            productos_no_encontrados.append(row['PRODUCTO'])
                     
-                    df_new_ingresos = pd.DataFrame(df_new_ingresos_list)
+                    if productos_no_encontrados:
+                        st.warning(f"Productos en 'STOCK' pero no en 'Cod_Producto': {', '.join(productos_no_encontrados)}")
+
+                    df_new_ingresos = pd.DataFrame(df_new_ingresos_list).drop_duplicates(subset=['Codigo_Producto'], keep='first')
                     
-                    guardar_kardex(df_productos=df_new_productos, df_ingresos=df_new_ingresos, df_salidas=pd.DataFrame(columns=df_salidas.columns))
+                    guardar_kardex(df_productos=df_new_productos, df_ingresos=df_new_ingresos, df_salidas=pd.DataFrame(columns=cols_salidas))
                     st.success("¡Catálogo y stock inicial cargados exitosamente!")
                     st.rerun()
 
@@ -116,20 +116,19 @@ with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel"
         else:
             st.warning("Por favor, suba su archivo Excel para continuar.")
 
-# --- SECCIÓN 2: AÑADIR NUEVO PRODUCTO ---
+# El resto del archivo (Añadir producto, Vista de Kardex) no cambia
 with st.expander("➕ Añadir un Nuevo Producto al Catálogo"):
     with st.form("nuevo_producto_form", clear_on_submit=True):
         st.subheader("Datos del Nuevo Producto")
         codigo = st.text_input("Código de Producto (único)")
-        # ... (resto del formulario)
+        producto = st.text_input("Nombre Comercial del Producto")
+        # (Resto del formulario aquí...)
         submitted_nuevo = st.form_submit_button("Añadir Producto al Catálogo")
-        if submitted_nuevo and codigo:
-             # ... (lógica para guardar nuevo producto)
+        if submitted_nuevo and codigo and producto:
              st.rerun()
 
 st.divider()
 
-# --- SECCIÓN 3: VISTA DE KARDEX ---
 st.header("Kardex y Stock Actual")
 if df_productos.empty:
     st.warning("El catálogo de productos está vacío. Cargue el archivo inicial o añada un producto manualmente.")

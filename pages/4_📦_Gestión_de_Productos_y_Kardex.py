@@ -173,4 +173,12 @@ else:
     if producto_seleccionado:
         codigo_seleccionado = df_productos[df_productos['Producto'] == producto_seleccionado]['Codigo'].iloc[0]
         historial_ingresos = df_ingresos[df_ingresos['Codigo_Producto'] == codigo_seleccionado]
-        historial_salidas = df_salidas[df_salidas['Codigo_Producto'] == codigo_
+        historial_salidas = df_salidas[df_salidas['Codigo_Producto'] == codigo_seleccionado]
+
+        col_ing, col_sal = st.columns(2)
+        with col_ing:
+            st.markdown("##### Historial de Ingresos")
+            st.dataframe(historial_ingresos, use_container_width=True, hide_index=True)
+        with col_sal:
+            st.markdown("##### Historial de Salidas")
+            st.dataframe(historial_salidas, use_container_width=True, hide_index=True)

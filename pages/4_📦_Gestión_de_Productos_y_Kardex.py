@@ -20,7 +20,6 @@ def cargar_kardex():
     cols_productos = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion']
     cols_ingresos = ['Codigo_Lote', 'Fecha', 'Tipo', 'Proveedor', 'Factura', 'Producto', 'Codigo_Producto', 'Cantidad', 'Precio_Unitario', 'Fecha_Vencimiento']
     cols_salidas = ['Fecha', 'Lote_Sector', 'Turno', 'Producto', 'Cantidad', 'Codigo_Producto', 'Objetivo_Tratamiento', 'Codigo_Lote']
-
     if os.path.exists(KARDEX_FILE):
         try:
             xls = pd.ExcelFile(KARDEX_FILE)
@@ -61,32 +60,34 @@ def calcular_stock_por_lote(df_ingresos, df_salidas):
 df_productos, df_ingresos, df_salidas = cargar_kardex()
 
 # --- SECCIÓN 1: CARGA INICIAL (VERSIÓN FINAL) ---
-with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel"):
+with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel", expanded=True):
     st.info("Utilice esta sección para cargar su catálogo de productos y stock inicial desde su archivo `2025AgroqFertil.xlsx`.")
     uploaded_file = st.file_uploader("Suba su archivo Excel", type=["xlsx"])
     if st.button("Procesar Archivo Excel Completo"):
         if uploaded_file:
             with st.spinner("Procesando archivo Excel..."):
                 try:
-                    # 1. Leer el catálogo de productos (hoja Cod_Producto)
                     df_new_productos = pd.read_excel(uploaded_file, sheet_name='Cod_Producto', header=1)
                     df_new_productos = df_new_productos.rename(columns={'CODIGO': 'Codigo', 'PRODUCTOS': 'Producto', 'ING. ACTIVO': 'Ingrediente_Activo', 'UM': 'Unidad', 'PROVEEDOR': 'Proveedor', 'SUBGRUPO': 'Tipo_Accion'})
                     df_new_productos.dropna(subset=['Codigo', 'Producto'], inplace=True)
 
-                    # 2. Leer el stock (hoja STOCK), que está en varias columnas
                     df_stock_sheet = pd.read_excel(uploaded_file, sheet_name='STOCK', header=2)
                     
-                    # 3. Procesar y unificar las columnas de stock
                     df1 = df_stock_sheet[['PRODUCTO', 'CANT']].copy()
                     df2 = df_stock_sheet[['PRODUCTO.1', 'CANT.1']].rename(columns={'PRODUCTO.1': 'PRODUCTO', 'CANT.1': 'CANT'})
                     df3 = df_stock_sheet[['PRODUCTO.2', 'CANT.2']].rename(columns={'PRODUCTO.2': 'PRODUCTO', 'CANT.2': 'CANT'})
                     df_stock_total = pd.concat([df1, df2, df3], ignore_index=True).dropna(subset=['PRODUCTO'])
+                    
+                    # --- !! AJUSTE CLAVE !! ---
+                    # 1. Convertir la columna 'CANT' a numérico. Los valores que no son números se convertirán en NaN (Not a Number).
+                    df_stock_total['CANT'] = pd.to_numeric(df_stock_total['CANT'], errors='coerce')
+                    # 2. Reemplazar los NaN con 0.
+                    df_stock_total.fillna({'CANT': 0}, inplace=True)
+                    # 3. Ahora sí, filtrar de forma segura.
                     df_stock_total = df_stock_total[df_stock_total['CANT'] > 0]
 
-                    # 4. Unir stock con catálogo por NOMBRE de producto para obtener el CÓDIGO
                     df_merged = pd.merge(df_stock_total, df_new_productos, left_on='PRODUCTO', right_on='Producto', how='left')
                     
-                    # 5. Crear los registros de ingreso inicial
                     df_new_ingresos_list = []
                     productos_no_encontrados = []
                     for _, row in df_merged.iterrows():
@@ -116,7 +117,7 @@ with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel"
         else:
             st.warning("Por favor, suba su archivo Excel para continuar.")
 
-# El resto del archivo (Añadir producto, Vista de Kardex) no cambia
+# El resto del archivo no cambia
 with st.expander("➕ Añadir un Nuevo Producto al Catálogo"):
     with st.form("nuevo_producto_form", clear_on_submit=True):
         st.subheader("Datos del Nuevo Producto")
@@ -124,8 +125,6 @@ with st.expander("➕ Añadir un Nuevo Producto al Catálogo"):
         producto = st.text_input("Nombre Comercial del Producto")
         # (Resto del formulario aquí...)
         submitted_nuevo = st.form_submit_button("Añadir Producto al Catálogo")
-        if submitted_nuevo and codigo and producto:
-             st.rerun()
 
 st.divider()
 

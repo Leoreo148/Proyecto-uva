@@ -15,24 +15,32 @@ SHEET_PRODUCTS = 'Productos'
 SHEET_INGRESOS = 'Ingresos'
 SHEET_SALIDAS = 'Salidas'
 
-# --- FUNCIONES CORE DEL KARDEX ---
-# Estas funciones son las mismas que en el módulo de Kardex para mantener la consistencia.
+# --- !! FUNCIÓN CARGAR_KARDEX CORREGIDA Y MÁS ROBUSTA !! ---
 def cargar_kardex():
     """
-    Carga todas las hojas del archivo Kardex. Si no existen, crea DataFrames vacíos.
+    Carga todas las hojas del archivo Kardex. Si una hoja no existe,
+    la crea como un DataFrame vacío sin afectar a las demás.
     """
+    cols_productos = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion']
+    cols_ingresos = ['Codigo_Lote', 'Fecha', 'Tipo', 'Proveedor', 'Factura', 'Producto', 'Codigo_Producto', 'Cantidad', 'Precio_Unitario', 'Fecha_Vencimiento']
+    cols_salidas = ['Fecha', 'Lote_Sector', 'Turno', 'Producto', 'Cantidad', 'Codigo_Producto', 'Objetivo_Tratamiento', 'Codigo_Lote']
+
+    # Cargar el archivo si existe
     if os.path.exists(KARDEX_FILE):
-        try:
-            xls = pd.ExcelFile(KARDEX_FILE)
-            df_productos = pd.read_excel(xls, sheet_name=SHEET_PRODUCTS)
-            df_ingresos = pd.read_excel(xls, sheet_name=SHEET_INGRESOS)
-            df_salidas = pd.read_excel(xls, sheet_name=SHEET_SALIDAS)
-        except Exception as e:
-            st.error(f"Error al leer el archivo Kardex: {e}")
-            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        xls = pd.ExcelFile(KARDEX_FILE)
+        
+        # Leer cada hoja de forma segura
+        df_productos = pd.read_excel(xls, sheet_name=SHEET_PRODUCTS) if SHEET_PRODUCTS in xls.sheet_names else pd.DataFrame(columns=cols_productos)
+        df_ingresos = pd.read_excel(xls, sheet_name=SHEET_INGRESOS) if SHEET_INGRESOS in xls.sheet_names else pd.DataFrame(columns=cols_ingresos)
+        df_salidas = pd.read_excel(xls, sheet_name=SHEET_SALIDAS) if SHEET_SALIDAS in xls.sheet_names else pd.DataFrame(columns=cols_salidas)
+        
     else:
+        # Si el archivo no existe, crear todos los DataFrames vacíos
         st.warning("Archivo 'kardex_fundo.xlsx' no encontrado. Por favor, cargue primero el catálogo de productos.")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        df_productos = pd.DataFrame(columns=cols_productos)
+        df_ingresos = pd.DataFrame(columns=cols_ingresos)
+        df_salidas = pd.DataFrame(columns=cols_salidas)
+        
     return df_productos, df_ingresos, df_salidas
 
 def guardar_kardex(df_productos, df_ingresos, df_salidas):
@@ -58,13 +66,10 @@ else:
     with st.form("ingreso_lote_form", clear_on_submit=True):
         st.markdown("##### 1. Información del Producto")
         
-        # Selección del producto
         producto_seleccionado = st.selectbox(
             "Seleccione el Producto que ingresa:",
             options=df_productos['Producto'].unique()
         )
-        
-        # Cantidad
         cantidad_ingresada = st.number_input("Cantidad Ingresada (en la unidad del producto)", min_value=0.01, format="%.2f")
 
         st.markdown("##### 2. Información del Lote (Costo y Caducidad)")
@@ -86,16 +91,10 @@ else:
         submitted = st.form_submit_button("✅ Guardar Ingreso del Lote")
 
         if submitted:
-            # --- LÓGICA DE GUARDADO DEL LOTE ---
-            
-            # Obtener el código del producto seleccionado
             codigo_producto = df_productos[df_productos['Producto'] == producto_seleccionado]['Codigo'].iloc[0]
-            
-            # Generar un código de lote único
             timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
             codigo_lote = f"{codigo_producto}-{timestamp}"
             
-            # Crear el nuevo registro como un DataFrame
             nuevo_ingreso_data = {
                 'Codigo_Lote': codigo_lote,
                 'Fecha': fecha_ingreso.strftime("%Y-%m-%d"),
@@ -109,15 +108,12 @@ else:
                 'Fecha_Vencimiento': fecha_vencimiento.strftime("%Y-%m-%d") if fecha_vencimiento else None
             }
             df_nuevo_ingreso = pd.DataFrame([nuevo_ingreso_data])
-            
-            # Unir con el historial de ingresos existente
             df_ingresos_actualizado = pd.concat([df_ingresos, df_nuevo_ingreso], ignore_index=True)
             
-            # Guardar el archivo kardex completo
             exito = guardar_kardex(df_productos, df_ingresos_actualizado, df_salidas)
             
             if exito:
-                st.success(f"¡Lote '{codigo_lote}' para el producto '{producto_seleccionado}' registrado exitosamente!")
+                st.success(f"¡Lote '{codigo_lote}' para '{producto_seleccionado}' registrado exitosamente!")
             else:
                 st.error("Hubo un error al guardar el registro en el archivo Kardex.")
 
@@ -126,12 +122,10 @@ st.divider()
 # --- HISTORIAL DE INGRESOS RECIENTES ---
 st.header("📚 Historial de Ingresos Recientes")
 if not df_ingresos.empty:
-    # Mostramos las columnas más relevantes
     columnas_a_mostrar = [
         'Fecha', 'Producto', 'Cantidad', 'Precio_Unitario', 
         'Codigo_Lote', 'Proveedor', 'Factura', 'Fecha_Vencimiento'
     ]
-    # Filtramos para asegurarnos que solo mostramos columnas que existen
     columnas_existentes = [col for col in columnas_a_mostrar if col in df_ingresos.columns]
     st.dataframe(df_ingresos[columnas_existentes].tail(15).iloc[::-1], use_container_width=True)
 else:

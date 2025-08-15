@@ -15,7 +15,6 @@ SHEET_PRODUCTS = 'Productos'
 SHEET_INGRESOS = 'Ingresos'
 SHEET_SALIDAS = 'Salidas'
 
-# --- !! AJUSTE CLAVE !!: Definición de columnas movida aquí para ser global ---
 COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion']
 COLS_INGRESOS = ['Codigo_Lote', 'Fecha', 'Tipo', 'Proveedor', 'Factura', 'Producto', 'Codigo_Producto', 'Cantidad', 'Precio_Unitario', 'Fecha_Vencimiento']
 COLS_SALIDAS = ['Fecha', 'Lote_Sector', 'Turno', 'Producto', 'Cantidad', 'Codigo_Producto', 'Objetivo_Tratamiento', 'Codigo_Lote']
@@ -74,17 +73,22 @@ with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel"
                     df_new_productos.dropna(subset=['Codigo', 'Producto'], inplace=True)
 
                     df_stock_sheet = pd.read_excel(uploaded_file, sheet_name='STOCK', header=2)
-                    
                     df1 = df_stock_sheet[['PRODUCTO', 'CANT']].copy()
                     df2 = df_stock_sheet[['PRODUCTO.1', 'CANT.1']].rename(columns={'PRODUCTO.1': 'PRODUCTO', 'CANT.1': 'CANT'})
                     df3 = df_stock_sheet[['PRODUCTO.2', 'CANT.2']].rename(columns={'PRODUCTO.2': 'PRODUCTO', 'CANT.2': 'CANT'})
                     df_stock_total = pd.concat([df1, df2, df3], ignore_index=True).dropna(subset=['PRODUCTO'])
-                    
                     df_stock_total['CANT'] = pd.to_numeric(df_stock_total['CANT'], errors='coerce')
                     df_stock_total.fillna({'CANT': 0}, inplace=True)
                     df_stock_total = df_stock_total[df_stock_total['CANT'] > 0]
 
-                    df_merged = pd.merge(df_stock_total, df_new_productos, left_on='PRODUCTO', right_on='Producto', how='left')
+                    # --- !! AJUSTE CLAVE PARA LA ASOCIACIÓN !! ---
+                    stock_to_merge = df_stock_total.copy()
+                    products_to_merge = df_new_productos.copy()
+                    # 1. Crear una "llave" de unión limpia en ambas tablas
+                    stock_to_merge['join_key'] = stock_to_merge['PRODUCTO'].astype(str).str.strip().str.lower()
+                    products_to_merge['join_key'] = products_to_merge['Producto'].astype(str).str.strip().str.lower()
+                    # 2. Unir usando la nueva llave
+                    df_merged = pd.merge(stock_to_merge, products_to_merge, on='join_key', how='left')
                     
                     df_new_ingresos_list = []
                     productos_no_encontrados = []
@@ -104,9 +108,8 @@ with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel"
                     if productos_no_encontrados:
                         st.warning(f"Productos en 'STOCK' pero no en 'Cod_Producto': {', '.join(productos_no_encontrados)}")
 
-                    df_new_ingresos = pd.DataFrame(df_new_ingresos_list).drop_duplicates(subset=['Codigo_Producto'], keep='first')
+                    df_new_ingresos = pd.DataFrame(df_new_ingresos_list)
                     
-                    # Usa la variable COLS_SALIDAS globalmente definida
                     guardar_kardex(df_productos=df_new_productos, df_ingresos=df_new_ingresos, df_salidas=pd.DataFrame(columns=COLS_SALIDAS))
                     st.success("¡Catálogo y stock inicial cargados exitosamente!")
                     st.rerun()
@@ -116,5 +119,33 @@ with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel"
         else:
             st.warning("Por favor, suba su archivo Excel para continuar.")
 
-# El resto del archivo no ha cambiado
-# ... (código para añadir producto y vista de kardex) ...
+# El resto del archivo no cambia
+with st.expander("➕ Añadir un Nuevo Producto al Catálogo"):
+    with st.form("nuevo_producto_form", clear_on_submit=True):
+        st.subheader("Datos del Nuevo Producto")
+        codigo = st.text_input("Código de Producto (único)")
+        producto = st.text_input("Nombre Comercial del Producto")
+        st.form_submit_button("Añadir Producto al Catálogo")
+
+st.divider()
+st.header("Kardex y Stock Actual")
+if df_productos.empty:
+    st.warning("El catálogo de productos está vacío. Cargue el archivo inicial o añada un producto manualmente.")
+else:
+    df_total_stock, df_stock_lotes = calcular_stock_por_lote(df_ingresos, df_salidas)
+    df_vista_kardex = pd.merge(df_productos, df_total_stock, left_on='Codigo', right_on='Codigo_Producto', how='left').fillna(0)
+    df_vista_kardex = df_vista_kardex[['Codigo', 'Producto', 'Stock_Actual', 'Unidad', 'Tipo_Accion']]
+    st.dataframe(df_vista_kardex, use_container_width=True, hide_index=True)
+    st.divider()
+    st.subheader("Ver Desglose de Lotes Activos por Producto")
+    producto_seleccionado = st.selectbox("Seleccione un producto:", options=df_productos['Producto'])
+    if producto_seleccionado:
+        codigo_seleccionado = df_productos.loc[df_productos['Producto'] == producto_seleccionado, 'Codigo'].iloc[0]
+        lotes_del_producto = df_stock_lotes[df_stock_lotes['Codigo_Producto'] == codigo_seleccionado]
+        lotes_activos = lotes_del_producto[lotes_del_producto['Stock_Restante'] > 0.001].copy()
+        if lotes_activos.empty:
+            st.info(f"No hay lotes con stock activo para '{producto_seleccionado}'.")
+        else:
+            lotes_activos['Precio_Unitario'] = lotes_activos['Precio_Unitario'].map('${:,.2f}'.format)
+            lotes_activos['Stock_Restante'] = lotes_activos['Stock_Restante'].map('{:,.2f}'.format)
+            st.dataframe(lotes_activos[['Codigo_Lote', 'Stock_Restante', 'Precio_Unitario', 'Fecha_Vencimiento']], use_container_width=True, hide_index=True)

@@ -87,12 +87,15 @@ if registros_pendientes:
             if exito:
                 localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
                 st.success("¡Sincronización completada!")
-                st.rerun()
+                st.session_state['sync_success_mosca'] = True
             else:
                 st.error(f"Error al guardar en el servidor: {mensaje}. Sus datos locales están a salvo.")
 else:
-    st.info("✅ Todas las mediciones de diámetro están sincronizadas.")
+    st.info("✅ Todos los registros de monitoreo están sincronizados.")
 
+if 'sync_success_mosca' in st.session_state and st.session_state['sync_success_mosca']:
+    del st.session_state['sync_success_mosca']
+    st.rerun()
 st.divider()
 
 # --- NUEVA SECCIÓN: HISTORIAL Y DESCARGA ---

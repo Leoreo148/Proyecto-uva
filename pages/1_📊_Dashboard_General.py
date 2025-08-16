@@ -2,193 +2,151 @@ import streamlit as st
 import pandas as pd
 import os
 import plotly.express as px
+from datetime import datetime, timedelta
 
-# --- Configuración de la Página ---
+# --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Dashboard General", page_icon="📊", layout="wide")
 st.title("📊 Dashboard General del Fundo")
-st.write("Métricas clave, tendencias y alertas críticas para una visión completa.")
+st.write("Métricas clave de inventario, operaciones y sanidad para una visión completa del fundo.")
 
-# --- Función para Cargar Datos de Forma Segura ---
-def cargar_datos(nombre_archivo):
-    if os.path.exists(nombre_archivo):
-        try:
-            return pd.read_excel(nombre_archivo)
-        except Exception as e:
-            st.error(f"Error al leer el archivo {nombre_archivo}: {e}")
-            return None
-    return None
+# --- FUNCIONES DE CARGA Y CÁLCULO (CENTRALIZADAS) ---
 
-# --- Carga de Datos ---
-df_plagas = cargar_datos('Monitoreo_Plagas_Detallado.xlsx')
-df_fenologia = cargar_datos('Evaluacion_Fenologica_Detallada.xlsx')
-df_observaciones = cargar_datos('Observaciones_Campo.xlsx')
-df_inventario = cargar_datos('Inventario_Productos.xlsx')
+@st.cache_data
+def cargar_datos(nombre_archivo, columnas_fecha=None):
+    """Función genérica y segura para cargar cualquier archivo Excel."""
+    if not os.path.exists(nombre_archivo):
+        return None
+    try:
+        df = pd.read_excel(nombre_archivo)
+        if columnas_fecha:
+            for col in columnas_fecha:
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col])
+        return df
+    except Exception as e:
+        st.error(f"Error al leer el archivo {nombre_archivo}: {e}")
+        return None
 
-# --- Barra Lateral con Filtros ---
-st.sidebar.header("Filtros y Umbrales")
-umbral_alerta_plagas = st.sidebar.number_input("Umbral de Alerta de Capturas:", min_value=1, value=7, step=1)
-umbral_alerta_oidio = st.sidebar.slider("Umbral de Alerta de Oídio:", min_value=1, max_value=4, value=3)
+def calcular_stock(df_ingresos, df_salidas):
+    """Calcula el stock total y valorizado a partir de los movimientos."""
+    if df_ingresos is None or df_ingresos.empty:
+        return pd.DataFrame(), pd.DataFrame()
+    
+    ingresos_por_lote = df_ingresos.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Ingresada'})
+    
+    if df_salidas is not None and not df_salidas.empty and 'Codigo_Lote' in df_salidas.columns:
+        salidas_por_lote = df_salidas.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Consumida'})
+        stock_lotes = pd.merge(ingresos_por_lote, salidas_por_lote, on='Codigo_Lote', how='left').fillna(0)
+        stock_lotes['Stock_Restante'] = stock_lotes['Cantidad_Ingresada'] - stock_lotes['Cantidad_Consumida']
+    else:
+        stock_lotes = ingresos_por_lote
+        stock_lotes['Stock_Restante'] = stock_lotes['Cantidad_Ingresada']
+        
+    lote_info = df_ingresos.drop_duplicates(subset=['Codigo_Lote'])
+    stock_lotes_detallado = pd.merge(stock_lotes, lote_info, on='Codigo_Lote', how='left')
+    stock_lotes_detallado['Valor_Lote'] = stock_lotes_detallado['Stock_Restante'] * stock_lotes_detallado['Precio_Unitario']
+    
+    return stock_lotes_detallado
 
-# --- Lógica para obtener TODOS los sectores ---
-sectores_plagas = df_plagas['Sector'].unique().tolist() if df_plagas is not None else []
-sectores_fenologia = df_fenologia['Sector'].unique().tolist() if df_fenologia is not None and 'Sector' in df_fenologia.columns else []
-sectores_observaciones = df_observaciones['Sector'].unique().tolist() if df_observaciones is not None and 'Sector' in df_observaciones.columns else []
-todos_los_sectores = sorted(list(set(sectores_plagas + sectores_fenologia + sectores_observaciones)))
-if not todos_los_sectores:
-    todos_los_sectores = ['General']
-sector_seleccionado = st.sidebar.selectbox("Seleccione un Sector para Analizar:", options=todos_los_sectores)
+# --- CARGA DE TODOS LOS DATOS DE LA APLICACIÓN ---
+df_kardex_ingresos = cargar_datos('kardex_fundo.xlsx', columnas_fecha=['Fecha', 'Fecha_Vencimiento'])
+df_kardex_productos = cargar_datos('kardex_fundo.xlsx')
+df_kardex_salidas = cargar_datos('kardex_fundo.xlsx', columnas_fecha=['Fecha'])
+df_raleo = cargar_datos('Registro_Raleo.xlsx', columnas_fecha=['Fecha'])
+df_horas_tractor = cargar_datos('Registro_Horas_Tractor.xlsx', columnas_fecha=['Fecha'])
+df_ordenes = cargar_datos('Ordenes_de_Trabajo.xlsx', columnas_fecha=['Fecha_Programada', 'Aplicacion_Completada_Fecha'])
+df_observaciones = cargar_datos('Observaciones_Campo.xlsx', columnas_fecha=['Fecha'])
 
-st.header(f"Análisis para el Sector: {sector_seleccionado}")
-st.divider()
+# Calcular stock
+df_stock_lotes = calcular_stock(df_kardex_ingresos, df_kardex_salidas)
 
-# --- MÉTRICAS CLAVE (KPIs) - OPTIMIZADO PARA MÓVIL ---
-st.subheader("📈 Resumen de Métricas Clave")
+# --- BARRA LATERAL CON FILTROS ---
+st.sidebar.header("Filtros del Dashboard")
+# Filtro de Fechas
+today = datetime.now().date()
+fecha_inicio = st.sidebar.date_input("Fecha de Inicio", today - timedelta(days=30))
+fecha_fin = st.sidebar.date_input("Fecha de Fin", today)
 
-col1, col2, col3 = st.columns(3)
+# --- FILTRADO DE DATOS ---
+df_raleo_filtrado = df_raleo[(df_raleo['Fecha'].dt.date >= fecha_inicio) & (df_raleo['Fecha'].dt.date <= fecha_fin)] if df_raleo is not None else None
+df_horas_filtrado = df_horas_tractor[(df_horas_tractor['Fecha'].dt.date >= fecha_inicio) & (df_horas_tractor['Fecha'].dt.date <= fecha_fin)] if df_horas_tractor is not None else None
+df_ordenes_filtrado = df_ordenes[(df_ordenes['Fecha_Programada'].dt.date >= fecha_inicio) & (df_ordenes['Fecha_Programada'].dt.date <= fecha_fin)] if df_ordenes is not None else None
 
-# KPI 1: Trampas de Plagas en Alerta
+# --- VISTA PRINCIPAL DEL DASHBOARD ---
+st.header("Resumen General")
+
+# --- MÉTRICAS CLAVE (KPIs) ---
+col1, col2, col3, col4 = st.columns(4)
+
+# KPI 1: Valor de Inventario
 with col1:
-    if df_plagas is not None:
-        df_plagas['Fecha'] = pd.to_datetime(df_plagas['Fecha'])
-        ultimos_registros_plagas = df_plagas.loc[df_plagas.groupby('Codigo_Trampa')['Fecha'].idxmax()]
-        trampas_en_alerta_total = ultimos_registros_plagas[ultimos_registros_plagas['Total_Capturas'] >= umbral_alerta_plagas]
-        st.metric(label="Trampas de Plagas en Alerta", value=len(trampas_en_alerta_total))
-    else:
-        st.metric(label="Trampas de Plagas en Alerta", value="N/A")
+    valor_total_inventario = df_stock_lotes['Valor_Lote'].sum() if not df_stock_lotes.empty else 0
+    st.metric("💰 Valor del Inventario", f"S/ {valor_total_inventario:,.2f}")
 
-# KPI 2: Sectores con Oídio Activo
+# KPI 2: Lotes por Vencer
 with col2:
-    # CORRECCIÓN: Añadimos la verificación de la columna aquí también
-    if df_observaciones is not None and 'Severidad_Oidio' in df_observaciones.columns:
-        df_observaciones['Fecha'] = pd.to_datetime(df_observaciones['Fecha'])
-        ultimas_obs_oidio = df_observaciones.loc[df_observaciones.groupby('Sector')['Fecha'].idxmax()]
-        sectores_con_oidio = ultimas_obs_oidio[ultimas_obs_oidio['Severidad_Oidio'] > 0]
-        st.metric(label="Sectores con Oídio Detectado", value=len(sectores_con_oidio))
-    else:
-        st.metric(label="Sectores con Oídio Detectado", value="N/A")
+    lotes_por_vencer = 0
+    if not df_stock_lotes.empty and 'Fecha_Vencimiento' in df_stock_lotes.columns:
+        df_stock_lotes_activos = df_stock_lotes[df_stock_lotes['Stock_Restante'] > 0]
+        lotes_por_vencer = len(df_stock_lotes_activos[
+            (df_stock_lotes_activos['Fecha_Vencimiento'].dt.date <= today + timedelta(days=30)) &
+            (df_stock_lotes_activos['Fecha_Vencimiento'].dt.date >= today)
+        ])
+    st.metric("⚠️ Lotes por Vencer (30d)", f"{lotes_por_vencer} Lotes")
 
-# KPI 3: Producto con Menor Stock
+# KPI 3: Órdenes de Trabajo Activas
 with col3:
-    if df_inventario is not None and not df_inventario.empty:
-        producto_menor_stock = df_inventario.loc[df_inventario['Cantidad_Stock'].idxmin()]
-        nombre_prod = producto_menor_stock['Producto']
-        stock_prod = producto_menor_stock['Cantidad_Stock']
-        unidad_prod = producto_menor_stock['Unidad']
-        st.metric(label=f"Producto con Menor Stock", value=f"{stock_prod} {unidad_prod}", help=f"Producto: {nombre_prod}")
-    else:
-        st.metric(label="Producto con Menor Stock", value="N/A")
+    ordenes_activas = 0
+    if df_ordenes is not None:
+        ordenes_activas = len(df_ordenes[df_ordenes['Status'] != 'Completada'])
+    st.metric("🛠️ Órdenes de Trabajo Activas", f"{ordenes_activas} Órdenes")
+    
+# KPI 4: Horas de Tractor en el Período
+with col4:
+    horas_totales = df_horas_filtrado['Total_Horas'].sum() if df_horas_filtrado is not None else 0
+    st.metric(f"🚜 Horas de Tractor (Período)", f"{horas_totales:,.1f} Horas")
 
-st.divider()
-
-# --- CONCLUSIONES AGRONÓMICAS ---
-st.subheader("💡 Conclusiones Agronómicas")
-col_conc_1, col_conc_2 = st.columns(2)
-
-# Conclusión para Oídio
-with col_conc_1:
-    with st.container(border=True):
-        st.markdown("##### Diagnóstico de Oídio")
-        # CORRECCIÓN: Añadimos la verificación de la columna aquí también
-        if df_observaciones is not None and sector_seleccionado in df_observaciones['Sector'].unique() and 'Severidad_Oidio' in df_observaciones.columns:
-            ultima_obs_oidio = df_observaciones[df_observaciones['Sector'] == sector_seleccionado].sort_values(by='Fecha', ascending=False).iloc[0]
-            severidad_actual = ultima_obs_oidio['Severidad_Oidio']
-            fecha_obs_oidio = pd.to_datetime(ultima_obs_oidio['Fecha']).strftime('%d/%m/%Y')
-            
-            if df_fenologia is not None and sector_seleccionado in df_fenologia['Sector'].unique():
-                df_fenologia_sector = df_fenologia[df_fenologia['Sector'] == sector_seleccionado]
-                ultima_fecha_feno = df_fenologia_sector['Fecha'].max()
-                df_ultima_evaluacion = df_fenologia_sector[df_fenologia_sector['Fecha'] == ultima_fecha_feno]
-                columnas_estados = ['Punta algodón', 'Punta verde', 'Salida de hojas', 'Hojas extendidas', 'Racimos visibles']
-                resumen_fenologia = df_ultima_evaluacion[columnas_estados].sum()
-                estado_dominante = resumen_fenologia.idxmax()
-                
-                mensaje = f"**Severidad actual:** {severidad_actual} (del {fecha_obs_oidio}).\n\n**Estado dominante:** '{estado_dominante}'."
-                st.info(mensaje)
-            else:
-                st.warning("Faltan datos de fenología para un diagnóstico completo.")
-        else:
-            st.info("Sin datos de oídio para este sector.")
-
-# Conclusión para Plagas
-with col_conc_2:
-    with st.container(border=True):
-        st.markdown("##### Diagnóstico de Mosca de la Fruta")
-        if df_plagas is not None and sector_seleccionado in df_plagas['Sector'].unique():
-            df_plagas_sector = df_plagas[df_plagas['Sector'] == sector_seleccionado]
-            df_plagas_sector['Fecha'] = pd.to_datetime(df_plagas_sector['Fecha'])
-            ultimos_registros = df_plagas_sector.loc[df_plagas_sector.groupby('Codigo_Trampa')['Fecha'].idxmax()]
-            
-            if not ultimos_registros.empty:
-                trampa_max_capturas = ultimos_registros.loc[ultimos_registros['Total_Capturas'].idxmax()]
-                max_capturas = trampa_max_capturas['Total_Capturas']
-                codigo_trampa_max = trampa_max_capturas['Codigo_Trampa']
-                
-                mensaje = f"La **trampa con mayor actividad** es la **'{codigo_trampa_max}'** con **{max_capturas} capturas**."
-                st.info(mensaje)
-
-                if max_capturas >= umbral_alerta_plagas:
-                    st.warning(f"Este valor supera el umbral de alerta ({umbral_alerta_plagas}).")
-                else:
-                    st.success("La presión de la plaga está por debajo del umbral.")
-            else:
-                st.info("Sin datos de plagas para este sector.")
-        else:
-            st.info("Sin datos de plagas para este sector.")
-
-st.divider()
-
-# --- ALERTAS CRÍTICAS ---
-st.subheader("🚨 Alertas Críticas")
-col_oidio, col_plagas = st.columns(2)
-with col_oidio:
-    st.markdown("##### Alertas de Oídio")
-    if df_observaciones is not None and 'Severidad_Oidio' in df_observaciones.columns:
-        df_observaciones['Fecha'] = pd.to_datetime(df_observaciones['Fecha'])
-        ultimas_obs = df_observaciones.loc[df_observaciones.groupby('Sector')['Fecha'].idxmax()]
-        sectores_en_alerta = ultimas_obs[ultimas_obs['Severidad_Oidio'] >= umbral_alerta_oidio]
-        if not sectores_en_alerta.empty:
-            for index, row in sectores_en_alerta.iterrows():
-                st.error(f"**Sector:** {row['Sector']} | **Severidad:** {row['Severidad_Oidio']}")
-        else:
-            st.success("✅ Sin alertas de oídio.")
-    else:
-        st.info("No hay datos de oídio.")
-
-with col_plagas:
-    st.markdown("##### Alertas de Plagas")
-    if df_plagas is not None:
-        df_plagas['Fecha'] = pd.to_datetime(df_plagas['Fecha'])
-        ultimos_registros = df_plagas.loc[df_plagas.groupby('Codigo_Trampa')['Fecha'].idxmax()]
-        trampas_en_alerta = ultimos_registros[ultimos_registros['Total_Capturas'] >= umbral_alerta_plagas]
-        if not trampas_en_alerta.empty:
-            for index, row in trampas_en_alerta.iterrows():
-                st.warning(f"**Trampa:** {row['Codigo_Trampa']} | **Capturas:** {row['Total_Capturas']}")
-        else:
-            st.success("✅ Sin alertas de plagas.")
-    else:
-        st.info("No hay datos de plagas.")
 st.divider()
 
 # --- GRÁFICOS ---
-st.subheader("🪰 Evolución de Capturas de Mosca de la Fruta")
-if df_plagas is not None and sector_seleccionado in df_plagas['Sector'].unique():
-    df_plagas_sector = df_plagas[df_plagas['Sector'] == sector_seleccionado]
-    df_plagas_sector['Fecha'] = pd.to_datetime(df_plagas_sector['Fecha'])
-    capturas_por_dia = df_plagas_sector.groupby('Fecha')['Total_Capturas'].sum().reset_index()
-    fig_plagas = px.line(capturas_por_dia, x='Fecha', y='Total_Capturas', title=f'Total de Capturas Diarias en el Sector {sector_seleccionado}', markers=True)
-    st.plotly_chart(fig_plagas, use_container_width=True)
-else:
-    st.info(f"No hay registros de monitoreo de plagas para el sector '{sector_seleccionado}'.")
+st.header("Análisis Visual")
+gcol1, gcol2 = st.columns(2)
+
+with gcol1:
+    st.subheader("Valor de Inventario por Tipo")
+    if df_kardex_productos is not None and not df_stock_lotes.empty:
+        df_valor_tipo = pd.merge(df_stock_lotes, df_kardex_productos, on='Codigo_Producto', how='left')
+        df_valor_tipo = df_valor_tipo.groupby('Tipo_Accion')['Valor_Lote'].sum().reset_index()
+        fig_pie = px.pie(df_valor_tipo, values='Valor_Lote', names='Tipo_Accion', title="Distribución del Valor en Almacén", hole=.3)
+        st.plotly_chart(fig_pie, use_container_width=True)
+    else:
+        st.info("No hay datos de inventario para mostrar.")
+
+with gcol2:
+    st.subheader("Actividad del Fundo (Período Seleccionado)")
+    actividades = {
+        "Ingresos Registrados": len(df_kardex_ingresos[(df_kardex_ingresos['Fecha'].dt.date >= fecha_inicio) & (df_kardex_ingresos['Fecha'].dt.date <= fecha_fin)]) if df_kardex_ingresos is not None else 0,
+        "Jornadas de Raleo": df_raleo_filtrado['Fecha'].nunique() if df_raleo_filtrado is not None else 0,
+        "Aplicaciones Completadas": len(df_ordenes_filtrado[df_ordenes_filtrado['Status'] == 'Completada']) if df_ordenes_filtrado is not None else 0
+    }
+    df_actividad = pd.DataFrame(list(actividades.items()), columns=['Actividad', 'Cantidad'])
+    fig_bar = px.bar(df_actividad, x='Actividad', y='Cantidad', title="Resumen de Operaciones", text='Cantidad')
+    st.plotly_chart(fig_bar, use_container_width=True)
+
 st.divider()
-st.subheader("🌱 Distribución Fenológica Reciente")
-if df_fenologia is not None and sector_seleccionado in df_fenologia['Sector'].unique():
-    df_fenologia_sector = df_fenologia[df_fenologia['Sector'] == sector_seleccionado]
-    ultima_fecha = df_fenologia_sector['Fecha'].max()
-    st.write(f"Mostrando la última evaluación realizada el: **{pd.to_datetime(ultima_fecha).strftime('%d/%m/%Y')}**")
-    df_ultima_evaluacion = df_fenologia_sector[df_fenologia_sector['Fecha'] == ultima_fecha]
-    columnas_estados = ['Punta algodón', 'Punta verde', 'Salida de hojas', 'Hojas extendidas', 'Racimos visibles']
-    resumen_fenologia = df_ultima_evaluacion[columnas_estados].sum()
-    fig_fenologia = px.pie(values=resumen_fenologia.values, names=resumen_fenologia.index, title=f'Distribución de Estados Fenológicos en el Sector {sector_seleccionado}')
-    st.plotly_chart(fig_fenologia, use_container_width=True)
+
+# --- ALERTAS DE SANIDAD (SIMPLIFICADO) ---
+st.header("Alertas de Sanidad")
+if df_observaciones is not None:
+    ultima_obs = df_observaciones.loc[df_observaciones.groupby('Sector')['Fecha'].idxmax()]
+    umbral_oidio = st.slider("Umbral de Alerta de Oídio:", min_value=1, max_value=4, value=3, key='slider_oidio')
+    sectores_en_alerta = ultima_obs[ultima_obs['Severidad_Oidio'] >= umbral_oidio]
+    
+    if not sectores_en_alerta.empty:
+        st.warning("¡Sectores con alta severidad de Oídio!")
+        for _, row in sectores_en_alerta.iterrows():
+            st.error(f"**Sector:** {row['Sector']} | **Severidad:** {row['Severidad_Oidio']}")
+    else:
+        st.success("✅ Sin alertas críticas de Oídio en la última evaluación.")
 else:
-    st.info(f"No hay registros de evaluación fenológica para el sector '{sector_seleccionado}'.")
+    st.info("No se han cargado datos de observación de Oídio.")

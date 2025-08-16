@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import json
 from datetime import datetime
-import openpyxl 
+import openpyxl
 from io import BytesIO
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
@@ -41,9 +41,14 @@ def guardar_kardex(df_productos, df_ingresos, df_salidas):
     return True
 
 def calcular_stock_por_lote(df_ingresos, df_salidas):
+    # --- !! AJUSTE CLAVE !! ---
+    # Asegura que si no hay ingresos, la tabla vacía tenga la estructura correcta.
     if df_ingresos.empty:
-        return pd.DataFrame(), pd.DataFrame()
+        cols_lotes = ['Codigo_Lote', 'Cantidad_Ingresada', 'Stock_Restante', 'Codigo_Producto', 'Producto', 'Precio_Unitario', 'Fecha_Vencimiento']
+        return pd.DataFrame(columns=cols_lotes)
+
     ingresos_por_lote = df_ingresos.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Ingresada'})
+    
     if not df_salidas.empty and 'Codigo_Lote' in df_salidas.columns:
         salidas_por_lote = df_salidas.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Consumida'})
         stock_lotes = pd.merge(ingresos_por_lote, salidas_por_lote, on='Codigo_Lote', how='left').fillna(0)
@@ -51,6 +56,7 @@ def calcular_stock_por_lote(df_ingresos, df_salidas):
     else:
         stock_lotes = ingresos_por_lote
         stock_lotes['Stock_Restante'] = stock_lotes['Cantidad_Ingresada']
+        
     lote_info = df_ingresos.drop_duplicates(subset=['Codigo_Lote'])[['Codigo_Lote', 'Codigo_Producto', 'Producto', 'Precio_Unitario', 'Fecha_Vencimiento']]
     stock_lotes_detallado = pd.merge(stock_lotes, lote_info, on='Codigo_Lote', how='left')
     return stock_lotes_detallado
@@ -70,7 +76,6 @@ df_ordenes = cargar_ordenes()
 
 # --- SECCIÓN 1 (INGENIERO): PROGRAMAR NUEVA RECETA ---
 with st.expander("👨‍🔬 Programar Nueva Receta de Mezcla (Ingeniero)"):
-    # Preparamos la lista de lotes activos para el selector
     lotes_activos = df_stock_lotes[df_stock_lotes['Stock_Restante'] > 0.001].copy()
     opciones_lotes = []
     if not lotes_activos.empty:
@@ -114,6 +119,7 @@ with st.expander("👨‍🔬 Programar Nueva Receta de Mezcla (Ingeniero)"):
                 if row['Cantidad_a_Usar'] > stock_disponible:
                     st.error(f"Stock insuficiente para el lote {codigo_lote}. Solicitado: {row['Cantidad_a_Usar']}, Disponible: {stock_disponible}")
                     error = True
+                    break
                 else:
                     info_lote = lotes_activos[lotes_activos['Codigo_Lote'] == codigo_lote].iloc[0]
                     receta_final.append({
@@ -160,10 +166,8 @@ if not tareas_pendientes.empty:
                 df_nuevas_salidas = pd.DataFrame(nuevas_salidas)
                 df_salidas_final = pd.concat([df_salidas, df_nuevas_salidas], ignore_index=True)
                 
-                # Guardar el kardex con las nuevas salidas
                 guardar_kardex(df_productos, df_ingresos, df_salidas_final)
                 
-                # Actualizar el status de la orden
                 df_ordenes.loc[index, 'Status'] = 'Lista para Aplicar'
                 guardar_ordenes(df_ordenes)
                 

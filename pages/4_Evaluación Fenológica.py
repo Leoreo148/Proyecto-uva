@@ -56,19 +56,17 @@ with st.expander("➕ Registrar Nueva Evaluación"):
         df_para_guardar['Sector'] = sector_seleccionado
         df_para_guardar['Fecha'] = fecha_evaluacion.strftime("%Y-%m-%d")
         
-        # Convertir el DataFrame a una lista de diccionarios (JSON)
         registros_json = df_para_guardar.reset_index().rename(columns={'index': 'Planta'}).to_dict('records')
         
-        # Obtener registros locales, extender la lista y guardarla
         registros_locales_str = localS.getItem(LOCAL_STORAGE_KEY)
         registros_locales = json.loads(registros_locales_str) if registros_locales_str else []
-        registros_locales.extend(registros_json) # Usar .extend() para añadir los nuevos registros
+        registros_locales.extend(registros_json)
         localS.setItem(LOCAL_STORAGE_KEY, json.dumps(registros_locales))
         
-        st.success(f"¡Evaluación guardada en el dispositivo! Hay {len(registros_locales)} registros de plantas pendientes.")
+        st.success(f"¡Evaluación guardada! Hay {len(registros_locales)} registros de plantas pendientes.")
         st.rerun()
 
-# --- Sección de Sincronización (Lógica Mejorada) ---
+# --- Sección de Sincronización ---
 st.divider()
 st.subheader("📡 Sincronización con el Servidor")
 
@@ -87,7 +85,7 @@ if registros_pendientes:
                 st.success("¡Sincronización completada!")
                 st.session_state['sync_success_fenologia'] = True
             else:
-                st.error(f"Error al guardar en el servidor: {mensaje}. Sus datos locales están a salvo.")
+                st.error(f"Error al guardar: {mensaje}. Sus datos locales están a salvo.")
 else:
     st.info("✅ Todos los registros de fenología están sincronizados.")
 
@@ -95,31 +93,36 @@ if 'sync_success_fenologia' in st.session_state and st.session_state['sync_succe
     del st.session_state['sync_success_fenologia']
     st.rerun()
 
-# --- Historial y Descarga ---
+# --- Historial y Descarga (CON VERIFICACIÓN) ---
 st.divider()
 st.subheader("📚 Historial de Evaluaciones Fenológicas")
 if os.path.exists(ARCHIVO_FENOLOGIA):
-    df_historial = pd.read_excel(ARCHIVO_FENOLOGIA)
-    sesiones = df_historial.groupby(['Fecha', 'Sector']).size().reset_index(name='counts')
-    st.write("A continuación se muestra un resumen de las últimas evaluaciones realizadas.")
+    df_historial = pd.read_excel(ARCHIVO_FENologia)
     
-    for index, sesion in sesiones.sort_values(by='Fecha', ascending=False).head(10).iterrows():
-        with st.container(border=True):
-            df_sesion_actual = df_historial[(df_historial['Fecha'] == sesion['Fecha']) & (df_historial['Sector'] == sesion['Sector'])]
-            col1, col2, col3 = st.columns([2, 2, 1])
-            with col1:
-                st.metric("Fecha de Evaluación", pd.to_datetime(sesion['Fecha']).strftime('%d/%m/%Y'))
-            with col2:
-                st.metric("Sector Evaluado", sesion['Sector'])
-            with col3:
-                st.write("")
-                reporte_individual = to_excel(df_sesion_actual)
-                st.download_button(
-                    label="📥 Descargar Detalle",
-                    data=reporte_individual,
-                    file_name=f"Reporte_Fenologia_{sesion['Sector']}_{pd.to_datetime(sesion['Fecha']).strftime('%Y%m%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"download_fenologia_{sesion['Fecha']}_{sesion['Sector']}"
-                )
+    # --- !! AJUSTE CLAVE !! ---
+    # Verificamos que las columnas necesarias existan antes de usarlas
+    if 'Fecha' in df_historial.columns and 'Sector' in df_historial.columns:
+        sesiones = df_historial.groupby(['Fecha', 'Sector']).size().reset_index(name='counts')
+        st.write("A continuación se muestra un resumen de las últimas evaluaciones realizadas.")
+        
+        for index, sesion in sesiones.sort_values(by='Fecha', ascending=False).head(10).iterrows():
+            with st.container(border=True):
+                df_sesion_actual = df_historial[(df_historial['Fecha'] == sesion['Fecha']) & (df_historial['Sector'] == sesion['Sector'])]
+                col1, col2, col3 = st.columns([2, 2, 1])
+                with col1:
+                    st.metric("Fecha de Evaluación", pd.to_datetime(sesion['Fecha']).strftime('%d/%m/%Y'))
+                with col2:
+                    st.metric("Sector Evaluado", sesion['Sector'])
+                with col3:
+                    st.write("")
+                    reporte_individual = to_excel(df_sesion_actual)
+                    st.download_button(
+                        label="📥 Descargar Detalle",
+                        data=reporte_individual,
+                        file_name=f"Reporte_Fenologia_{sesion['Sector']}_{pd.to_datetime(sesion['Fecha']).strftime('%Y%m%d')}.xlsx",
+                        key=f"download_fenologia_{sesion['Fecha']}_{sesion['Sector']}"
+                    )
+    else:
+        st.warning("El archivo de historial parece tener un formato antiguo o está dañado. Por favor, bórrelo y genere uno nuevo al sincronizar datos.")
 else:
     st.info("Aún no se ha sincronizado ninguna evaluación fenológica.")

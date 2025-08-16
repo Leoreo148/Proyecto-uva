@@ -15,7 +15,6 @@ TARIFA_POR_RACIMO = 0.07
 ARCHIVO_RALEO = 'Registro_Raleo.xlsx'
 
 # --- FUNCIONES ---
-@st.cache_data
 def cargar_datos_raleo():
     """Carga, limpia y procesa los datos de raleo desde el archivo Excel."""
     if not os.path.exists(ARCHIVO_RALEO):
@@ -34,6 +33,7 @@ def to_excel(df):
     return output.getvalue()
 
 # --- CARGA Y FILTROS ---
+# La línea @st.cache_data ha sido eliminada de la función de carga
 df_raleo = cargar_datos_raleo()
 
 if df_raleo.empty:
@@ -44,6 +44,7 @@ st.sidebar.header("Filtros del Dashboard")
 
 # Filtro de Fechas
 today = datetime.now().date()
+# Usamos .date() para asegurar que no haya conflictos de zona horaria
 fecha_inicio = st.sidebar.date_input("Fecha de Inicio", today - timedelta(days=7))
 fecha_fin = st.sidebar.date_input("Fecha de Fin", today)
 
@@ -87,12 +88,8 @@ else:
         ).sort_values(by='Total_Racimos', ascending=False).reset_index()
 
         fig_ranking = px.bar(
-            df_ranking,
-            x='Total_Racimos',
-            y='Nombre del Trabajador',
-            orientation='h',
-            title='Total de Racimos Raleados por Persona',
-            text='Total_Racimos',
+            df_ranking, x='Total_Racimos', y='Nombre del Trabajador', orientation='h',
+            title='Total de Racimos Raleados por Persona', text='Total_Racimos',
             labels={'Nombre del Trabajador': 'Trabajador', 'Total_Racimos': 'Nº de Racimos'}
         )
         fig_ranking.update_layout(yaxis={'categoryorder':'total ascending'})
@@ -102,11 +99,8 @@ else:
         st.subheader("📅 Evolución Diaria del Raleo")
         df_evolucion = df_filtrado.groupby(df_filtrado['Fecha'].dt.date)['Racimos Raleados'].sum().reset_index()
         fig_evolucion = px.line(
-            df_evolucion,
-            x='Fecha',
-            y='Racimos Raleados',
-            title='Total de Racimos Raleados por Día',
-            markers=True,
+            df_evolucion, x='Fecha', y='Racimos Raleados',
+            title='Total de Racimos Raleados por Día', markers=True,
             labels={'Fecha': 'Día', 'Racimos Raleados': 'Nº de Racimos'}
         )
         st.plotly_chart(fig_evolucion, use_container_width=True)
@@ -115,7 +109,10 @@ else:
 
     # Tabla detallada y botón de descarga
     st.subheader("📋 Tabla de Datos Detallada")
-    st.dataframe(df_filtrado[['Fecha', 'Sector', 'Nombre del Trabajador', 'Racimos Raleados', 'Pago Calculado (S/)']].sort_values(by="Fecha", ascending=False), use_container_width=True)
+    # Aseguramos que el pago tenga 2 decimales en la tabla
+    df_display = df_filtrado.copy()
+    df_display['Pago Calculado (S/)'] = df_display['Pago Calculado (S/)'].round(2)
+    st.dataframe(df_display[['Fecha', 'Sector', 'Nombre del Trabajador', 'Racimos Raleados', 'Pago Calculado (S/)']].sort_values(by="Fecha", ascending=False), use_container_width=True)
     
     excel_data = to_excel(df_filtrado)
     st.download_button(

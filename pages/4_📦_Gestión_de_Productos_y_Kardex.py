@@ -125,6 +125,46 @@ with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel"
 # --- (El resto del código se mantiene igual) ---
 st.divider()
 st.header("Kardex y Stock Actual")
-# ... (código para mostrar la tabla de kardex)
-# ... (código para los botones de descarga)
-# ... (código para el desglose de lotes)
+if df_productos.empty:
+    st.warning("El catálogo de productos está vacío. Cargue el archivo inicial o añada un producto manualmente.")
+else:
+    df_total_stock, df_stock_lotes = calcular_stock_por_lote(df_ingresos, df_salidas)
+    
+    df_vista_kardex = pd.merge(df_productos, df_total_stock, left_on='Codigo', right_on='Codigo_Producto', how='left').fillna(0)
+    
+    df_vista_kardex = df_vista_kardex[['Codigo', 'Producto', 'Stock_Actual', 'Unidad', 'Stock_Valorizado']]
+    
+    df_display = df_vista_kardex.copy()
+    df_display['Stock_Valorizado'] = df_display['Stock_Valorizado'].map('${:,.2f}'.format)
+    df_display['Stock_Actual'] = df_display['Stock_Actual'].map('{:,.2f}'.format)
+
+    st.dataframe(df_display, use_container_width=True, hide_index=True)
+    
+    st.subheader("📥 Descargar Reportes")
+    col1, col2 = st.columns(2)
+    with col1:
+        excel_resumen = to_excel(df_vista_kardex)
+        st.download_button(label="Descargar Resumen de Stock", data=excel_resumen, file_name=f"Resumen_Stock_{datetime.now().strftime('%Y%m%d')}.xlsx")
+    with col2:
+        lotes_activos_full = df_stock_lotes[df_stock_lotes['Stock_Restante'] > 0.001]
+        excel_detallado = to_excel(lotes_activos_full)
+        st.download_button(label="Descargar Inventario Detallado por Lote", data=excel_detallado, file_name=f"Detalle_Lotes_{datetime.now().strftime('%Y%m%d')}.xlsx")
+    
+    st.divider()
+    
+    st.subheader("Ver Desglose de Lotes Activos por Producto")
+    producto_seleccionado = st.selectbox("Seleccione un producto:", options=df_productos['Producto'])
+    if producto_seleccionado:
+        codigo_seleccionado = df_productos.loc[df_productos['Producto'] == producto_seleccionado, 'Codigo'].iloc[0]
+        
+        lotes_del_producto = df_stock_lotes[df_stock_lotes['Codigo_Producto'] == codigo_seleccionado]
+        lotes_activos = lotes_del_producto[lotes_del_producto['Stock_Restante'] > 0.001].copy()
+        
+        if lotes_activos.empty:
+            st.info(f"No hay lotes con stock activo para '{producto_seleccionado}'.")
+        else:
+            lotes_activos['Precio_Unitario'] = lotes_activos['Precio_Unitario'].map('${:,.2f}'.format)
+            lotes_activos['Stock_Restante'] = lotes_activos['Stock_Restante'].map('{:,.2f}'.format)
+            lotes_activos['Valor_Lote'] = lotes_activos['Valor_Lote'].map('${:,.2f}'.format)
+            st.dataframe(lotes_activos[['Codigo_Lote', 'Stock_Restante', 'Precio_Unitario', 'Valor_Lote', 'Fecha_Vencimiento']], use_container_width=True, hide_index=True)
+

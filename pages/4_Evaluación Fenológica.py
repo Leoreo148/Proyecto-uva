@@ -93,14 +93,13 @@ if 'sync_success_fenologia' in st.session_state and st.session_state['sync_succe
     del st.session_state['sync_success_fenologia']
     st.rerun()
 
-# --- Historial y Descarga (CON VERIFICACIÓN) ---
+# --- Historial y Descarga (CON VERIFICACIÓN Y CORRECCIÓN) ---
 st.divider()
 st.subheader("📚 Historial de Evaluaciones Fenológicas")
 if os.path.exists(ARCHIVO_FENOLOGIA):
-    df_historial = pd.read_excel(ARCHIVO_FENologia)
+    # --- !! CORRECCIÓN DEL ERROR DE TIPEO AQUÍ !! ---
+    df_historial = pd.read_excel(ARCHIVO_FENOLOGIA)
     
-    # --- !! AJUSTE CLAVE !! ---
-    # Verificamos que las columnas necesarias existan antes de usarlas
     if 'Fecha' in df_historial.columns and 'Sector' in df_historial.columns:
         sesiones = df_historial.groupby(['Fecha', 'Sector']).size().reset_index(name='counts')
         st.write("A continuación se muestra un resumen de las últimas evaluaciones realizadas.")

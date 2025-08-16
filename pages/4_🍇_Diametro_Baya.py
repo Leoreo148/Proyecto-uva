@@ -11,23 +11,20 @@ st.set_page_config(page_title="Diámetro de Baya", page_icon="🍇", layout="wid
 st.title("🍇 Medición de Diámetro de Baya")
 st.write("Registre el diámetro (mm) de 3 bayas (superior, medio, inferior) para 2 racimos por cada una de las 25 plantas.")
 
-# --- Inicialización del Almacenamiento Local ---
+# --- Inicialización y Constantes ---
 localS = LocalStorage()
-
-# --- Nombres de Archivos y Claves ---
 ARCHIVO_DIAMETRO = 'Registro_Diametro_Baya_Detallado.xlsx'
 LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2'
+columnas_medicion = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior", "Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"]
 
 # --- Funciones ---
-def cargar_datos_excel():
-    if os.path.exists(ARCHIVO_DIAMETRO):
-        return pd.read_excel(ARCHIVO_DIAMETRO)
-    return None
-
 def guardar_datos_excel(df_nuevos):
     try:
-        df_existente = cargar_datos_excel()
-        df_final = pd.concat([df_existente, df_nuevos], ignore_index=True) if df_existente is not None else df_nuevos
+        if os.path.exists(ARCHIVO_DIAMETRO):
+            df_existente = pd.read_excel(ARCHIVO_DIAMETRO)
+            df_final = pd.concat([df_existente, df_nuevos], ignore_index=True)
+        else:
+            df_final = df_nuevos
         df_final.to_excel(ARCHIVO_DIAMETRO, index=False, engine='openpyxl')
         return True, "Guardado exitoso."
     except Exception as e:
@@ -39,7 +36,7 @@ def to_excel(df):
         df.to_excel(writer, index=False, sheet_name='Reporte_Diametro')
     return output.getvalue()
 
-# --- Interfaz de Registro (dentro de un expander) ---
+# --- Interfaz de Registro ---
 with st.expander("➕ Registrar Nueva Medición"):
     col1, col2 = st.columns(2)
     with col1:
@@ -50,88 +47,84 @@ with st.expander("➕ Registrar Nueva Medición"):
 
     st.subheader("Tabla de Ingreso de Diámetros (mm)")
     plant_numbers = [f"Planta {i+1}" for i in range(25)]
-    columnas_medicion = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior", "Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"]
     df_plantilla = pd.DataFrame(0.0, index=plant_numbers, columns=columnas_medicion)
     df_editada = st.data_editor(df_plantilla, use_container_width=True, key="editor_baya")
 
-    if st.button("💾 Guardar Medición Localmente"):
+    if st.button("💾 Guardar Medición en Dispositivo"):
         df_para_guardar = df_editada.copy()
         df_para_guardar['Sector'] = sector_seleccionado
         df_para_guardar['Fecha'] = fecha_medicion.strftime("%Y-%m-%d")
         registros_json = df_para_guardar.reset_index().rename(columns={'index': 'Planta'}).to_dict('records')
-        try:
-            registros_locales_str = localS.getItem(LOCAL_STORAGE_KEY)
-            registros_locales = json.loads(registros_locales_str) if registros_locales_str else []
-            registros_locales.append(registros_json)
-            localS.setItem(LOCAL_STORAGE_KEY, json.dumps(registros_locales))
-            st.info(f"¡Medición guardada en el dispositivo! Hay {len(registros_locales)} mediciones pendientes.")
-        except Exception as e:
-            st.error(f"Error al guardar localmente: {e}")
+        
+        registros_locales_str = localS.getItem(LOCAL_STORAGE_KEY)
+        registros_locales = json.loads(registros_locales_str) if registros_locales_str else []
+        # --- !! AJUSTE CLAVE 1: Usar extend en lugar de append !! ---
+        registros_locales.extend(registros_json)
+        localS.setItem(LOCAL_STORAGE_KEY, json.dumps(registros_locales))
+        st.success(f"¡Medición guardada! Hay {len(registros_locales)} registros de plantas pendientes.")
+        st.rerun()
 
-# --- Sección de Sincronización ---
+# --- Sección de Sincronización (Lógica Mejorada) ---
 st.divider()
 st.subheader("📡 Sincronización con el Servidor")
-try:
-    registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
-    registros_pendientes = json.loads(registros_pendientes_str) if registros_pendientes_str else []
-except:
-    registros_pendientes = []
+
+registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
+registros_pendientes = json.loads(registros_pendientes_str) if registros_pendientes_str else []
 
 if registros_pendientes:
-    st.warning(f"Hay **{len(registros_pendientes)}** mediciones completas guardadas localmente pendientes de sincronizar.")
+    st.warning(f"Hay **{len(registros_pendientes)}** mediciones de plantas guardadas localmente pendientes de sincronizar.")
     if st.button("Sincronizar Ahora"):
         with st.spinner("Sincronizando..."):
-            flat_list = [item for sublist in registros_pendientes for item in sublist]
-            df_pendientes = pd.DataFrame(flat_list)
+            # --- !! AJUSTE CLAVE 2: No se necesita aplanar la lista !! ---
+            df_pendientes = pd.DataFrame(registros_pendientes)
             exito, mensaje = guardar_datos_excel(df_pendientes)
+            
             if exito:
                 localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
                 st.success("¡Sincronización completada!")
-                st.session_state['sync_success_mosca'] = True
+                # Usamos una clave única para este módulo en el session_state
+                st.session_state['sync_success_baya'] = True
             else:
                 st.error(f"Error al guardar en el servidor: {mensaje}. Sus datos locales están a salvo.")
 else:
-    st.info("✅ Todos los registros de monitoreo están sincronizados.")
+    st.info("✅ Todas las mediciones de diámetro están sincronizadas.")
 
-if 'sync_success_mosca' in st.session_state and st.session_state['sync_success_mosca']:
-    del st.session_state['sync_success_mosca']
+# Forzamos el refresco final si la sincronización fue exitosa
+if 'sync_success_baya' in st.session_state and st.session_state['sync_success_baya']:
+    del st.session_state['sync_success_baya']
     st.rerun()
+
 st.divider()
 
-# --- NUEVA SECCIÓN: HISTORIAL Y DESCARGA ---
+# --- Historial y Descarga ---
 st.subheader("📚 Historial de Mediciones de Diámetro")
-df_historial = cargar_datos_excel()
+if os.path.exists(ARCHIVO_DIAMETRO):
+    df_historial = pd.read_excel(ARCHIVO_DIAMETRO)
+    if not df_historial.empty and 'Fecha' in df_historial.columns and 'Sector' in df_historial.columns:
+        sesiones = df_historial.groupby(['Fecha', 'Sector']).size().reset_index(name='counts')
+        st.write("A continuación se muestra un resumen de las últimas mediciones realizadas.")
+        
+        for index, sesion in sesiones.sort_values(by='Fecha', ascending=False).head(10).iterrows():
+            with st.container(border=True):
+                df_sesion_actual = df_historial[(df_historial['Fecha'] == sesion['Fecha']) & (df_historial['Sector'] == sesion['Sector'])]
+                
+                valores_medidos = df_sesion_actual[columnas_medicion].to_numpy().flatten()
+                valores_no_cero = valores_medidos[valores_medidos > 0]
+                promedio_sesion = valores_no_cero.mean() if len(valores_no_cero) > 0 else 0
+                
+                col1, col2, col3, col4 = st.columns([2, 1, 2, 1])
+                col1.metric("Fecha", pd.to_datetime(sesion['Fecha']).strftime('%d/%m/%Y'))
+                col2.metric("Sector", sesion['Sector'])
+                col3.metric("Promedio General (mm)", f"{promedio_sesion:.2f}")
 
-if df_historial is not None and not df_historial.empty:
-    # Agrupar por fecha y sector para identificar cada sesión de medición
-    sesiones = df_historial.groupby(['Fecha', 'Sector']).size().reset_index(name='counts')
-    
-    st.write("A continuación se muestra un resumen de las últimas mediciones realizadas.")
-
-    # Mostrar un resumen de cada sesión con su botón de descarga
-    for index, sesion in sesiones.sort_values(by='Fecha', ascending=False).head(10).iterrows():
-        with st.container(border=True):
-            df_sesion_actual = df_historial[(df_historial['Fecha'] == sesion['Fecha']) & (df_historial['Sector'] == sesion['Sector'])]
-            
-            # Calcular promedio para esta sesión específica
-            valores_medidos = df_sesion_actual[columnas_medicion].to_numpy().flatten()
-            valores_no_cero = valores_medidos[valores_medidos > 0]
-            promedio_sesion = valores_no_cero.mean() if len(valores_no_cero) > 0 else 0
-            
-            col1, col2, col3, col4 = st.columns([2, 1, 2, 1])
-            col1.metric("Fecha", pd.to_datetime(sesion['Fecha']).strftime('%d/%m/%Y'))
-            col2.metric("Sector", sesion['Sector'])
-            col3.metric("Promedio General (mm)", f"{promedio_sesion:.2f}")
-
-            with col4:
-                st.write("") # Espacio para alinear
-                reporte_individual = to_excel(df_sesion_actual)
-                st.download_button(
-                    label="📥 Descargar Detalle",
-                    data=reporte_individual,
-                    file_name=f"Reporte_Diametro_{sesion['Sector']}_{pd.to_datetime(sesion['Fecha']).strftime('%Y%m%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"download_{sesion['Fecha']}_{sesion['Sector']}"
-                )
+                with col4:
+                    st.write("")
+                    reporte_individual = to_excel(df_sesion_actual)
+                    st.download_button(
+                        label="📥 Descargar Detalle",
+                        data=reporte_individual,
+                        file_name=f"Reporte_Diametro_{sesion['Sector']}_{pd.to_datetime(sesion['Fecha']).strftime('%Y%m%d')}.xlsx",
+                        key=f"download_diametro_{sesion['Fecha']}_{sesion['Sector']}"
+                    )
 else:
     st.info("Aún no se ha sincronizado ninguna medición de diámetro de baya.")

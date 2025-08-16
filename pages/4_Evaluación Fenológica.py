@@ -9,25 +9,21 @@ from io import BytesIO
 # --- Configuración de la Página ---
 st.set_page_config(page_title="Evaluación Fenológica", page_icon="🌱", layout="wide")
 st.title("🌱 Evaluación Fenológica por Estados")
-st.write("Registre los conteos y guárdelos localmente. Sincronice cuando tenga conexión.")
+st.write("Registre los conteos y guárdelos en el dispositivo. Sincronice cuando tenga conexión.")
 
-# --- Inicialización del Almacenamiento Local ---
+# --- Inicialización y Constantes ---
 localS = LocalStorage()
-
-# --- Nombres de Archivos y Claves ---
 ARCHIVO_FENOLOGIA = 'Evaluacion_Fenologica_Detallada.xlsx'
 LOCAL_STORAGE_KEY = 'fenologia_offline'
 
 # --- Funciones ---
-def cargar_datos_excel():
-    if os.path.exists(ARCHIVO_FENOLOGIA):
-        return pd.read_excel(ARCHIVO_FENOLOGIA)
-    return None
-
 def guardar_datos_excel(df_nuevos):
     try:
-        df_existente = cargar_datos_excel()
-        df_final = pd.concat([df_existente, df_nuevos], ignore_index=True) if df_existente is not None else df_nuevos
+        if os.path.exists(ARCHIVO_FENOLOGIA):
+            df_existente = pd.read_excel(ARCHIVO_FENOLOGIA)
+            df_final = pd.concat([df_existente, df_nuevos], ignore_index=True)
+        else:
+            df_final = df_nuevos
         df_final.to_excel(ARCHIVO_FENOLOGIA, index=False, engine='openpyxl')
         return True, "Guardado exitoso."
     except Exception as e:
@@ -39,7 +35,7 @@ def to_excel(df):
         df.to_excel(writer, index=False, sheet_name='Reporte')
     return output.getvalue()
 
-# --- Interfaz de Registro (dentro de un expander) ---
+# --- Interfaz de Registro ---
 with st.expander("➕ Registrar Nueva Evaluación"):
     col1, col2 = st.columns(2)
     with col1:
@@ -47,76 +43,77 @@ with st.expander("➕ Registrar Nueva Evaluación"):
         sector_seleccionado = st.selectbox('Seleccione el Sector de Evaluación:', options=sectores_del_fundo, key="fenologia_sector")
     with col2:
         fecha_evaluacion = st.date_input("Fecha de Evaluación", datetime.now(), key="fenologia_fecha")
+    
     st.subheader("Tabla de Ingreso de Datos")
     columnas_fenologicas = ['Punta algodón', 'Punta verde', 'Salida de hojas', 'Hojas extendidas', 'Racimos visibles']
     plant_numbers = [f"Planta {i+1}" for i in range(25)]
     df_plantilla = pd.DataFrame(0, index=plant_numbers, columns=columnas_fenologicas)
+    
     df_editada = st.data_editor(df_plantilla, use_container_width=True, key="editor_fenologia")
-    if st.button("💾 Guardar Localmente"):
+    
+    if st.button("💾 Guardar en Dispositivo"):
         df_para_guardar = df_editada.copy()
         df_para_guardar['Sector'] = sector_seleccionado
         df_para_guardar['Fecha'] = fecha_evaluacion.strftime("%Y-%m-%d")
+        
+        # Convertir el DataFrame a una lista de diccionarios (JSON)
         registros_json = df_para_guardar.reset_index().rename(columns={'index': 'Planta'}).to_dict('records')
-        try:
-            registros_locales_str = localS.getItem(LOCAL_STORAGE_KEY)
-            registros_locales = json.loads(registros_locales_str) if registros_locales_str else []
-            registros_locales.append(registros_json)
-            localS.setItem(LOCAL_STORAGE_KEY, json.dumps(registros_locales))
-            st.success(f"¡Evaluación guardada en el dispositivo! Hay {len(registros_locales)} evaluaciones pendientes.")
-        except Exception as e:
-            st.error(f"Error al guardar localmente: {e}")
+        
+        # Obtener registros locales, extender la lista y guardarla
+        registros_locales_str = localS.getItem(LOCAL_STORAGE_KEY)
+        registros_locales = json.loads(registros_locales_str) if registros_locales_str else []
+        registros_locales.extend(registros_json) # Usar .extend() para añadir los nuevos registros
+        localS.setItem(LOCAL_STORAGE_KEY, json.dumps(registros_locales))
+        
+        st.success(f"¡Evaluación guardada en el dispositivo! Hay {len(registros_locales)} registros de plantas pendientes.")
+        st.rerun()
 
-# --- Sección de Sincronización ---
+# --- Sección de Sincronización (Lógica Mejorada) ---
 st.divider()
 st.subheader("📡 Sincronización con el Servidor")
-try:
-    registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
-    registros_pendientes = json.loads(registros_pendientes_str) if registros_pendientes_str else []
-except:
-    registros_pendientes = []
+
+registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
+registros_pendientes = json.loads(registros_pendientes_str) if registros_pendientes_str else []
+
 if registros_pendientes:
-    st.warning(f"Hay **{len(registros_pendientes)}** evaluaciones guardadas localmente pendientes de sincronizar.")
+    st.warning(f"Hay **{len(registros_pendientes)}** registros guardados localmente pendientes de sincronizar.")
     if st.button("Sincronizar Ahora"):
         with st.spinner("Sincronizando..."):
-            flat_list = [item for sublist in registros_pendientes for item in sublist]
-            df_pendientes = pd.DataFrame(flat_list)
+            df_pendientes = pd.DataFrame(registros_pendientes)
             exito, mensaje = guardar_datos_excel(df_pendientes)
+            
             if exito:
-               localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
+                localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
                 st.success("¡Sincronización completada!")
-                st.session_state['sync_success_mosca'] = True
+                st.session_state['sync_success_fenologia'] = True
             else:
                 st.error(f"Error al guardar en el servidor: {mensaje}. Sus datos locales están a salvo.")
 else:
-    st.info("✅ Todos los registros de monitoreo están sincronizados.")
+    st.info("✅ Todos los registros de fenología están sincronizados.")
 
-if 'sync_success_mosca' in st.session_state and st.session_state['sync_success_mosca']:
-    del st.session_state['sync_success_mosca']
+if 'sync_success_fenologia' in st.session_state and st.session_state['sync_success_fenologia']:
+    del st.session_state['sync_success_fenologia']
     st.rerun()
 
+# --- Historial y Descarga ---
 st.divider()
-
-# --- HISTORIAL Y DESCARGA INDIVIDUAL ---
 st.subheader("📚 Historial de Evaluaciones Fenológicas")
-df_historial = cargar_datos_excel()
-
-if df_historial is not None and not df_historial.empty:
+if os.path.exists(ARCHIVO_FENOLOGIA):
+    df_historial = pd.read_excel(ARCHIVO_FENOLOGIA)
     sesiones = df_historial.groupby(['Fecha', 'Sector']).size().reset_index(name='counts')
     st.write("A continuación se muestra un resumen de las últimas evaluaciones realizadas.")
     
     for index, sesion in sesiones.sort_values(by='Fecha', ascending=False).head(10).iterrows():
         with st.container(border=True):
             df_sesion_actual = df_historial[(df_historial['Fecha'] == sesion['Fecha']) & (df_historial['Sector'] == sesion['Sector'])]
-            
             col1, col2, col3 = st.columns([2, 2, 1])
             with col1:
                 st.metric("Fecha de Evaluación", pd.to_datetime(sesion['Fecha']).strftime('%d/%m/%Y'))
             with col2:
                 st.metric("Sector Evaluado", sesion['Sector'])
             with col3:
-                st.write("") 
+                st.write("")
                 reporte_individual = to_excel(df_sesion_actual)
-                # CORRECCIÓN DEL ERROR DE TIPEO AQUÍ
                 st.download_button(
                     label="📥 Descargar Detalle",
                     data=reporte_individual,

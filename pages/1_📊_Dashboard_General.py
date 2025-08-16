@@ -21,7 +21,7 @@ def cargar_datos(nombre_archivo, columnas_fecha=None):
         if columnas_fecha:
             for col in columnas_fecha:
                 if col in df.columns:
-                    df[col] = pd.to_datetime(df[col])
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
         return df
     except Exception as e:
         st.error(f"Error al leer el archivo {nombre_archivo}: {e}")
@@ -29,8 +29,10 @@ def cargar_datos(nombre_archivo, columnas_fecha=None):
 
 def calcular_stock(df_ingresos, df_salidas):
     """Calcula el stock total y valorizado a partir de los movimientos."""
+    # --- !! AJUSTE CLAVE !! ---
+    # Si no hay ingresos, devuelve un DataFrame vacío con la estructura correcta.
     if df_ingresos is None or df_ingresos.empty:
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(columns=['Codigo_Lote', 'Stock_Restante', 'Valor_Lote', 'Fecha_Vencimiento', 'Codigo_Producto'])
     
     ingresos_por_lote = df_ingresos.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Ingresada'})
     
@@ -44,14 +46,37 @@ def calcular_stock(df_ingresos, df_salidas):
         
     lote_info = df_ingresos.drop_duplicates(subset=['Codigo_Lote'])
     stock_lotes_detallado = pd.merge(stock_lotes, lote_info, on='Codigo_Lote', how='left')
+    
+    # Asegurar que las columnas para el cálculo existen
+    if 'Precio_Unitario' not in stock_lotes_detallado.columns:
+        stock_lotes_detallado['Precio_Unitario'] = 0
+        
     stock_lotes_detallado['Valor_Lote'] = stock_lotes_detallado['Stock_Restante'] * stock_lotes_detallado['Precio_Unitario']
     
     return stock_lotes_detallado
 
 # --- CARGA DE TODOS LOS DATOS DE LA APLICACIÓN ---
-df_kardex_ingresos = cargar_datos('kardex_fundo.xlsx', columnas_fecha=['Fecha', 'Fecha_Vencimiento'])
 df_kardex_productos = cargar_datos('kardex_fundo.xlsx')
-df_kardex_salidas = cargar_datos('kardex_fundo.xlsx', columnas_fecha=['Fecha'])
+# Para cargar hojas específicas, necesitamos una función un poco más inteligente
+@st.cache_data
+def cargar_hoja_especifica(nombre_archivo, nombre_hoja, columnas_fecha=None):
+    if not os.path.exists(nombre_archivo):
+        return None
+    try:
+        df = pd.read_excel(nombre_archivo, sheet_name=nombre_hoja)
+        if columnas_fecha:
+            for col in columnas_fecha:
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+        return df
+    except ValueError: # La hoja no existe
+        return None
+    except Exception as e:
+        st.error(f"Error al leer la hoja '{nombre_hoja}' de {nombre_archivo}: {e}")
+        return None
+
+df_kardex_ingresos = cargar_hoja_especifica('kardex_fundo.xlsx', 'Ingresos', columnas_fecha=['Fecha', 'Fecha_Vencimiento'])
+df_kardex_salidas = cargar_hoja_especifica('kardex_fundo.xlsx', 'Salidas', columnas_fecha=['Fecha'])
 df_raleo = cargar_datos('Registro_Raleo.xlsx', columnas_fecha=['Fecha'])
 df_horas_tractor = cargar_datos('Registro_Horas_Tractor.xlsx', columnas_fecha=['Fecha'])
 df_ordenes = cargar_datos('Ordenes_de_Trabajo.xlsx', columnas_fecha=['Fecha_Programada', 'Aplicacion_Completada_Fecha'])
@@ -62,15 +87,14 @@ df_stock_lotes = calcular_stock(df_kardex_ingresos, df_kardex_salidas)
 
 # --- BARRA LATERAL CON FILTROS ---
 st.sidebar.header("Filtros del Dashboard")
-# Filtro de Fechas
 today = datetime.now().date()
 fecha_inicio = st.sidebar.date_input("Fecha de Inicio", today - timedelta(days=30))
 fecha_fin = st.sidebar.date_input("Fecha de Fin", today)
 
 # --- FILTRADO DE DATOS ---
-df_raleo_filtrado = df_raleo[(df_raleo['Fecha'].dt.date >= fecha_inicio) & (df_raleo['Fecha'].dt.date <= fecha_fin)] if df_raleo is not None else None
-df_horas_filtrado = df_horas_tractor[(df_horas_tractor['Fecha'].dt.date >= fecha_inicio) & (df_horas_tractor['Fecha'].dt.date <= fecha_fin)] if df_horas_tractor is not None else None
-df_ordenes_filtrado = df_ordenes[(df_ordenes['Fecha_Programada'].dt.date >= fecha_inicio) & (df_ordenes['Fecha_Programada'].dt.date <= fecha_fin)] if df_ordenes is not None else None
+df_raleo_filtrado = df_raleo[(df_raleo['Fecha'].dt.date >= fecha_inicio) & (df_raleo['Fecha'].dt.date <= fecha_fin)] if df_raleo is not None else pd.DataFrame()
+df_horas_filtrado = df_horas_tractor[(df_horas_tractor['Fecha'].dt.date >= fecha_inicio) & (df_horas_tractor['Fecha'].dt.date <= fecha_fin)] if df_horas_tractor is not None else pd.DataFrame()
+df_ordenes_filtrado = df_ordenes[(df_ordenes['Fecha_Programada'].dt.date >= fecha_inicio) & (df_ordenes['Fecha_Programada'].dt.date <= fecha_fin)] if df_ordenes is not None else pd.DataFrame()
 
 # --- VISTA PRINCIPAL DEL DASHBOARD ---
 st.header("Resumen General")
@@ -78,32 +102,29 @@ st.header("Resumen General")
 # --- MÉTRICAS CLAVE (KPIs) ---
 col1, col2, col3, col4 = st.columns(4)
 
-# KPI 1: Valor de Inventario
 with col1:
     valor_total_inventario = df_stock_lotes['Valor_Lote'].sum() if not df_stock_lotes.empty else 0
     st.metric("💰 Valor del Inventario", f"S/ {valor_total_inventario:,.2f}")
 
-# KPI 2: Lotes por Vencer
 with col2:
     lotes_por_vencer = 0
     if not df_stock_lotes.empty and 'Fecha_Vencimiento' in df_stock_lotes.columns:
-        df_stock_lotes_activos = df_stock_lotes[df_stock_lotes['Stock_Restante'] > 0]
+        df_stock_lotes['Fecha_Vencimiento'] = pd.to_datetime(df_stock_lotes['Fecha_Vencimiento'], errors='coerce')
+        df_stock_lotes_activos = df_stock_lotes[df_stock_lotes['Stock_Restante'] > 0].dropna(subset=['Fecha_Vencimiento'])
         lotes_por_vencer = len(df_stock_lotes_activos[
             (df_stock_lotes_activos['Fecha_Vencimiento'].dt.date <= today + timedelta(days=30)) &
             (df_stock_lotes_activos['Fecha_Vencimiento'].dt.date >= today)
         ])
     st.metric("⚠️ Lotes por Vencer (30d)", f"{lotes_por_vencer} Lotes")
 
-# KPI 3: Órdenes de Trabajo Activas
 with col3:
     ordenes_activas = 0
     if df_ordenes is not None:
         ordenes_activas = len(df_ordenes[df_ordenes['Status'] != 'Completada'])
     st.metric("🛠️ Órdenes de Trabajo Activas", f"{ordenes_activas} Órdenes")
     
-# KPI 4: Horas de Tractor en el Período
 with col4:
-    horas_totales = df_horas_filtrado['Total_Horas'].sum() if df_horas_filtrado is not None else 0
+    horas_totales = df_horas_filtrado['Total_Horas'].sum() if not df_horas_filtrado.empty else 0
     st.metric(f"🚜 Horas de Tractor (Período)", f"{horas_totales:,.1f} Horas")
 
 st.divider()
@@ -115,7 +136,7 @@ gcol1, gcol2 = st.columns(2)
 with gcol1:
     st.subheader("Valor de Inventario por Tipo")
     if df_kardex_productos is not None and not df_stock_lotes.empty:
-        df_valor_tipo = pd.merge(df_stock_lotes, df_kardex_productos, on='Codigo_Producto', how='left')
+        df_valor_tipo = pd.merge(df_stock_lotes, df_kardex_productos, left_on='Codigo_Producto', right_on='Codigo', how='left')
         df_valor_tipo = df_valor_tipo.groupby('Tipo_Accion')['Valor_Lote'].sum().reset_index()
         fig_pie = px.pie(df_valor_tipo, values='Valor_Lote', names='Tipo_Accion', title="Distribución del Valor en Almacén", hole=.3)
         st.plotly_chart(fig_pie, use_container_width=True)
@@ -126,8 +147,8 @@ with gcol2:
     st.subheader("Actividad del Fundo (Período Seleccionado)")
     actividades = {
         "Ingresos Registrados": len(df_kardex_ingresos[(df_kardex_ingresos['Fecha'].dt.date >= fecha_inicio) & (df_kardex_ingresos['Fecha'].dt.date <= fecha_fin)]) if df_kardex_ingresos is not None else 0,
-        "Jornadas de Raleo": df_raleo_filtrado['Fecha'].nunique() if df_raleo_filtrado is not None else 0,
-        "Aplicaciones Completadas": len(df_ordenes_filtrado[df_ordenes_filtrado['Status'] == 'Completada']) if df_ordenes_filtrado is not None else 0
+        "Jornadas de Raleo": df_raleo_filtrado['Fecha'].nunique() if not df_raleo_filtrado.empty else 0,
+        "Aplicaciones Completadas": len(df_ordenes_filtrado[df_ordenes_filtrado['Status'] == 'Completada']) if not df_ordenes_filtrado.empty else 0
     }
     df_actividad = pd.DataFrame(list(actividades.items()), columns=['Actividad', 'Cantidad'])
     fig_bar = px.bar(df_actividad, x='Actividad', y='Cantidad', title="Resumen de Operaciones", text='Cantidad')
@@ -135,7 +156,7 @@ with gcol2:
 
 st.divider()
 
-# --- ALERTAS DE SANIDAD (SIMPLIFICADO) ---
+# --- ALERTAS DE SANIDAD ---
 st.header("Alertas de Sanidad")
 if df_observaciones is not None:
     ultima_obs = df_observaciones.loc[df_observaciones.groupby('Sector')['Fecha'].idxmax()]

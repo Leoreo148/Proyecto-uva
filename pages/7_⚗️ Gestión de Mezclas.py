@@ -3,170 +3,171 @@ import pandas as pd
 import os
 import json
 from datetime import datetime
+import openpyxl 
 from io import BytesIO
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión de Mezclas", page_icon="⚗️", layout="wide")
-st.title("⚗️ Gestión de Mezclas")
-st.write("El ingeniero programa la receta y el encargado confirma la preparación.")
+st.title("⚗️ Gestión de Mezclas por Lote")
+st.write("El ingeniero programa la receta seleccionando lotes específicos y el encargado confirma la preparación para registrar la salida del inventario.")
 
-# --- NOMBRES DE ARCHIVOS ---
-ARCHIVO_INVENTARIO = 'Inventario_Maestro.xlsx'
-ARCHIVO_ORDENES = 'Ordenes_de_Trabajo.xlsx'
-ARCHIVO_SALIDAS = 'Historial_Salidas.xlsx'
+# --- CONSTANTES Y NOMBRES DE ARCHIVOS ---
+KARDEX_FILE = 'kardex_fundo.xlsx'
+ORDENES_FILE = 'Ordenes_de_Trabajo.xlsx'
+SHEET_PRODUCTS = 'Productos'
+SHEET_INGRESOS = 'Ingresos'
+SHEET_SALIDAS = 'Salidas'
 
-# --- FUNCIONES ---
-def cargar_datos(nombre_archivo, columnas_defecto):
-    if os.path.exists(nombre_archivo):
-        return pd.read_excel(nombre_archivo)
+COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion']
+COLS_INGRESOS = ['Codigo_Lote', 'Fecha', 'Tipo', 'Proveedor', 'Factura', 'Producto', 'Codigo_Producto', 'Cantidad', 'Precio_Unitario', 'Fecha_Vencimiento']
+COLS_SALIDAS = ['Fecha', 'Lote_Sector', 'Turno', 'Producto', 'Cantidad', 'Codigo_Producto', 'Objetivo_Tratamiento', 'Codigo_Lote']
+
+# --- FUNCIONES CORE (REUTILIZADAS) ---
+def cargar_kardex():
+    if os.path.exists(KARDEX_FILE):
+        xls = pd.ExcelFile(KARDEX_FILE)
+        df_productos = pd.read_excel(xls, sheet_name=SHEET_PRODUCTS) if SHEET_PRODUCTS in xls.sheet_names else pd.DataFrame(columns=COLS_PRODUCTOS)
+        df_ingresos = pd.read_excel(xls, sheet_name=SHEET_INGRESOS) if SHEET_INGRESOS in xls.sheet_names else pd.DataFrame(columns=COLS_INGRESOS)
+        df_salidas = pd.read_excel(xls, sheet_name=SHEET_SALIDAS) if SHEET_SALIDAS in xls.sheet_names else pd.DataFrame(columns=COLS_SALIDAS)
     else:
-        return pd.DataFrame(columns=columnas_defecto)
+        return pd.DataFrame(columns=COLS_PRODUCTOS), pd.DataFrame(columns=COLS_INGRESOS), pd.DataFrame(columns=COLS_SALIDAS)
+    return df_productos, df_ingresos, df_salidas
 
-def guardar_datos(df, nombre_archivo):
-    try:
-        df.to_excel(nombre_archivo, index=False, engine='openpyxl')
-        return True, "Guardado exitoso."
-    except Exception as e:
-        return False, str(e)
+def guardar_kardex(df_productos, df_ingresos, df_salidas):
+    with pd.ExcelWriter(KARDEX_FILE, engine='openpyxl') as writer:
+        df_productos.to_excel(writer, sheet_name=SHEET_PRODUCTS, index=False)
+        df_ingresos.to_excel(writer, sheet_name=SHEET_INGRESOS, index=False)
+        df_salidas.to_excel(writer, sheet_name=SHEET_SALIDAS, index=False)
+    return True
 
-def to_excel(df):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Reporte')
-    return output.getvalue()
+def calcular_stock_por_lote(df_ingresos, df_salidas):
+    if df_ingresos.empty:
+        return pd.DataFrame(), pd.DataFrame()
+    ingresos_por_lote = df_ingresos.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Ingresada'})
+    if not df_salidas.empty and 'Codigo_Lote' in df_salidas.columns:
+        salidas_por_lote = df_salidas.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Consumida'})
+        stock_lotes = pd.merge(ingresos_por_lote, salidas_por_lote, on='Codigo_Lote', how='left').fillna(0)
+        stock_lotes['Stock_Restante'] = stock_lotes['Cantidad_Ingresada'] - stock_lotes['Cantidad_Consumida']
+    else:
+        stock_lotes = ingresos_por_lote
+        stock_lotes['Stock_Restante'] = stock_lotes['Cantidad_Ingresada']
+    lote_info = df_ingresos.drop_duplicates(subset=['Codigo_Lote'])[['Codigo_Lote', 'Codigo_Producto', 'Producto', 'Precio_Unitario', 'Fecha_Vencimiento']]
+    stock_lotes_detallado = pd.merge(stock_lotes, lote_info, on='Codigo_Lote', how='left')
+    return stock_lotes_detallado
 
-# --- Cargar datos al inicio ---
-df_inventario = cargar_datos(ARCHIVO_INVENTARIO, ['Producto', 'Unidad', 'Stock_Actual'])
-df_ordenes = cargar_datos(ARCHIVO_ORDENES, ['ID_Orden', 'Status'])
-df_salidas = cargar_datos(ARCHIVO_SALIDAS, [])
+def cargar_ordenes():
+    if os.path.exists(ORDENES_FILE):
+        return pd.read_excel(ORDENES_FILE)
+    return pd.DataFrame()
 
+def guardar_ordenes(df):
+    df.to_excel(ORDENES_FILE, index=False, engine='openpyxl')
 
-# --- SECCIÓN 1 (PARA EL INGENIERO): PROGRAMAR NUEVA RECETA ---
+# --- CARGA DE DATOS ---
+df_productos, df_ingresos, df_salidas = cargar_kardex()
+df_stock_lotes = calcular_stock_por_lote(df_ingresos, df_salidas)
+df_ordenes = cargar_ordenes()
+
+# --- SECCIÓN 1 (INGENIERO): PROGRAMAR NUEVA RECETA ---
 with st.expander("👨‍🔬 Programar Nueva Receta de Mezcla (Ingeniero)"):
-    with st.form("programar_form"):
-        st.subheader("Datos Generales")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            fecha_aplicacion = st.date_input("Fecha Programada")
-        with col2:
-            sectores_del_fundo = ['W3', 'J-3', 'W1', 'W2', 'K1', 'K2', 'General']
-            sector_aplicacion = st.selectbox("Lote / Sector", options=sectores_del_fundo)
-        with col3:
-            turno = st.selectbox("Turno", ["Día", "Noche"])
-        
-        objetivo_tratamiento = st.text_input("Objetivo del Tratamiento", placeholder="Ej: Trips - araña roja")
+    # Preparamos la lista de lotes activos para el selector
+    lotes_activos = df_stock_lotes[df_stock_lotes['Stock_Restante'] > 0.001].copy()
+    opciones_lotes = []
+    if not lotes_activos.empty:
+        lotes_activos['Fecha_Vencimiento'] = pd.to_datetime(lotes_activos['Fecha_Vencimiento']).dt.strftime('%Y-%m-%d')
+        for _, row in lotes_activos.iterrows():
+            label = (f"{row['Producto']} ({row['Codigo_Lote']}) | "
+                     f"Stock: {row['Stock_Restante']:.2f} | "
+                     f"Vence: {row['Fecha_Vencimiento'] or 'N/A'}")
+            opciones_lotes.append(label)
 
-        st.subheader("Receta")
-        if not df_inventario.empty:
-            productos_disponibles = df_inventario['Producto'].tolist()
+    with st.form("programar_form"):
+        st.subheader("Datos Generales de la Orden")
+        col1, col2, col3 = st.columns(3)
+        with col1: fecha_aplicacion = st.date_input("Fecha Programada")
+        with col2: sector_aplicacion = st.text_input("Lote / Sector de Aplicación")
+        with col3: turno = st.selectbox("Turno", ["Día", "Noche"])
+        objetivo_tratamiento = st.text_input("Objetivo del Tratamiento", placeholder="Ej: Control de Oídio y Trips")
+
+        st.subheader("Receta de la Mezcla")
+        if not opciones_lotes:
+            st.warning("No hay lotes con stock disponible para crear una receta.")
+            productos_para_mezcla = None
+        else:
             productos_para_mezcla = st.data_editor(
-                pd.DataFrame([{"Producto": productos_disponibles[0], "Cantidad Total": 1.0}]),
+                pd.DataFrame([{"Lote_Seleccionado": opciones_lotes[0], "Cantidad_a_Usar": 1.0}]),
                 num_rows="dynamic",
                 column_config={
-                    "Producto": st.column_config.SelectboxColumn("Producto", options=productos_disponibles, required=True),
-                    "Cantidad Total": st.column_config.NumberColumn("Cantidad TOTAL a Mezclar", min_value=0.0, format="%.3f")
-                },
-                key="editor_mezcla"
+                    "Lote_Seleccionado": st.column_config.SelectboxColumn("Seleccione el Lote de Producto a Usar", options=opciones_lotes, required=True),
+                    "Cantidad_a_Usar": st.column_config.NumberColumn("Cantidad TOTAL a Mezclar", min_value=0.01, format="%.3f")
+                }, key="editor_mezcla"
             )
-        else:
-            st.warning("No hay productos en el inventario para crear una receta.")
-            productos_para_mezcla = pd.DataFrame()
 
         submitted_programar = st.form_submit_button("✅ Programar Orden de Mezcla")
 
-        if submitted_programar:
-            if productos_para_mezcla.empty or productos_para_mezcla["Producto"].isnull().any():
-                st.error("Error: La receta está vacía o incompleta.")
-            else:
-                productos_para_mezcla = pd.merge(productos_para_mezcla, df_inventario[['Producto', 'Unidad']], on='Producto', how='left')
-                id_orden = datetime.now().strftime("%Y%m%d%H%M%S")
-                receta_json = productos_para_mezcla.to_json(orient='records')
-                
-                nueva_orden = pd.DataFrame([{"ID_Orden": id_orden, "Status": "Pendiente de Mezcla", "Fecha_Programada": fecha_aplicacion.strftime("%Y-%m-%d"), "Sector_Aplicacion": sector_aplicacion, "Objetivo": objetivo_tratamiento, "Turno": turno, "Receta_Mezcla": receta_json}])
-                
-                df_ordenes_final = pd.concat([df_ordenes, nueva_orden], ignore_index=True)
-                exito, mensaje = guardar_datos(df_ordenes_final, ARCHIVO_ORDENES)
-                
-                if exito:
-                    st.success(f"¡Orden de mezcla para el sector '{sector_aplicacion}' programada!")
+        if submitted_programar and productos_para_mezcla is not None:
+            receta_final = []
+            error = False
+            for _, row in productos_para_mezcla.iterrows():
+                codigo_lote = row['Lote_Seleccionado'].split('(')[1].split(')')[0]
+                stock_disponible = lotes_activos[lotes_activos['Codigo_Lote'] == codigo_lote]['Stock_Restante'].iloc[0]
+                if row['Cantidad_a_Usar'] > stock_disponible:
+                    st.error(f"Stock insuficiente para el lote {codigo_lote}. Solicitado: {row['Cantidad_a_Usar']}, Disponible: {stock_disponible}")
+                    error = True
                 else:
-                    st.error(f"No se pudo programar la orden. Error: {mensaje}")
+                    info_lote = lotes_activos[lotes_activos['Codigo_Lote'] == codigo_lote].iloc[0]
+                    receta_final.append({
+                        'Codigo_Lote': codigo_lote,
+                        'Producto': info_lote['Producto'],
+                        'Codigo_Producto': info_lote['Codigo_Producto'],
+                        'Cantidad_Usada': row['Cantidad_a_Usar']
+                    })
+            if not error:
+                id_orden = datetime.now().strftime("OT-%Y%m%d%H%M%S")
+                nueva_orden = pd.DataFrame([{"ID_Orden": id_orden, "Status": "Pendiente de Mezcla", "Fecha_Programada": fecha_aplicacion.strftime("%Y-%m-%d"), "Sector_Aplicacion": sector_aplicacion, "Objetivo": objetivo_tratamiento, "Turno": turno, "Receta_Mezcla_Lotes": json.dumps(receta_final)}])
+                df_ordenes_final = pd.concat([df_ordenes, nueva_orden], ignore_index=True)
+                guardar_ordenes(df_ordenes_final)
+                st.success(f"¡Orden de mezcla '{id_orden}' programada exitosamente!")
+                st.rerun()
 
 st.divider()
 
-# --- SECCIÓN 2 (PARA EL ENCARGADO DE MEZCLA): TAREAS PENDIENTES ---
+# --- SECCIÓN 2 (ENCARGADO): TAREAS PENDIENTES ---
 st.subheader("📋 Recetas Pendientes de Preparar (Encargado de Mezcla)")
-tareas_pendientes = df_ordenes[df_ordenes['Status'] == 'Pendiente de Mezcla']
+tareas_pendientes = df_ordenes[df_ordenes['Status'] == 'Pendiente de Mezcla'] if 'Status' in df_ordenes.columns else pd.DataFrame()
 
 if not tareas_pendientes.empty:
     for index, tarea in tareas_pendientes.iterrows():
         with st.container(border=True):
-            st.markdown(f"**Orden ID: {tarea['ID_Orden']}** | Sector: {tarea['Sector_Aplicacion']} | Fecha: {pd.to_datetime(tarea['Fecha_Programada']).strftime('%d/%m/%Y')}")
-            receta = json.loads(tarea['Receta_Mezcla'])
+            st.markdown(f"**Orden ID:** `{tarea['ID_Orden']}` | **Sector:** {tarea['Sector_Aplicacion']} | **Fecha:** {pd.to_datetime(tarea['Fecha_Programada']).strftime('%d/%m/%Y')}")
+            receta = json.loads(tarea['Receta_Mezcla_Lotes'])
             df_receta = pd.DataFrame(receta)
             st.dataframe(df_receta, use_container_width=True)
             
-            responsable_mezcla = st.text_input("Nombre del Responsable", key=f"resp_{tarea['ID_Orden']}")
-            
-            if st.button("✅ Terminado: Confirmar Preparación", key=f"confirm_{tarea['ID_Orden']}"):
-                if responsable_mezcla:
-                    inventario_actualizado = df_inventario.copy()
-                    ordenes_actualizado = df_ordenes.copy()
-                    lista_salidas = []
-                    error_stock = False
-                    for _, producto_usado in df_receta.iterrows():
-                        nombre = producto_usado["Producto"]
-                        cantidad_usada = producto_usado["Cantidad Total"]
-                        stock_actual = inventario_actualizado.loc[inventario_actualizado['Producto'] == nombre, 'Stock_Actual'].iloc[0]
-                        if stock_actual >= cantidad_usada:
-                            nuevo_stock = stock_actual - cantidad_usada
-                            inventario_actualizado.loc[inventario_actualizado['Producto'] == nombre, 'Stock_Actual'] = nuevo_stock
-                            
-                            codigo_prod = inventario_actualizado.loc[inventario_actualizado['Producto'] == nombre, 'Codigo'].iloc[0]
-                            lista_salidas.append({"Fecha": datetime.now().strftime("%Y-%m-%d %H:%M"), "ID_Orden": tarea['ID_Orden'], "Codigo_Producto": codigo_prod, "Producto": nombre, "Cantidad_Salida": cantidad_usada, "Responsable": responsable_mezcla, "Destino": f"Aplicación en {tarea['Sector_Aplicacion']}"})
-                        else:
-                            st.error(f"¡Stock insuficiente para '{nombre}'! Se necesitan {cantidad_usada} y solo hay {stock_actual}.")
-                            error_stock = True
-                            break
-                    
-                    if not error_stock:
-                        ordenes_actualizado.loc[index, 'Status'] = 'Lista para Aplicar'
-                        ordenes_actualizado.loc[index, 'Mezcla_Responsable'] = responsable_mezcla
-                        ordenes_actualizado.loc[index, 'Mezcla_Confirmada'] = datetime.now().strftime("%Y-%m-%d %H:%M")
-                        
-                        df_salidas_nuevas = pd.DataFrame(lista_salidas)
-                        df_salidas_final = pd.concat([df_salidas, df_salidas_nuevas], ignore_index=True)
-
-                        exito_inv, msg_inv = guardar_datos(inventario_actualizado, ARCHIVO_INVENTARIO)
-                        exito_ord, msg_ord = guardar_datos(ordenes_actualizado, ARCHIVO_ORDENES)
-                        exito_sal, msg_sal = guardar_datos(df_salidas_final, ARCHIVO_SALIDAS)
-
-                        if exito_inv and exito_ord and exito_sal:
-                            st.success("¡Mezcla confirmada, stock actualizado y salida registrada!")
-                            st.rerun()
-                        else:
-                            st.error(f"Error al guardar. Inv: {msg_inv}, Órdenes: {msg_ord}, Salidas: {msg_sal}")
-                else:
-                    st.warning("Por favor, ingrese el nombre del responsable.")
+            if st.button("✅ Confirmar Preparación y Registrar Salida", key=f"confirm_{tarea['ID_Orden']}"):
+                nuevas_salidas = []
+                for item in receta:
+                    nuevas_salidas.append({
+                        'Fecha': datetime.now().strftime("%Y-%m-%d"),
+                        'Lote_Sector': tarea['Sector_Aplicacion'],
+                        'Turno': tarea['Turno'],
+                        'Producto': item['Producto'],
+                        'Cantidad': item['Cantidad_Usada'],
+                        'Codigo_Producto': item['Codigo_Producto'],
+                        'Objetivo_Tratamiento': tarea['Objetivo'],
+                        'Codigo_Lote': item['Codigo_Lote']
+                    })
+                df_nuevas_salidas = pd.DataFrame(nuevas_salidas)
+                df_salidas_final = pd.concat([df_salidas, df_nuevas_salidas], ignore_index=True)
+                
+                # Guardar el kardex con las nuevas salidas
+                guardar_kardex(df_productos, df_ingresos, df_salidas_final)
+                
+                # Actualizar el status de la orden
+                df_ordenes.loc[index, 'Status'] = 'Lista para Aplicar'
+                guardar_ordenes(df_ordenes)
+                
+                st.success(f"Salida para la orden '{tarea['ID_Orden']}' registrada. Stock actualizado.")
+                st.rerun()
 else:
     st.info("No hay recetas pendientes de preparar.")
-
-st.divider()
-
-# --- SECCIÓN 3: HISTORIAL Y DESCARGA ---
-st.subheader("📚 Historial de Mezclas Preparadas")
-historial_mezclas = df_ordenes[df_ordenes['Status'] != 'Pendiente de Mezcla']
-if not historial_mezclas.empty:
-    columnas_a_mostrar = ['Fecha_Programada', 'Sector_Aplicacion', 'Mezcla_Responsable', 'Status']
-    columnas_existentes = [col for col in columnas_a_mostrar if col in historial_mezclas.columns]
-    st.dataframe(historial_mezclas[columnas_existentes].tail(10).iloc[::-1], use_container_width=True)
-    
-    df_para_descargar = to_excel(historial_mezclas)
-    st.download_button(
-        label="📥 Descargar Historial Completo de Mezclas",
-        data=df_para_descargar,
-        file_name="Historial_Mezclas.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-else:
-    st.info("Aún no se ha preparado ninguna mezcla.")

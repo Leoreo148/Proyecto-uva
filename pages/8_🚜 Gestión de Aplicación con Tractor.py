@@ -2,154 +2,133 @@ import streamlit as st
 import pandas as pd
 import os
 import json
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from io import BytesIO
 import openpyxl
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Gestión de Aplicación", page_icon="🚜", layout="wide")
-st.title("🚜 Cartilla de Aplicación con Tractor")
-st.write("El operario completa la cartilla digital con los detalles de la aplicación para marcar la orden como finalizada.")
+st.set_page_config(page_title="Gestión de Aplicación y Horas", page_icon="🚜", layout="wide")
+st.title("🚜 Cartilla de Aplicación y Control de Horas")
+st.write("El operario completa la cartilla unificada para finalizar la aplicación y registrar las horas de maquinaria.")
 
 # --- NOMBRES DE ARCHIVOS ---
 ORDENES_FILE = 'Ordenes_de_Trabajo.xlsx'
+ARCHIVO_HORAS = 'Registro_Horas_Tractor.xlsx'
 
 # --- FUNCIONES ---
-def cargar_ordenes():
-    if os.path.exists(ORDENES_FILE):
-        return pd.read_excel(ORDENES_FILE)
-    cols = ['ID_Orden', 'Status', 'Fecha_Programada', 'Sector_Aplicacion', 'Objetivo', 'Receta_Mezcla_Lotes']
-    return pd.DataFrame(columns=cols)
+def cargar_datos(nombre_archivo, columnas_defecto):
+    if os.path.exists(nombre_archivo):
+        df = pd.read_excel(nombre_archivo)
+        # Asegurar que las columnas de fecha se lean correctamente
+        for col in df.columns:
+            if 'fecha' in col.lower():
+                df[col] = pd.to_datetime(df[col])
+        return df
+    return pd.DataFrame(columns=columnas_defecto)
 
-def guardar_ordenes(df):
-    df.to_excel(ORDENES_FILE, index=False, engine='openpyxl')
+def guardar_datos(df, nombre_archivo):
+    df.to_excel(nombre_archivo, index=False, engine='openpyxl')
     return True
 
-def to_excel_detailed(tarea_row):
+def to_excel(df):
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # Hoja 1: Resumen
-        resumen_data = {k: [v] for k, v in tarea_row.items() if not isinstance(v, (list, dict, str)) or len(str(v)) < 200}
-        pd.DataFrame(resumen_data).to_excel(writer, index=False, sheet_name='Resumen_Orden')
-        
-        # Hoja 2: Receta
-        if 'Receta_Mezcla_Lotes' in tarea_row and pd.notna(tarea_row['Receta_Mezcla_Lotes']):
-            receta = json.loads(tarea_row['Receta_Mezcla_Lotes'])
-            pd.DataFrame(receta).to_excel(writer, index=False, sheet_name='Receta_Detallada')
-
-        # Hoja 3: Cartilla de Aplicación
-        if 'Detalle_Aplicacion' in tarea_row and pd.notna(tarea_row['Detalle_Aplicacion']):
-            detalle = json.loads(tarea_row['Detalle_Aplicacion'])
-            pd.DataFrame([detalle]).T.to_excel(writer, sheet_name='Cartilla_Aplicacion')
-            
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Reporte')
     return output.getvalue()
 
 # --- CARGA DE DATOS ---
-df_ordenes = cargar_ordenes()
+df_ordenes = cargar_datos(ORDENES_FILE, ['ID_Orden', 'Status'])
+df_horas = cargar_datos(ARCHIVO_HORAS, [])
 
 # --- SECCIÓN 1: TAREAS LISTAS PARA APLICAR ---
 st.subheader("✅ Tareas Listas para Aplicar")
-st.write("Aquí aparecen las órdenes que ya tienen la mezcla preparada.")
-
 tareas_para_aplicar = df_ordenes[df_ordenes['Status'] == 'Lista para Aplicar'] if 'Status' in df_ordenes.columns else pd.DataFrame()
 
 if not tareas_para_aplicar.empty:
     for index, tarea in tareas_para_aplicar.iterrows():
-        expander_title = f"**Orden ID:** `{tarea['ID_Orden']}` | **Sector:** {tarea['Sector_Aplicacion']} | **Fecha:** {pd.to_datetime(tarea['Fecha_Programada']).strftime('%d/%m/%Y')}"
-        with st.expander(expander_title):
-            
-            st.write("**Receta de la Mezcla (Lotes a Usar):**")
+        expander_title = f"**Orden ID:** `{tarea['ID_Orden']}` | **Sector:** {tarea['Sector_Aplicacion']}"
+        with st.expander(expander_title, expanded=True):
+            st.write("**Receta de la Mezcla:**")
             receta = json.loads(tarea['Receta_Mezcla_Lotes'])
             st.dataframe(pd.DataFrame(receta), use_container_width=True)
             
-            with st.form(key=f"form_tractor_{tarea['ID_Orden']}"):
-                st.subheader("Cartilla de Aplicación")
+            with st.form(key=f"form_unificado_{tarea['ID_Orden']}"):
+                st.subheader("Cartilla Unificada de Aplicación y Horas")
                 
-                # --- DATOS DE LA CARTILLA ---
-                st.markdown("##### Método de Aplicación")
-                col_tipo, col_vol = st.columns(2)
-                with col_tipo:
-                    tipo_aplicacion = st.radio("Tipo de Aplicación", ["Nebulizador (Turbo)", "Barras", "Pistolas/Drench"])
-                with col_vol:
-                    volumen_total = st.number_input("Volumen de Agua Total (L)", value=2200)
-                    volumen_ha = st.number_input("Volumen por Hectárea", value=1200)
-
-                st.markdown("##### Maquinaria")
-                col_maq1, col_maq2, col_maq3 = st.columns(3)
-                with col_maq1:
+                # --- DATOS DEL CONTROL DE HORAS ---
+                st.markdown("##### Parte Diario de Maquinaria")
+                col_parte1, col_parte2 = st.columns(2)
+                with col_parte1:
+                    operario = st.text_input("Nombre del Operador", value=tarea.get('Tractor_Responsable', ''))
+                    implemento = st.text_input("Implemento Utilizado", "Nebulizadora")
+                with col_parte2:
                     tractor_utilizado = st.text_input("Tractor Utilizado", "CASE")
-                    pulverizador = st.text_input("Pulverizador", "FULL MAQUINARIAS")
-                with col_maq2:
-                    marcha_tractor = st.text_input("Marcha / Tractor", "1ra")
-                    velocidad_kmh = st.number_input("Velocidad (km/h)", value=9.0, format="%.1f")
-                with col_maq3:
-                    rpm = st.number_input("RPM", value=98)
-                    presion_bar = st.number_input("Presión (bar)", value=9.0, format="%.1f")
+                    labor_realizada = st.text_input("Labor Realizada", value=f"Aplicación {tarea['Objetivo']}")
 
-                st.markdown("##### Boquillas")
-                col_boq1, col_boq2 = st.columns(2)
-                with col_boq1:
-                    n_boquillas = st.number_input("Nº Boquillas Total", value=18)
-                with col_boq2:
-                    color_boquilla = st.text_input("Color de Boquilla", "Negra y Marrón")
-                ubicacion_boquillas = st.text_area("Ubicación y Estado de Boquillas", "Descripción de la configuración de boquillas (ej: 2 corona, 2 centro, 2 bajas por lado)")
-
-                st.markdown("##### Personal y Horarios")
-                operario = st.text_input("Nombre del Operario / Aplicador", "Antonio Carraro")
                 col_h1, col_h2 = st.columns(2)
-                with col_h1: hora_inicio = st.time_input("Hora de Inicio", time(2,0))
-                with col_h2: hora_fin = st.time_input("Hora Final", time(7,0))
-                
-                observaciones = st.text_area("Observaciones Generales", "Aplicación con turbo y con boquillas intermedias")
+                with col_h1:
+                    h_inicial = st.number_input("Horómetro Inicial", min_value=0.0, format="%.2f", step=0.1)
+                with col_h2:
+                    h_final = st.number_input("Horómetro Final", min_value=0.0, format="%.2f", step=0.1)
 
-                submitted_tractor = st.form_submit_button("🏁 Finalizar y Guardar Aplicación")
+                # --- DATOS DE LA CARTILLA DE APLICACIÓN ---
+                st.markdown("##### Detalles de la Aplicación")
+                observaciones = st.text_area("Observaciones Generales (Clima, Novedades, etc.)")
 
-                if submitted_tractor:
-                    detalle_aplicacion = {
-                        "Tipo_Aplicacion": tipo_aplicacion, "Volumen_Agua_Total_L": volumen_total, "Volumen_por_Ha": volumen_ha,
-                        "Tractor": tractor_utilizado, "Pulverizador": pulverizador, "Marcha": marcha_tractor,
-                        "Velocidad_KMH": velocidad_kmh, "RPM": rpm, "Presion_Bar": presion_bar,
-                        "N_Boquillas": n_boquillas, "Color_Boquillas": color_boquilla, "Ubicacion_Boquillas": ubicacion_boquillas,
-                        "Operario": operario, "Hora_Inicio": hora_inicio.strftime("%H:%M"), "Hora_Fin": hora_fin.strftime("%H:%M"),
-                        "Observaciones": observaciones
-                    }
-                    
-                    df_ordenes.loc[index, 'Status'] = 'Completada'
-                    df_ordenes.loc[index, 'Tractor_Responsable'] = operario
-                    df_ordenes.loc[index, 'Aplicacion_Completada_Fecha'] = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    df_ordenes.loc[index, 'Detalle_Aplicacion'] = json.dumps(detalle_aplicacion)
+                submitted = st.form_submit_button("🏁 Finalizar Tarea y Guardar Registros")
 
-                    exito = guardar_ordenes(df_ordenes)
-                    if exito:
-                        st.success(f"¡Aplicación de la orden '{tarea['ID_Orden']}' registrada exitosamente!")
-                        st.rerun()
+                if submitted:
+                    if h_final <= h_inicial:
+                        st.error("El Horómetro Final debe ser mayor que el Inicial.")
                     else:
-                        st.error("Error al guardar la actualización de la orden.")
+                        # 1. Guardar el registro de horas
+                        total_horas = h_final - h_inicial
+                        nuevo_registro_horas = pd.DataFrame([{
+                            'Fecha': pd.to_datetime(tarea['Fecha_Programada']),
+                            'Turno': tarea['Turno'], 'Operador': operario, 'Tractor': tractor_utilizado,
+                            'Implemento': implemento, 'Labor Realizada': labor_realizada, 
+                            'Sector': tarea['Sector_Aplicacion'],
+                            'Horometro_Inicial': h_inicial, 'Horometro_Final': h_final,
+                            'Total_Horas': total_horas, 'Observaciones': observaciones
+                        }])
+                        df_horas_actualizado = pd.concat([df_horas, nuevo_registro_horas], ignore_index=True)
+                        guardar_datos(df_horas_actualizado, ARCHIVO_HORAS)
+
+                        # 2. Actualizar la orden de trabajo
+                        df_ordenes.loc[index, 'Status'] = 'Completada'
+                        df_ordenes.loc[index, 'Tractor_Responsable'] = operario
+                        df_ordenes.loc[index, 'Aplicacion_Completada_Fecha'] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                        df_ordenes.loc[index, 'Observaciones_Aplicacion'] = observaciones
+                        guardar_datos(df_ordenes, ORDENES_FILE)
+
+                        st.success(f"¡Tarea '{tarea['ID_Orden']}' completada y horas registradas!")
+                        st.rerun()
 else:
     st.info("No hay aplicaciones con mezcla lista para ser aplicadas.")
 
 st.divider()
 
-# --- HISTORIAL Y DESCARGA ---
-st.subheader("📚 Historial de Aplicaciones Completadas")
-historial_apps = df_ordenes[df_ordenes['Status'] == 'Completada'] if 'Status' in df_ordenes.columns else pd.DataFrame()
+# --- HISTORIALES Y DESCARGAS ---
+st.header("📚 Historiales")
 
+# Historial de Horas de Tractor
+st.subheader("Historial de Horas de Tractor")
+df_historial_horas = cargar_datos(ARCHIVO_HORAS, [])
+if not df_historial_horas.empty:
+    st.dataframe(df_historial_horas.sort_values(by="Fecha", ascending=False), use_container_width=True)
+    excel_horas = to_excel(df_historial_horas)
+    st.download_button(
+        label="📥 Descargar Historial de Horas",
+        data=excel_horas,
+        file_name=f"Reporte_Horas_Tractor_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    )
+else:
+    st.info("Aún no se ha registrado ninguna hora de tractor.")
+
+# Historial de Aplicaciones Completadas
+st.subheader("Historial de Aplicaciones Completadas")
+historial_apps = df_ordenes[df_ordenes['Status'] == 'Completada'] if 'Status' in df_ordenes.columns else pd.DataFrame()
 if not historial_apps.empty:
-    for index, tarea in historial_apps.sort_values(by='Aplicacion_Completada_Fecha', ascending=False).iterrows():
-        with st.container(border=True):
-            col1, col2, col3 = st.columns([2, 2, 1])
-            col1.metric("Orden ID", tarea['ID_Orden'])
-            col2.metric("Sector", tarea['Sector_Aplicacion'])
-            
-            with col3:
-                st.write("") 
-                reporte_individual = to_excel_detailed(tarea)
-                st.download_button(
-                    label="📥 Descargar Reporte",
-                    data=reporte_individual,
-                    file_name=f"Reporte_Orden_{tarea['ID_Orden']}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"download_{tarea['ID_Orden']}"
-                )
+    st.dataframe(historial_apps[['ID_Orden', 'Sector_Aplicacion', 'Tractor_Responsable', 'Aplicacion_Completada_Fecha']], use_container_width=True)
 else:
     st.info("Aún no se ha completado ninguna aplicación.")

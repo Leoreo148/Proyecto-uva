@@ -15,38 +15,25 @@ SHEET_PRODUCTS = 'Productos'
 SHEET_INGRESOS = 'Ingresos'
 SHEET_SALIDAS = 'Salidas'
 
-# --- !! FUNCIÓN CARGAR_KARDEX CORREGIDA Y MÁS ROBUSTA !! ---
-def cargar_kardex():
-    """
-    Carga todas las hojas del archivo Kardex. Si una hoja no existe,
-    la crea como un DataFrame vacío sin afectar a las demás.
-    """
-    cols_productos = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion']
-    cols_ingresos = ['Codigo_Lote', 'Fecha', 'Tipo', 'Proveedor', 'Factura', 'Producto', 'Codigo_Producto', 'Cantidad', 'Precio_Unitario', 'Fecha_Vencimiento']
-    cols_salidas = ['Fecha', 'Lote_Sector', 'Turno', 'Producto', 'Cantidad', 'Codigo_Producto', 'Objetivo_Tratamiento', 'Codigo_Lote']
+COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion']
+COLS_INGRESOS = ['Codigo_Lote', 'Fecha', 'Tipo', 'Proveedor', 'Factura', 'Producto', 'Codigo_Producto', 'Cantidad', 'Precio_Unitario', 'Fecha_Vencimiento']
+COLS_SALIDAS = ['Fecha', 'Lote_Sector', 'Turno', 'Producto', 'Cantidad', 'Codigo_Producto', 'Objetivo_Tratamiento', 'Codigo_Lote']
 
-    # Cargar el archivo si existe
+# --- FUNCIONES CORE DEL KARDEX ---
+def cargar_kardex():
     if os.path.exists(KARDEX_FILE):
         xls = pd.ExcelFile(KARDEX_FILE)
-        
-        # Leer cada hoja de forma segura
-        df_productos = pd.read_excel(xls, sheet_name=SHEET_PRODUCTS) if SHEET_PRODUCTS in xls.sheet_names else pd.DataFrame(columns=cols_productos)
-        df_ingresos = pd.read_excel(xls, sheet_name=SHEET_INGRESOS) if SHEET_INGRESOS in xls.sheet_names else pd.DataFrame(columns=cols_ingresos)
-        df_salidas = pd.read_excel(xls, sheet_name=SHEET_SALIDAS) if SHEET_SALIDAS in xls.sheet_names else pd.DataFrame(columns=cols_salidas)
-        
+        df_productos = pd.read_excel(xls, sheet_name=SHEET_PRODUCTS) if SHEET_PRODUCTS in xls.sheet_names else pd.DataFrame(columns=COLS_PRODUCTOS)
+        df_ingresos = pd.read_excel(xls, sheet_name=SHEET_INGRESOS) if SHEET_INGRESOS in xls.sheet_names else pd.DataFrame(columns=COLS_INGRESOS)
+        df_salidas = pd.read_excel(xls, sheet_name=SHEET_SALIDAS) if SHEET_SALIDAS in xls.sheet_names else pd.DataFrame(columns=COLS_SALIDAS)
     else:
-        # Si el archivo no existe, crear todos los DataFrames vacíos
         st.warning("Archivo 'kardex_fundo.xlsx' no encontrado. Por favor, cargue primero el catálogo de productos.")
-        df_productos = pd.DataFrame(columns=cols_productos)
-        df_ingresos = pd.DataFrame(columns=cols_ingresos)
-        df_salidas = pd.DataFrame(columns=cols_salidas)
-        
+        df_productos = pd.DataFrame(columns=COLS_PRODUCTOS)
+        df_ingresos = pd.DataFrame(columns=COLS_INGRESOS)
+        df_salidas = pd.DataFrame(columns=COLS_SALIDAS)
     return df_productos, df_ingresos, df_salidas
 
 def guardar_kardex(df_productos, df_ingresos, df_salidas):
-    """
-    Guarda todos los dataframes en un único archivo Excel con múltiples hojas.
-    """
     with pd.ExcelWriter(KARDEX_FILE, engine='openpyxl') as writer:
         df_productos.to_excel(writer, sheet_name=SHEET_PRODUCTS, index=False)
         df_ingresos.to_excel(writer, sheet_name=SHEET_INGRESOS, index=False)
@@ -70,6 +57,12 @@ else:
             "Seleccione el Producto que ingresa:",
             options=df_productos['Producto'].unique()
         )
+
+        # --- !! MEJORA: MOSTRAR CÓDIGO DE PRODUCTO !! ---
+        if producto_seleccionado:
+            codigo_producto_visible = df_productos[df_productos['Producto'] == producto_seleccionado]['Codigo'].iloc[0]
+            st.info(f"**Código del Producto Seleccionado:** `{codigo_producto_visible}`")
+
         cantidad_ingresada = st.number_input("Cantidad Ingresada (en la unidad del producto)", min_value=0.01, format="%.2f")
 
         st.markdown("##### 2. Información del Lote (Costo y Caducidad)")

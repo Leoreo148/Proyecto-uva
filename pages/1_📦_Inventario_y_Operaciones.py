@@ -140,76 +140,93 @@ with tab_kardex:
 # --- PESTAÑA 2: REGISTRAR INGRESO ---
 with tab_ingreso:
     st.header("Registrar Ingreso de Mercadería por Lote")
+    st.write("Registre cada compra o ingreso como un lote único con su propio costo y fecha de vencimiento.")
+
     if df_productos.empty:
-        st.error("Catálogo de productos vacío. Añada productos en la pestaña de Kardex.")
+        st.error("No se pueden registrar ingresos porque el catálogo de productos está vacío.")
+        st.info("Por favor, vaya a la pestaña '📊 Kardex y Productos' y cargue o añada productos.")
     else:
         with st.form("ingreso_lote_form", clear_on_submit=True):
-        st.markdown("##### 1. Información del Producto")
+            st.markdown("##### 1. Información del Producto")
+            
+            producto_seleccionado = st.selectbox(
+                "Seleccione el Producto que ingresa:",
+                options=df_productos['Producto'].unique(),
+                key="ingreso_producto"
+            )
+
+            if producto_seleccionado:
+                codigo_producto_visible = df_productos[df_productos['Producto'] == producto_seleccionado]['Codigo'].iloc[0]
+                st.info(f"**Código del Producto Seleccionado:** `{codigo_producto_visible}`")
+
+            cantidad_ingresada = st.number_input("Cantidad Ingresada (en la unidad del producto)", min_value=0.01, format="%.2f")
+
+            st.markdown("##### 2. Información del Lote (Costo y Caducidad)")
+            col1, col2 = st.columns(2)
+            with col1:
+                precio_unitario = st.number_input("Precio Unitario (Costo por Unidad)", min_value=0.00, format="%.2f", help="El costo de compra de una unidad (Kg, L, etc.) de este lote.")
+            with col2:
+                fecha_vencimiento = st.date_input("Fecha de Vencimiento (Opcional)", value=None)
+
+            st.markdown("##### 3. Documentación de Soporte")
+            col3, col4, col5 = st.columns(3)
+            with col3:
+                fecha_ingreso = st.date_input("Fecha de Ingreso", datetime.now())
+            with col4:
+                proveedor = st.text_input("Proveedor")
+            with col5:
+                factura = st.text_input("Factura / Guía de Remisión")
+            
+            submitted = st.form_submit_button("✅ Guardar Ingreso del Lote")
+
+            if submitted:
+                codigo_producto = df_productos[df_productos['Producto'] == producto_seleccionado]['Codigo'].iloc[0]
+                timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+                codigo_lote = f"{codigo_producto}-{timestamp}"
+                
+                nuevo_ingreso_data = {
+                    'Codigo_Lote': codigo_lote,
+                    'Fecha': fecha_ingreso.strftime("%Y-%m-%d"),
+                    'Tipo': 'Ingreso por Compra',
+                    'Proveedor': proveedor,
+                    'Factura': factura,
+                    'Producto': producto_seleccionado,
+                    'Codigo_Producto': codigo_producto,
+                    'Cantidad': cantidad_ingresada,
+                    'Precio_Unitario': precio_unitario,
+                    'Fecha_Vencimiento': fecha_vencimiento.strftime("%Y-%m-%d") if fecha_vencimiento else None
+                }
+                df_nuevo_ingreso = pd.DataFrame([nuevo_ingreso_data])
+                df_ingresos_actualizado = pd.concat([df_ingresos, df_nuevo_ingreso], ignore_index=True)
+                
+                exito = guardar_kardex(df_productos, df_ingresos_actualizado, df_salidas)
+                
+                if exito:
+                    st.success(f"¡Lote '{codigo_lote}' para '{producto_seleccionado}' registrado exitosamente!")
+                else:
+                    st.error("Hubo un error al guardar el registro en el archivo Kardex.")
+
+    st.divider()
+
+    st.header("📚 Historial de Ingresos Recientes")
+    if not df_ingresos.empty:
+        columnas_a_mostrar = [
+            'Fecha', 'Producto', 'Cantidad', 'Precio_Unitario', 
+            'Codigo_Lote', 'Proveedor', 'Factura', 'Fecha_Vencimiento'
+        ]
+        columnas_existentes = [col for col in columnas_a_mostrar if col in df_ingresos.columns]
+        st.dataframe(df_ingresos[columnas_existentes].tail(15).iloc[::-1], use_container_width=True)
         
-        producto_seleccionado = st.selectbox(
-            "Seleccione el Producto que ingresa:",
-            options=df_productos['Producto'].unique()
+        # Botón de descarga
+        excel_data = to_excel(df_ingresos[columnas_existentes])
+        st.download_button(
+            label="📥 Descargar Historial de Ingresos",
+            data=excel_data,
+            file_name=f"Historial_Ingresos_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
-        # --- !! MEJORA: MOSTRAR CÓDIGO DE PRODUCTO !! ---
-        if producto_seleccionado:
-            codigo_producto_visible = df_productos[df_productos['Producto'] == producto_seleccionado]['Codigo'].iloc[0]
-            st.info(f"**Código del Producto Seleccionado:** `{codigo_producto_visible}`")
-
-        cantidad_ingresada = st.number_input("Cantidad Ingresada (en la unidad del producto)", min_value=0.01, format="%.2f")
-
-        st.markdown("##### 2. Información del Lote (Costo y Caducidad)")
-        col1, col2 = st.columns(2)
-        with col1:
-            precio_unitario = st.number_input("Precio Unitario (Costo por Unidad)", min_value=0.00, format="%.2f", help="El costo de compra de una unidad (Kg, L, etc.) de este lote.")
-        with col2:
-            fecha_vencimiento = st.date_input("Fecha de Vencimiento (Opcional)", value=None)
-
-        st.markdown("##### 3. Documentación de Soporte")
-        col3, col4, col5 = st.columns(3)
-        with col3:
-            fecha_ingreso = st.date_input("Fecha de Ingreso", datetime.now())
-        with col4:
-            proveedor = st.text_input("Proveedor")
-        with col5:
-            factura = st.text_input("Factura / Guía de Remisión")
-            if st.form_submit_button("✅ Guardar Ingreso del Lote"):
-                   if submitted:
-            codigo_producto = df_productos[df_productos['Producto'] == producto_seleccionado]['Codigo'].iloc[0]
-            timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-            codigo_lote = f"{codigo_producto}-{timestamp}"
-            
-            nuevo_ingreso_data = {
-                'Codigo_Lote': codigo_lote,
-                'Fecha': fecha_ingreso.strftime("%Y-%m-%d"),
-                'Tipo': 'Ingreso por Compra',
-                'Proveedor': proveedor,
-                'Factura': factura,
-                'Producto': producto_seleccionado,
-                'Codigo_Producto': codigo_producto,
-                'Cantidad': cantidad_ingresada,
-                'Precio_Unitario': precio_unitario,
-                'Fecha_Vencimiento': fecha_vencimiento.strftime("%Y-%m-%d") if fecha_vencimiento else None
-            }
-            df_nuevo_ingreso = pd.DataFrame([nuevo_ingreso_data])
-            df_ingresos_actualizado = pd.concat([df_ingresos, df_nuevo_ingreso], ignore_index=True)
-            
-            exito = guardar_kardex(df_productos, df_ingresos_actualizado, df_salidas)
-            
-                st.success("¡Lote registrado!")
-                st.rerun()
-
-# --- HISTORIAL DE INGRESOS RECIENTES ---
-st.header("📚 Historial de Ingresos Recientes")
-if not df_ingresos.empty:
-    columnas_a_mostrar = [
-        'Fecha', 'Producto', 'Cantidad', 'Precio_Unitario', 
-        'Codigo_Lote', 'Proveedor', 'Factura', 'Fecha_Vencimiento'
-    ]
-    columnas_existentes = [col for col in columnas_a_mostrar if col in df_ingresos.columns]
-    st.dataframe(df_ingresos[columnas_existentes].tail(15).iloc[::-1], use_container_width=True)
-else:
-    st.info("Aún no se ha registrado ningún ingreso.")
+    else:
+        st.info("Aún no se ha registrado ningún ingreso.")
 # --- PESTAÑA 3: GESTIÓN DE MEZCLAS ---
 with tab_mezclas:
     st.header("Gestionar y Programar Mezclas de Aplicación")

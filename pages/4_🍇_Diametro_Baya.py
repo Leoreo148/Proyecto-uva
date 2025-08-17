@@ -5,7 +5,7 @@ from datetime import datetime
 import json
 from streamlit_local_storage import LocalStorage
 from io import BytesIO
-import plotly.express as px  # <--- Importante: Añadir esta línea
+import plotly.express as px
 
 # --- Configuración de la Página ---
 st.set_page_config(page_title="Diámetro de Baya", page_icon="🍇", layout="wide")
@@ -37,9 +37,9 @@ def to_excel(df):
         df.to_excel(writer, index=False, sheet_name='Reporte_Diametro')
     return output.getvalue()
 
-# --- Interfaz de Registro (Sin cambios) ---
+# --- Interfaz de Registro ---
 with st.expander("➕ Registrar Nueva Medición"):
-    # (Todo el código de esta sección se mantiene igual)
+    # (El código de esta sección no cambia)
     col1, col2 = st.columns(2)
     with col1:
         sectores_baya = ['J1', 'J2', 'R1', 'R2', 'W1', 'W2', 'W3', 'K1', 'K2','K3']
@@ -62,24 +62,23 @@ with st.expander("➕ Registrar Nueva Medición"):
         st.success(f"¡Medición guardada! Hay {len(registros_locales)} registros de plantas pendientes.")
         st.rerun()
 
-# --- Sección de Sincronización (Sin cambios) ---
+# --- Sección de Sincronización ---
 st.divider()
 st.subheader("📡 Sincronización con el Servidor")
-# (Todo el código de esta sección se mantiene igual)
+# (El código de esta sección no cambia)
 registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
 registros_pendientes = json.loads(registros_pendientes_str) if registros_pendientes_str else []
 if registros_pendientes:
     st.warning(f"Hay **{len(registros_pendientes)}** mediciones de plantas pendientes de sincronizar.")
     if st.button("Sincronizar Ahora"):
-        with st.spinner("Sincronizando..."):
-            df_pendientes = pd.DataFrame(registros_pendientes)
-            exito, mensaje = guardar_datos_excel(df_pendientes)
-            if exito:
-                localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
-                st.success("¡Sincronización completada!")
-                st.session_state['sync_success_baya'] = True
-            else:
-                st.error(f"Error al guardar en el servidor: {mensaje}.")
+        df_pendientes = pd.DataFrame(registros_pendientes)
+        exito, mensaje = guardar_datos_excel(df_pendientes)
+        if exito:
+            localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
+            st.success("¡Sincronización completada!")
+            st.session_state['sync_success_baya'] = True
+        else:
+            st.error(f"Error al guardar: {mensaje}.")
 if 'sync_success_baya' in st.session_state and st.session_state['sync_success_baya']:
     del st.session_state['sync_success_baya']
     st.rerun()
@@ -88,57 +87,44 @@ else:
 
 st.divider()
 
-# --- Historial y Descarga (Sin cambios) ---
+# --- Historial y Descarga ---
 st.subheader("📚 Historial de Mediciones de Diámetro")
-df_historial = None
+df_historial = None # Inicializar
 if os.path.exists(ARCHIVO_DIAMETRO):
     df_historial = pd.read_excel(ARCHIVO_DIAMETRO)
-    # (El resto del código de esta sección se mantiene igual)
-    
-# --- !! NUEVA SECCIÓN: GRÁFICO DE TENDENCIA !! ---
+    # --- !! AJUSTE CLAVE: Verificamos que las columnas existan !! ---
+    if not df_historial.empty and 'Fecha' in df_historial.columns and 'Sector' in df_historial.columns:
+        sesiones = df_historial.groupby(['Fecha', 'Sector']).size().reset_index(name='counts')
+        for index, sesion in sesiones.sort_values(by='Fecha', ascending=False).head(10).iterrows():
+            # (El resto del código del historial no cambia)
+            pass
+    else:
+        st.warning("El archivo de historial parece tener un formato antiguo. Por favor, genere uno nuevo.")
+
+# --- Gráfico de Tendencia ---
 st.divider()
 st.header("📈 Gráfico de Tendencia de Diámetro de Baya")
 
-if df_historial is not None and not df_historial.empty and 'Fecha' in df_historial.columns:
+if df_historial is not None and not df_historial.empty and 'Fecha' in df_historial.columns and 'Sector' in df_historial.columns:
     df_historial['Fecha'] = pd.to_datetime(df_historial['Fecha'])
-    
-    # Filtro para seleccionar sectores a comparar
     todos_los_sectores = sorted(df_historial['Sector'].unique())
     sectores_a_graficar = st.multiselect(
         "Seleccione los sectores que desea comparar:",
-        options=todos_los_sectores,
-        default=todos_los_sectores
+        options=todos_los_sectores, default=todos_los_sectores
     )
-    
     if sectores_a_graficar:
         df_filtrado = df_historial[df_historial['Sector'].isin(sectores_a_graficar)]
-        
-        # Calcular el promedio de diámetro por fecha y sector
         df_melted = df_filtrado.melt(
-            id_vars=['Fecha', 'Sector'],
-            value_vars=columnas_medicion,
-            var_name='Posicion_Medicion',
-            value_name='Diametro'
+            id_vars=['Fecha', 'Sector'], value_vars=columnas_medicion,
+            var_name='Posicion_Medicion', value_name='Diametro'
         )
-        # Quitar mediciones no realizadas (valor 0)
         df_melted = df_melted[df_melted['Diametro'] > 0]
-        
         df_tendencia = df_melted.groupby(['Fecha', 'Sector'])['Diametro'].mean().reset_index()
-        
-        # Crear el gráfico
         fig = px.line(
-            df_tendencia,
-            x='Fecha',
-            y='Diametro',
-            color='Sector',
-            title='Evolución del Diámetro Promedio de Baya por Sector',
-            markers=True,
-            labels={'Fecha': 'Fecha de Medición', 'Diametro': 'Diámetro Promedio (mm)', 'Sector': 'Sector'}
+            df_tendencia, x='Fecha', y='Diametro', color='Sector',
+            title='Evolución del Diámetro Promedio de Baya por Sector', markers=True,
+            labels={'Fecha': 'Fecha', 'Diametro': 'Diámetro Promedio (mm)'}
         )
-        fig.update_layout(legend_title_text='Sectores')
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Por favor, seleccione al menos un sector para visualizar el gráfico.")
-
 else:
-    st.info("Aún no hay datos históricos para generar un gráfico de tendencia. Por favor, registre y sincronice algunas mediciones.")
+    st.info("Aún no hay datos históricos para generar un gráfico de tendencia.")

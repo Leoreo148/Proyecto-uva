@@ -230,16 +230,16 @@ with tab_ingreso:
 # --- PESTAÑA 3: GESTIÓN DE MEZCLAS ---
 with tab_mezclas:
     st.header("Gestionar y Programar Mezclas de Aplicación")
-    df_stock_lotes = calcular_stock_por_lote(df_ingresos, df_salidas)
-    
+
     with st.expander("👨‍🔬 Programar Nueva Receta de Mezcla (Ingeniero)"):
         lotes_activos = df_stock_lotes[df_stock_lotes['Stock_Restante'] > 0.001].copy()
         opciones_lotes = []
         if not lotes_activos.empty:
-            lotes_activos['Fecha_Vencimiento'] = pd.to_datetime(lotes_activos['Fecha_Vencimiento']).dt.strftime('%Y-%m-%d')
+            lotes_activos['Fecha_Vencimiento'] = pd.to_datetime(lotes_activos['Fecha_Vencimiento'], errors='coerce').dt.strftime('%Y-%m-%d')
             for _, row in lotes_activos.iterrows():
                 label = (f"{row['Producto']} ({row['Codigo_Lote']}) | Stock: {row['Stock_Restante']:.2f} | Vence: {row['Fecha_Vencimiento'] or 'N/A'}")
                 opciones_lotes.append(label)
+        
         with st.form("programar_form"):
             st.subheader("Datos Generales de la Orden")
             col1, col2, col3 = st.columns(3)
@@ -247,6 +247,7 @@ with tab_mezclas:
             with col2: sector_aplicacion = st.text_input("Lote / Sector de Aplicación")
             with col3: turno = st.selectbox("Turno", ["Día", "Noche"])
             objetivo_tratamiento = st.text_input("Objetivo del Tratamiento", placeholder="Ej: Control de Oídio y Trips")
+            
             st.subheader("Receta de la Mezcla")
             if not opciones_lotes:
                 st.warning("No hay lotes con stock disponible para crear una receta.")
@@ -260,28 +261,33 @@ with tab_mezclas:
                         "Cantidad_a_Usar": st.column_config.NumberColumn("Cantidad TOTAL a Mezclar", min_value=0.01, format="%.3f")
                     }, key="editor_mezcla"
                 )
+
             submitted_programar = st.form_submit_button("✅ Programar Orden de Mezcla")
+
             if submitted_programar and productos_para_mezcla is not None:
                 receta_final = []
-                error = False
+                error_validacion = False
                 for _, row in productos_para_mezcla.iterrows():
                     codigo_lote = row['Lote_Seleccionado'].split('(')[1].split(')')[0]
                     stock_disponible = lotes_activos[lotes_activos['Codigo_Lote'] == codigo_lote]['Stock_Restante'].iloc[0]
                     if row['Cantidad_a_Usar'] > stock_disponible:
                         st.error(f"Stock insuficiente para el lote {codigo_lote}. Solicitado: {row['Cantidad_a_Usar']}, Disponible: {stock_disponible}")
-                        error = True
+                        error_validacion = True
                         break
                     else:
                         info_lote = lotes_activos[lotes_activos['Codigo_Lote'] == codigo_lote].iloc[0]
                         receta_final.append({'Codigo_Lote': codigo_lote, 'Producto': info_lote['Producto'], 'Codigo_Producto': info_lote['Codigo_Producto'], 'Cantidad_Usada': row['Cantidad_a_Usar']})
-                if not error:
+                
+                if not error_validacion:
                     id_orden = datetime.now().strftime("OT-%Y%m%d%H%M%S")
                     nueva_orden = pd.DataFrame([{"ID_Orden": id_orden, "Status": "Pendiente de Mezcla", "Fecha_Programada": fecha_aplicacion.strftime("%Y-%m-%d"), "Sector_Aplicacion": sector_aplicacion, "Objetivo": objetivo_tratamiento, "Turno": turno, "Receta_Mezcla_Lotes": json.dumps(receta_final)}])
                     df_ordenes_final = pd.concat([df_ordenes, nueva_orden], ignore_index=True)
                     guardar_datos_genericos(df_ordenes_final, ORDENES_FILE)
                     st.success(f"¡Orden de mezcla '{id_orden}' programada exitosamente!")
                     st.rerun()
+
     st.divider()
+
     st.subheader("📋 Recetas Pendientes de Preparar (Encargado de Mezcla)")
     tareas_pendientes = df_ordenes[df_ordenes['Status'] == 'Pendiente de Mezcla'] if 'Status' in df_ordenes.columns else pd.DataFrame()
     if not tareas_pendientes.empty:
@@ -307,10 +313,86 @@ with tab_mezclas:
 # --- PESTAÑA 4: GESTIÓN DE APLICACIÓN ---
 with tab_aplicacion:
     st.header("Finalizar Aplicaciones y Registrar Horas de Tractor")
-    # (Aquí va el código completo de la página 8_...Gestión_de_Aplicación_y_Horas.py)
-    st.subheader("✅ Tareas Listas para Aplicar")
-    # (Lógica para mostrar y finalizar tareas)
     
+    st.subheader("✅ Tareas Listas para Aplicar")
+    tareas_para_aplicar = df_ordenes[df_ordenes['Status'] == 'Lista para Aplicar'] if 'Status' in df_ordenes.columns else pd.DataFrame()
+
+    if not tareas_para_aplicar.empty:
+        for index, tarea in tareas_para_aplicar.iterrows():
+            expander_title = f"**Orden ID:** `{tarea['ID_Orden']}` | **Sector:** {tarea['Sector_Aplicacion']}"
+            with st.expander(expander_title, expanded=True):
+                st.write("**Receta de la Mezcla:**")
+                receta = json.loads(tarea['Receta_Mezcla_Lotes'])
+                st.dataframe(pd.DataFrame(receta), use_container_width=True)
+                
+                with st.form(key=f"form_unificado_{tarea['ID_Orden']}"):
+                    st.subheader("Cartilla Unificada de Aplicación y Horas")
+                    
+                    st.markdown("##### Parte Diario de Maquinaria")
+                    col_parte1, col_parte2 = st.columns(2)
+                    with col_parte1:
+                        operario = st.text_input("Nombre del Operador", value=tarea.get('Tractor_Responsable', ''))
+                        implemento = st.text_input("Implemento Utilizado", "Nebulizadora")
+                    with col_parte2:
+                        tractor_utilizado = st.text_input("Tractor Utilizado", "CASE")
+                        labor_realizada = st.text_input("Labor Realizada", value=f"Aplicación {tarea['Objetivo']}")
+
+                    col_h1, col_h2 = st.columns(2)
+                    with col_h1:
+                        h_inicial = st.number_input("Horómetro Inicial", min_value=0.0, format="%.2f", step=0.1)
+                    with col_h2:
+                        h_final = st.number_input("Horómetro Final", min_value=0.0, format="%.2f", step=0.1)
+
+                    st.markdown("##### Detalles de la Aplicación")
+                    observaciones = st.text_area("Observaciones Generales (Clima, Novedades, etc.)")
+
+                    submitted = st.form_submit_button("🏁 Finalizar Tarea y Guardar Registros")
+
+                    if submitted:
+                        if h_final <= h_inicial:
+                            st.error("El Horómetro Final debe ser mayor que el Inicial.")
+                        else:
+                            total_horas = h_final - h_inicial
+                            nuevo_registro_horas = pd.DataFrame([{
+                                'Fecha': pd.to_datetime(tarea['Fecha_Programada']),
+                                'Turno': tarea['Turno'], 'Operador': operario, 'Tractor': tractor_utilizado,
+                                'Implemento': implemento, 'Labor Realizada': labor_realizada, 
+                                'Sector': tarea['Sector_Aplicacion'],
+                                'Horometro_Inicial': h_inicial, 'Horometro_Final': h_final,
+                                'Total_Horas': total_horas, 'Observaciones': observaciones
+                            }])
+                            df_horas_actualizado = pd.concat([df_horas, nuevo_registro_horas], ignore_index=True)
+                            guardar_datos_genericos(df_horas_actualizado, ARCHIVO_HORAS)
+
+                            df_ordenes.loc[index, 'Status'] = 'Completada'
+                            df_ordenes.loc[index, 'Tractor_Responsable'] = operario
+                            df_ordenes.loc[index, 'Aplicacion_Completada_Fecha'] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                            df_ordenes.loc[index, 'Observaciones_Aplicacion'] = observaciones
+                            guardar_datos_genericos(df_ordenes, ORDENES_FILE)
+
+                            st.success(f"¡Tarea '{tarea['ID_Orden']}' completada y horas registradas!")
+                            st.rerun()
+    else:
+        st.info("No hay aplicaciones con mezcla lista para ser aplicadas.")
+
     st.divider()
-    st.subheader("📚 Historiales")
-    # (Historial de horas y aplicaciones)
+
+    st.header("📚 Historiales")
+    st.subheader("Historial de Horas de Tractor")
+    if not df_horas.empty:
+        st.dataframe(df_horas.sort_values(by="Fecha", ascending=False), use_container_width=True)
+        excel_horas = to_excel(df_horas)
+        st.download_button(
+            label="📥 Descargar Historial de Horas",
+            data=excel_horas,
+            file_name=f"Reporte_Horas_Tractor_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        )
+    else:
+        st.info("Aún no se ha registrado ninguna hora de tractor.")
+
+    st.subheader("Historial de Aplicaciones Completadas")
+    historial_apps = df_ordenes[df_ordenes['Status'] == 'Completada'] if 'Status' in df_ordenes.columns else pd.DataFrame()
+    if not historial_apps.empty:
+        st.dataframe(historial_apps[['ID_Orden', 'Sector_Aplicacion', 'Tractor_Responsable', 'Aplicacion_Completada_Fecha']].sort_values(by="Aplicacion_Completada_Fecha", ascending=False), use_container_width=True)
+    else:
+        st.info("Aún no se ha completado ninguna aplicación.")

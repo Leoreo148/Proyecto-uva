@@ -1,4 +1,18 @@
 import streamlit as st
+# --- CÓDIGO DE DIAGNÓSTICO (TEMPORAL) ---
+import os
+st.sidebar.title("Diagnóstico del Sistema")
+st.sidebar.info(f"Directorio de Trabajo Actual: {os.getcwd()}")
+try:
+    with open("test_escritura.txt", "w") as f:
+        f.write("Streamlit puede escribir archivos.")
+    st.sidebar.success("Prueba de escritura: ¡ÉXITO!")
+    st.sidebar.write("Un archivo `test_escritura.txt` debería haber aparecido en tu carpeta.")
+except Exception as e:
+    st.sidebar.error("Prueba de escritura: ¡FALLÓ!")
+    st.sidebar.error(f"Error: {e}")
+st.sidebar.divider()
+# --- FIN DEL CÓDIGO DE DIAGNÓSTICO ---
 import pandas as pd
 import joblib
 
@@ -62,3 +76,4 @@ if st.button('Predecir Riesgo'):
     prediction = modelo.predict(input_df)
     recomendacion_texto = obtener_recomendacion(prediction[0], inventario_df)
     st.info(recomendacion_texto)
+

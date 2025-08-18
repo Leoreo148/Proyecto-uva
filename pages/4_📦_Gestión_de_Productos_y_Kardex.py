@@ -103,8 +103,9 @@ with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel"
                     stock_data['Cantidad'] = pd.to_numeric(stock_data['Cantidad'], errors='coerce').fillna(0)
                     stock_data = stock_data[stock_data['Cantidad'] > 0]
 
-                    # 3. Leer Precios Históricos usando los nombres de columna correctos
+                    # 3. Leer Precios Históricos usando los nombres de columna que nos diste
                     df_ingresos_historicos = pd.read_excel(uploaded_file, sheet_name='Ingreso', header=1)
+                    # Usamos los nombres exactos de tu archivo
                     df_ingresos_historicos['F.DE ING.'] = pd.to_datetime(df_ingresos_historicos['F.DE ING.'])
                     df_ultimos_precios = df_ingresos_historicos.sort_values(by='F.DE ING.', ascending=False).drop_duplicates(subset=['PRODUCTOS'], keep='first')
                     df_ultimos_precios = df_ultimos_precios[['PRODUCTOS', 'PREC. UNI S/.']].rename(columns={'PRODUCTOS': 'Producto', 'PREC. UNI S/.': 'Precio_Unitario'})
@@ -125,9 +126,10 @@ with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel"
                             ingresos_list.append({
                                 'Codigo_Lote': f"{row['Codigo']}-INV-INICIAL",
                                 'Fecha': datetime.now().strftime("%Y-%m-%d"), 'Tipo': 'Ajuste de Inventario Inicial',
-                                'Proveedor': 'N/A', 'Factura': 'N/A', 'Producto': row['Producto_y'],
+                                'Proveedor': row.get('PROVEEDOR', 'N/A'), 'Factura': row.get('FACTURA', 'N/A'), 
+                                'Producto': row['Producto_y'],
                                 'Codigo_Producto': row['Codigo'], 'Cantidad': row['Cantidad'],
-                                'Precio_Unitario': row['Precio_Unitario'], # Usar el precio encontrado
+                                'Precio_Unitario': row['Precio_Unitario'],
                                 'Fecha_Vencimiento': None
                             })
                     
@@ -137,9 +139,10 @@ with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel"
                     st.rerun()
 
                 except KeyError as e:
-                    st.error(f"Error de columna: No se encontró la columna {e}. Revisa que los nombres en tu Excel ('Cod_Producto', 'STOCK', 'Ingreso') sean correctos.")
+                    st.error(f"Error de columna: No se encontró la columna {e}. Revisa que los nombres en tu Excel sean correctos.")
                 except Exception as e:
                     st.error(f"Ocurrió un error. Verifique su archivo Excel. Detalle: {e}")
+                    
 # --- (El resto del código se mantiene igual) ---
 st.divider()
 st.header("Kardex y Stock Actual")

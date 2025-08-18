@@ -82,66 +82,28 @@ def to_excel(df):
 # --- CARGA INICIAL DE DATOS ---
 df_productos, df_ingresos, df_salidas = cargar_kardex()
 
-# --- SECCIÓN 1: CARGA INICIAL (VERSIÓN FINAL) ---
-# --- SECCIÓN 1: CARGA INICIAL (CON LECTURA DE PRECIOS ROBUSTA) ---
+# --- SECCIÓN 1: DIAGNÓSTICO DE CARGA INICIAL ---
 with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel", expanded=True):
     st.info("Utilice esta sección para cargar su catálogo de productos y stock inicial desde su archivo `2025AgroqFertil.xlsx`.")
     uploaded_file = st.file_uploader("Suba su archivo Excel", type=["xlsx"])
     if st.button("Procesar Archivo Excel Completo"):
         if uploaded_file:
-            with st.spinner("Procesando archivo Excel..."):
-                try:
-                    # 1. Leer Catálogo de Productos y limpiar nombres de columnas
-                    df_new_productos = pd.read_excel(uploaded_file, sheet_name='Cod_Producto', header=1)
-                    df_new_productos.columns = [str(c).strip().upper() for c in df_new_productos.columns]
-                    df_new_productos = df_new_productos.rename(columns={'CODIGO': 'Codigo', 'PRODUCTOS': 'Producto'})
-                    df_new_productos.dropna(subset=['Codigo', 'Producto'], inplace=True)
+            try:
+                st.subheader("🕵️‍♂️ Iniciando Diagnóstico de Columnas...")
+                
+                # Cargar la hoja 'Ingreso' y mostrar las columnas TAL CUAL las lee pandas
+                st.write("1. Leyendo la hoja 'Ingreso' con encabezado en la segunda fila...")
+                df_ingresos_debug = pd.read_excel(uploaded_file, sheet_name='Ingreso', header=1)
+                
+                st.write("2. Estas son las columnas que se encontraron (antes de cualquier limpieza):")
+                # Usamos st.code para ver la lista exacta, incluyendo espacios o caracteres raros
+                st.code(df_ingresos_debug.columns.to_list())
+                
+                st.warning("Por favor, copia la lista de columnas que aparece en el cuadro de arriba y pégala en el chat.")
+                st.info("El problema es que el nombre 'FECHA' no se encuentra exactamente como se esperaba en esa lista. Con la lista que me envíes, lo corregiré al instante.")
 
-                    # 2. Leer Stock Físico
-                    df_stock_sheet = pd.read_excel(uploaded_file, sheet_name='STOCK', header=2)
-                    df_stock_sheet.columns = [str(c).strip().upper() for c in df_stock_sheet.columns]
-                    p1 = df_stock_sheet[['PRODUCTO', 'CANT']].copy().rename(columns={'PRODUCTO': 'Producto', 'CANT': 'Cantidad'})
-                    p2 = df_stock_sheet[['PRODUCTO.1', 'CANT.1']].copy().rename(columns={'PRODUCTO.1': 'Producto', 'CANT.1': 'Cantidad'})
-                    p3 = df_stock_sheet[['PRODUCTO.2', 'CANT.2']].copy().rename(columns={'PRODUCTO.2': 'Producto', 'CANT.2': 'Cantidad'})
-                    stock_data = pd.concat([p1, p2, p3], ignore_index=True).dropna(subset=['Producto'])
-                    stock_data['Cantidad'] = pd.to_numeric(stock_data['Cantidad'], errors='coerce').fillna(0)
-                    stock_data = stock_data[stock_data['Cantidad'] > 0]
-
-                    # 3. Leer Precios Históricos y limpiar nombres de columnas
-                    df_ingresos_historicos = pd.read_excel(uploaded_file, sheet_name='Ingreso', header=1)
-                    df_ingresos_historicos.columns = [str(c).strip().upper() for c in df_ingresos_historicos.columns]
-                    df_ingresos_historicos['FECHA'] = pd.to_datetime(df_ingresos_historicos['FECHA'])
-                    df_ultimos_precios = df_ingresos_historicos.sort_values(by='FECHA', ascending=False).drop_duplicates(subset=['PRODUCTO'], keep='first')
-                    df_ultimos_precios = df_ultimos_precios[['PRODUCTO', 'P. UNIT']]
-
-                    # 4. Unir todo (Stock + Catálogo + Precios)
-                    stock_data['join_key'] = stock_data['Producto'].astype(str).str.strip().str.upper()
-                    df_new_productos['join_key'] = df_new_productos['Producto'].astype(str).str.strip().str.upper()
-                    df_ultimos_precios['join_key'] = df_ultimos_precios['PRODUCTO'].astype(str).str.strip().str.upper()
-                    df_merged = pd.merge(stock_data, df_new_productos, on='join_key', how='left')
-                    df_final_merged = pd.merge(df_merged, df_ultimos_precios, on='join_key', how='left')
-                    df_final_merged['P. UNIT'].fillna(0, inplace=True)
-
-                    # 5. Crear lotes iniciales usando el precio encontrado
-                    ingresos_list = []
-                    for _, row in df_final_merged.iterrows():
-                        if pd.notna(row['Codigo']):
-                            ingresos_list.append({
-                                'Codigo_Lote': f"{row['Codigo']}-INV-INICIAL",
-                                'Fecha': datetime.now().strftime("%Y-%m-%d"), 'Tipo': 'Ajuste de Inventario Inicial',
-                                'Proveedor': 'N/A', 'Factura': 'N/A', 'Producto': row['Producto_y'],
-                                'Codigo_Producto': row['Codigo'], 'Cantidad': row['Cantidad'],
-                                'Precio_Unitario': row['P. UNIT'],
-                                'Fecha_Vencimiento': None
-                            })
-                    
-                    df_new_ingresos = pd.DataFrame(ingresos_list).drop_duplicates(subset=['Codigo_Producto'], keep='first')
-                    guardar_kardex(df_productos=df_new_productos, df_ingresos=df_new_ingresos, df_salidas=pd.DataFrame(columns=COLS_SALIDAS))
-                    st.success("¡Catálogo y stock inicial (con precios) cargados exitosamente!")
-                    st.rerun()
-
-                except Exception as e:
-                    st.error(f"Ocurrió un error. Verifique su archivo Excel. Detalle: {e}")
+            except Exception as e:
+                st.error(f"Ocurrió un error incluso durante el diagnóstico: {e}")
                     
 # --- (El resto del código se mantiene igual) ---
 st.divider()

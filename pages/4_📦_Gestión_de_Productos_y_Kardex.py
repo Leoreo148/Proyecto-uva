@@ -43,11 +43,15 @@ def guardar_kardex(df_productos, df_ingresos, df_salidas):
     return True
 
 def calcular_stock_por_lote(df_ingresos, df_salidas):
+    """Calcula el stock detallado por lote y el total por producto."""
     if df_ingresos.empty:
+        # Devuelve dataframes vacíos con la estructura de columnas completa para evitar errores
         cols_totales = ['Codigo_Producto', 'Stock_Actual', 'Stock_Valorizado']
-        cols_lotes = ['Codigo_Lote', 'Stock_Restante', 'Valor_Lote', 'Codigo_Producto']
+        cols_lotes = ['Codigo_Lote', 'Stock_Restante', 'Valor_Lote', 'Codigo_Producto', 'Producto', 'Fecha_Vencimiento', 'Precio_Unitario']
         return pd.DataFrame(columns=cols_totales), pd.DataFrame(columns=cols_lotes)
+    
     ingresos_por_lote = df_ingresos.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Ingresada'})
+    
     if not df_salidas.empty and 'Codigo_Lote' in df_salidas.columns:
         salidas_por_lote = df_salidas.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Consumida'})
         stock_lotes = pd.merge(ingresos_por_lote, salidas_por_lote, on='Codigo_Lote', how='left').fillna(0)
@@ -55,12 +59,18 @@ def calcular_stock_por_lote(df_ingresos, df_salidas):
     else:
         stock_lotes = ingresos_por_lote
         stock_lotes['Stock_Restante'] = stock_lotes['Cantidad_Ingresada']
+        
     lote_info = df_ingresos.drop_duplicates(subset=['Codigo_Lote'])[['Codigo_Lote', 'Codigo_Producto', 'Producto', 'Precio_Unitario', 'Fecha_Vencimiento']]
     stock_lotes_detallado = pd.merge(stock_lotes, lote_info, on='Codigo_Lote', how='left')
+    
+    if 'Precio_Unitario' not in stock_lotes_detallado.columns:
+        stock_lotes_detallado['Precio_Unitario'] = 0
+        
     stock_lotes_detallado['Valor_Lote'] = stock_lotes_detallado['Stock_Restante'] * stock_lotes_detallado['Precio_Unitario']
+    
     agg_funcs = {'Stock_Restante': 'sum', 'Valor_Lote': 'sum'}
-    total_stock_producto = stock_lotes_detallado.groupby('Codigo_Producto').agg(agg_funcs).reset_index()
-    total_stock_producto = total_stock_producto.rename(columns={'Stock_Restante': 'Stock_Actual', 'Valor_Lote': 'Stock_Valorizado'})
+    total_stock_producto = stock_lotes_detallado.groupby('Codigo_Producto').agg(agg_funcs).reset_index().rename(columns={'Stock_Restante': 'Stock_Actual', 'Valor_Lote': 'Stock_Valorizado'})
+    
     return total_stock_producto, stock_lotes_detallado
 
 def to_excel(df):

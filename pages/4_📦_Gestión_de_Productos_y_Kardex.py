@@ -83,6 +83,7 @@ def to_excel(df):
 df_productos, df_ingresos, df_salidas = cargar_kardex()
 
 # --- SECCIÓN 1: CARGA INICIAL (VERSIÓN FINAL) ---
+# --- SECCIÓN 1: CARGA INICIAL (CON LECTURA DE PRECIOS) ---
 with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel", expanded=True):
     st.info("Utilice esta sección para cargar su catálogo de productos y stock inicial desde su archivo `2025AgroqFertil.xlsx`.")
     uploaded_file = st.file_uploader("Suba su archivo Excel", type=["xlsx"])
@@ -90,43 +91,57 @@ with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel"
         if uploaded_file:
             with st.spinner("Procesando archivo Excel..."):
                 try:
-                    df_new_productos = pd.read_excel(uploaded_file, sheet_name='Cod_Producto', header=1).rename(columns={'CODIGO': 'Codigo', 'PRODUCTOS': 'Producto', 'ING. ACTIVO': 'Ingrediente_Activo', 'UM': 'Unidad', 'PROVEEDOR': 'Proveedor', 'SUBGRUPO': 'Tipo_Accion'})
+                    # 1. Leer Catálogo de Productos
+                    df_new_productos = pd.read_excel(uploaded_file, sheet_name='Cod_Producto', header=1).rename(columns={'CODIGO': 'Codigo', 'PRODUCTOS': 'Producto'})
                     df_new_productos.dropna(subset=['Codigo', 'Producto'], inplace=True)
 
+                    # 2. Leer Stock Físico
                     df_stock_sheet = pd.read_excel(uploaded_file, sheet_name='STOCK', header=2)
-                    
-                    # Unificar las tres secciones de la hoja STOCK
                     p1 = df_stock_sheet[['PRODUCTO', 'CANT']].copy().rename(columns={'PRODUCTO': 'Producto', 'CANT': 'Cantidad'})
                     p2 = df_stock_sheet[['PRODUCTO.1', 'CANT.1']].copy().rename(columns={'PRODUCTO.1': 'Producto', 'CANT.1': 'Cantidad'})
                     p3 = df_stock_sheet[['PRODUCTO.2', 'CANT.2']].copy().rename(columns={'PRODUCTO.2': 'Producto', 'CANT.2': 'Cantidad'})
-                    
-                    stock_data = pd.concat([p1, p2, p3], ignore_index=True)
-                    stock_data.dropna(subset=['Producto'], inplace=True)
+                    stock_data = pd.concat([p1, p2, p3], ignore_index=True).dropna(subset=['Producto'])
                     stock_data['Cantidad'] = pd.to_numeric(stock_data['Cantidad'], errors='coerce').fillna(0)
                     stock_data = stock_data[stock_data['Cantidad'] > 0]
-                    
-                    # Asociar stock con productos usando una llave limpia
+
+                    # --- NUEVO: Leer Precios Históricos de la hoja Ingreso ---
+                    df_ingresos_historicos = pd.read_excel(uploaded_file, sheet_name='Ingreso', header=1)
+                    df_ingresos_historicos.columns = df_ingresos_historicos.columns.str.strip() # Limpiar espacios en nombres de columnas
+                    df_ingresos_historicos['FECHA'] = pd.to_datetime(df_ingresos_historicos['FECHA'])
+                    # Obtener el precio más reciente de cada producto
+                    df_ultimos_precios = df_ingresos_historicos.sort_values(by='FECHA', ascending=False).drop_duplicates(subset=['PRODUCTO'], keep='first')
+                    df_ultimos_precios = df_ultimos_precios[['PRODUCTO', 'P. UNIT']]
+
+                    # --- MODIFICADO: Unir todo (Stock + Catálogo + Precios) ---
+                    # Crear llaves de unión limpias
                     stock_data['join_key'] = stock_data['Producto'].astype(str).str.strip().str.lower()
                     df_new_productos['join_key'] = df_new_productos['Producto'].astype(str).str.strip().str.lower()
-                    
+                    df_ultimos_precios['join_key'] = df_ultimos_precios['PRODUCTO'].astype(str).str.strip().str.lower()
+
+                    # Unir stock con catálogo para obtener el Código
                     df_merged = pd.merge(stock_data, df_new_productos, on='join_key', how='left')
-                    
-                    # Crear registros de lote para el inventario inicial
+                    # Unir con precios para obtener el P. UNIT
+                    df_final_merged = pd.merge(df_merged, df_ultimos_precios[['join_key', 'P. UNIT']], on='join_key', how='left')
+                    # Si no se encontró un precio, poner 0
+                    df_final_merged['P. UNIT'].fillna(0, inplace=True)
+
+                    # --- MODIFICADO: Crear lotes iniciales usando el precio encontrado ---
                     ingresos_list = []
-                    for _, row in df_merged.iterrows():
+                    for _, row in df_final_merged.iterrows():
                         if pd.notna(row['Codigo']):
                             ingresos_list.append({
                                 'Codigo_Lote': f"{row['Codigo']}-INV-INICIAL",
                                 'Fecha': datetime.now().strftime("%Y-%m-%d"), 'Tipo': 'Ajuste de Inventario Inicial',
                                 'Proveedor': 'N/A', 'Factura': 'N/A', 'Producto': row['Producto_y'],
                                 'Codigo_Producto': row['Codigo'], 'Cantidad': row['Cantidad'],
-                                'Precio_Unitario': 0.0, 'Fecha_Vencimiento': None
+                                'Precio_Unitario': row['P. UNIT'], # Usar el precio encontrado
+                                'Fecha_Vencimiento': None
                             })
                     
                     df_new_ingresos = pd.DataFrame(ingresos_list).drop_duplicates(subset=['Codigo_Producto'], keep='first')
                     
                     guardar_kardex(df_productos=df_new_productos, df_ingresos=df_new_ingresos, df_salidas=pd.DataFrame(columns=COLS_SALIDAS))
-                    st.success("¡Catálogo y stock inicial cargados exitosamente!")
+                    st.success("¡Catálogo y stock inicial (con precios) cargados exitosamente!")
                     st.rerun()
 
                 except Exception as e:

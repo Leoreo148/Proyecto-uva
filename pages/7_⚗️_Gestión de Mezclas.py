@@ -104,7 +104,7 @@ with st.expander("👨‍🔬 Programar Nueva Receta de Mezcla (Ingeniero)"):
                 num_rows="dynamic",
                 column_config={
                     "Lote_Seleccionado": st.column_config.SelectboxColumn("Seleccione el Lote de Producto a Usar", options=opciones_lotes, required=True),
-                    "Cantidad_a_Usar": st.column_config.NumberColumn("Cantidad TOTAL a Mezclar", min_value=0.01, format="%.3f")
+                    "Cantidad_a_Usar": st.column_config.NumberColumn("Cantidad TOTAL a Mezclar", min_value=0.00001, format="%.3f")
                 }, key="editor_mezcla"
             )
 

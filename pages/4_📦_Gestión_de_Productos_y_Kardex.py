@@ -86,7 +86,6 @@ df_productos, df_ingresos, df_salidas = cargar_datos_supabase()
 
 # --- INTERFAZ DE USUARIO ---
 
-# SECCIÓN 1: CARGA MASIVA DESDE ARCHIVOS CSV (MODIFICADO)
 # --- SECCIÓN 1: CARGA MASIVA DESDE UN ÚNICO ARCHIVO EXCEL ---
 with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
     st.info("Sube tu archivo Excel (`2025AgroqFertil.xlsx`). Esto borrará los datos existentes en las tablas 'Productos', 'Ingresos' y 'Salidas' y los reemplazará con la información del archivo.")
@@ -97,17 +96,16 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
             with st.spinner("Procesando archivo y actualizando Supabase..."):
                 try:
                     # --- LÓGICA ORIGINAL PARA PROCESAR EL EXCEL ---
-                    # 1. Leer Catálogo de Productos desde la hoja 'Cod_Producto'
+                    # 1. Leer Catálogo de Productos
                     df_new_productos = pd.read_excel(uploaded_file, sheet_name='Cod_Producto', header=1).rename(columns={'CODIGO': 'Codigo', 'PRODUCTOS': 'Producto'})
                     df_new_productos.dropna(subset=['Codigo', 'Producto'], inplace=True)
-                    # Asegurarse de que las columnas coincidan con la tabla de Supabase
                     df_new_productos['Ingrediente_Activo'] = df_new_productos.get('ING. ACTIVO', None)
                     df_new_productos['Unidad'] = df_new_productos.get('UM', None)
-                    df_new_productos['Proveedor'] = None # Esta info no está en esta hoja
+                    df_new_productos['Proveedor'] = None
                     df_new_productos['Tipo_Accion'] = df_new_productos.get('SUBGRUPO', None)
-                    df_new_productos['Stock_Minimo'] = 0 # Valor por defecto
+                    df_new_productos['Stock_Minimo'] = 0
 
-                    # 2. Leer Stock Físico desde la hoja 'STOCK'
+                    # 2. Leer Stock Físico
                     df_stock_sheet = pd.read_excel(uploaded_file, sheet_name='STOCK', header=2)
                     p1 = df_stock_sheet[['PRODUCTO', 'CANT']].copy().rename(columns={'PRODUCTO': 'Producto', 'CANT': 'Cantidad'})
                     p2 = df_stock_sheet[['PRODUCTO.1', 'CANT.1']].copy().rename(columns={'PRODUCTO.1': 'Producto', 'CANT.1': 'Cantidad'})
@@ -116,13 +114,13 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
                     stock_data['Cantidad'] = pd.to_numeric(stock_data['Cantidad'], errors='coerce').fillna(0)
                     stock_data = stock_data[stock_data['Cantidad'] > 0]
 
-                    # 3. Leer Precios Históricos desde la hoja 'Ingreso'
+                    # 3. Leer Precios Históricos
                     df_ingresos_historicos = pd.read_excel(uploaded_file, sheet_name='Ingreso', header=1)
                     df_ingresos_historicos['F.DE ING.'] = pd.to_datetime(df_ingresos_historicos['F.DE ING.'])
                     df_ultimos_precios = df_ingresos_historicos.sort_values(by='F.DE ING.', ascending=False).drop_duplicates(subset=['PRODUCTOS'], keep='first')
                     df_ultimos_precios = df_ultimos_precios[['PRODUCTOS', 'PREC. UNI S/.']].rename(columns={'PRODUCTOS': 'Producto', 'PREC. UNI S/.': 'Precio_Unitario'})
 
-                    # 4. Unir todo para crear los registros de Ingresos iniciales
+                    # 4. Unir todo para crear los registros de Ingresos
                     stock_data['join_key'] = stock_data['Producto'].astype(str).str.strip().str.lower()
                     df_new_productos['join_key'] = df_new_productos['Producto'].astype(str).str.strip().str.lower()
                     df_ultimos_precios['join_key'] = df_ultimos_precios['Producto'].astype(str).str.strip().str.lower()
@@ -148,19 +146,15 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
                             })
                     df_new_ingresos = pd.DataFrame(ingresos_list).drop_duplicates(subset=['Codigo_Producto'], keep='first')
 
-                    # 5. Leer los datos de Salidas desde la hoja 'Salida'
+                    # 5. Leer los datos de Salidas
                     df_new_salidas = pd.read_excel(uploaded_file, sheet_name='Salida', header=1)
-                    # Renombrar columnas para que coincidan con la tabla de Supabase
                     df_new_salidas = df_new_salidas.rename(columns={
-                        'FECHA': 'Fecha',
-                        'LOTE': 'Lote_Sector',
-                        'CANT.': 'Cantidad',
-                        'COD. PROD': 'Codigo_Producto',
-                        'OBJETIVO DEL TRATAMIENTO': 'Objetivo_Tratamiento'
+                        'FECHA': 'Fecha', 'LOTE': 'Lote_Sector', 'CANT.': 'Cantidad',
+                        'COD. PROD': 'Codigo_Producto', 'OBJETIVO DEL TRATAMIENTO': 'Objetivo_Tratamiento',
+                        'PRODUCTO': 'Producto'
                     })
-                    # Seleccionar solo las columnas que necesitamos
-                    columnas_salidas_necesarias = ['Fecha', 'Lote_Sector', 'Cantidad', 'Codigo_Producto', 'Objetivo_Tratamiento', 'PRODUCTO']
-                    df_new_salidas = df_new_salidas[[col for col in columnas_salidas_necesarias if col in df_new_salidas.columns]].rename(columns={'PRODUCTO': 'Producto'})
+                    columnas_salidas_necesarias = ['Fecha', 'Lote_Sector', 'Cantidad', 'Codigo_Producto', 'Objetivo_Tratamiento', 'Producto']
+                    df_new_salidas = df_new_salidas[[col for col in columnas_salidas_necesarias if col in df_new_salidas.columns]]
 
 
                     # --- LÓGICA PARA GUARDAR EN SUPABASE ---
@@ -168,6 +162,12 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
                     supabase.table('Salidas').delete().neq('id', -1).execute()
                     supabase.table('Ingresos').delete().neq('id', -1).execute()
                     supabase.table('Productos').delete().neq('id', -1).execute()
+
+                    # --- NUEVO: LIMPIEZA DE VALORES NaN ANTES DE INSERTAR ---
+                    # Reemplazamos NaN con None, que Supabase entiende como NULL
+                    df_new_productos = df_new_productos.astype(object).where(pd.notnull(df_new_productos), None)
+                    df_new_ingresos = df_new_ingresos.astype(object).where(pd.notnull(df_new_ingresos), None)
+                    df_new_salidas = df_new_salidas.astype(object).where(pd.notnull(df_new_salidas), None)
 
                     st.write("Insertando nuevos productos...")
                     productos_records = df_new_productos[['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion', 'Stock_Minimo']].to_dict(orient='records')
@@ -190,6 +190,7 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
                     st.error(f"Ocurrió un error durante la carga masiva: {e}")
         else:
             st.warning("Por favor, sube un archivo Excel para procesar.")
+
 
 # SECCIÓN 2: AÑADIR NUEVO PRODUCTO (MANUALMENTE)
 with st.expander("➕ Añadir un solo Producto al Catálogo"):

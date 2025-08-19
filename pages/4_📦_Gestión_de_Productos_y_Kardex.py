@@ -1,13 +1,10 @@
-import json
-import base64
+import os
 import streamlit as st
 import pandas as pd
-import os
-from datetime import datetime
-import openpyxl 
-from io import BytesIO
+import json
+import base64
 import gspread
-from gspread_pandas import Spread, Client
+from gspread_pandas import Spread
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión de Productos y Kardex", page_icon="📦", layout="wide")
@@ -26,16 +23,10 @@ COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveed
 
 @st.cache_resource
 def get_google_sheets_client():
-    """
-    Lee las credenciales desde una variable de entorno.
-    """
-    # Buscamos la credencial en las variables de entorno
     creds_b64_str = os.environ.get("GCP_CREDS_B64")
-
     if not creds_b64_str:
-        st.error("Error: No se encontró la variable de entorno 'GCP_CREDS_B64'.")
+        st.error("Error de Sincronización: No se encontró la variable de entorno 'GCP_CREDS_B64'. Asegúrate de que los cambios en GitHub y en los Secrets de Streamlit se hayan guardado y reinicia la app.")
         return None
-
     try:
         creds_bytes = base64.b64decode(creds_b64_str)
         creds_json_str = creds_bytes.decode('utf-8')

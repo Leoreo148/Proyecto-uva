@@ -30,16 +30,16 @@ COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveed
 @st.cache_resource
 def get_google_sheets_client():
     """
-    Decodifica las credenciales desde Base64 buscando la clave 'gcp_service_account'.
+    Decodifica las credenciales desde Base64 y devuelve el cliente
+    de gspread autenticado.
     """
-    # El nombre de la clave que buscaremos ahora coincide con el que tienes en tus Secrets
+    # El código busca la clave 'gcp_service_account' que ya tienes configurada.
     SECRET_KEY_NAME = "gcp_service_account" 
 
     if SECRET_KEY_NAME not in st.secrets:
         st.error(f"Error: No se encontró la clave '{SECRET_KEY_NAME}' en los Secrets.")
         return None
 
-    # Leemos el texto Base64 usando el nombre correcto
     creds_b64_str = st.secrets[SECRET_KEY_NAME]
 
     try:
@@ -51,7 +51,6 @@ def get_google_sheets_client():
         # Autenticamos el cliente de gspread
         gspread_client = gspread.service_account_from_dict(creds_dict)
         
-        st.success("¡Conexión con Google Sheets establecida exitosamente!")
         return gspread_client
 
     except Exception as e:

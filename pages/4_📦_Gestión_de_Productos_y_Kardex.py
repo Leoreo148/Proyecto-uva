@@ -24,40 +24,47 @@ SHEET_SALIDAS = 'Salidas'
 # Añadimos la nueva columna 'Stock_Minimo' que conversamos
 COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion', 'Stock_Minimo']
 
-# --- NUEVO: FUNCIONES DE CONEXIÓN A GOOGLE SHEETS ---
-# (Recuerda tener 'import json' al inicio de tu archivo)
-
-import json
-import gspread
-from gspread_pandas import Spread, Client
-# ... (el resto de tus importaciones) ...
-
 @st.cache_resource
 def get_google_sheets_client():
     """
-    Decodifica las credenciales desde Base64 y devuelve el cliente
-    de gspread autenticado directamente.
+    VERSIÓN DE DEPURACIÓN:
+    Verifica y muestra qué claves de secretos está leyendo la aplicación.
     """
-    if "gcp_service_account_base64" not in st.secrets:
-        st.error("Error: No se encontró la clave `gcp_service_account_base64` en los Secrets.")
-        return None
+    # --- INICIO DEL BLOQUE DE DEPURACIÓN ---
+    st.warning("INICIANDO MODO DEPURACIÓN DE SECRETS", icon="🕵️")
+    
+    # Obtenemos una lista de todas las claves de secretos que la app encontró
+    available_secrets = list(st.secrets.keys())
+    st.write("La aplicación encontró las siguientes claves de secretos:")
+    st.code(str(available_secrets), language="text")
 
-    creds_b64_str = st.secrets["gcp_service_account_base64"]
+    # Verificamos si nuestra clave específica está en la lista
+    required_key = "gcp_service_account_base64"
+    if required_key in available_secrets:
+        st.success(f"¡Éxito! La clave requerida '{required_key}' fue encontrada.")
+    else:
+        st.error(f"¡FALLO! La clave requerida '{required_key}' NO fue encontrada.")
+        st.info("Por favor, ve a tus Secrets y asegúrate de que el nombre de la clave sea exactamente ese, todo en minúsculas y sin espacios.")
+        return None # Detenemos la ejecución aquí si la clave no existe
+    # --- FIN DEL BLOQUE DE DEPURACIÓN ---
+
+    creds_b64_str = st.secrets[required_key]
 
     try:
-        # Decodificamos y preparamos las credenciales
         creds_bytes = base64.b64decode(creds_b64_str)
         creds_json_str = creds_bytes.decode('utf-8')
         creds_dict = json.loads(creds_json_str)
 
-        # Autenticamos y creamos el cliente de gspread
         gspread_client = gspread.service_account_from_dict(creds_dict)
         
-        # Devolvemos el cliente autenticado directamente
+        # Una vez que la conexión funcione, puedes eliminar este bloque de depuración.
+        st.balloons()
+        st.success("¡CONEXIÓN EXITOSA! Ya puedes restaurar la versión anterior de la función.")
+        
         return gspread_client
 
     except Exception as e:
-        st.error("FALLO CRÍTICO AL PROCESAR LAS CREDENCIALES BASE64.", icon="🔥")
+        st.error("FALLO CRÍTICO AL PROCESAR LAS CREDENCIALES.", icon="🔥")
         st.code(f"Detalle técnico: {e}", language="text")
         return None
         

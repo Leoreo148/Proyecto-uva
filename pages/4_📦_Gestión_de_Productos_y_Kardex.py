@@ -1,3 +1,4 @@
+import json
 import streamlit as st
 import pandas as pd
 import os
@@ -26,9 +27,23 @@ COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveed
 @st.cache_resource
 def get_google_sheets_client():
     """Crea y cachea el cliente de conexión a Google Sheets."""
-    creds = st.secrets["gcp_service_account"]
-    # Reemplaza 'gspread.service_account_from_dict' por 'Client'
-    client = Client(creds)
+    if "gcp_service_account" not in st.secrets:
+        st.error("Credenciales de Google no encontradas. Asegúrate de configurar `gcp_service_account` en los Secrets de Streamlit.")
+        return None
+
+    # Obtenemos el secreto, que gracias a las comillas triples es un string
+    creds_str = st.secrets["gcp_service_account"]
+    
+    try:
+        # Lo convertimos de string (texto) a un diccionario de Python
+        creds_dict = json.loads(creds_str)
+    except json.JSONDecodeError:
+        st.error("Error al procesar las credenciales de Google. Revisa que el JSON copiado en los Secrets sea válido.")
+        return None
+
+    # Usamos el diccionario ya convertido para autenticar
+    sa = gspread.service_account_from_dict(creds_dict)
+    client = Client(auth=sa)
     return client
 
 @st.cache_data(ttl=60) # Cachear los datos por 60 segundos

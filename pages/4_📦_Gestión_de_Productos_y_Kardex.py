@@ -168,7 +168,7 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
                     df_new_ingresos = df_new_ingresos.astype(object).where(pd.notnull(df_new_ingresos), None)
                     df_new_salidas = df_new_salidas.astype(object).where(pd.notnull(df_new_salidas), None)
 
-                    # --- NUEVO: CONVERSIÓN DE FECHAS A TEXTO ---
+                    # --- CONVERSIÓN DE FECHAS A TEXTO (CORREGIDO) ---
                     # Convertimos las columnas de fecha a formato de texto 'YYYY-MM-DD'
                     if 'Fecha' in df_new_ingresos.columns:
                         df_new_ingresos['Fecha'] = pd.to_datetime(df_new_ingresos['Fecha']).dt.strftime('%Y-%m-%d')
@@ -176,7 +176,12 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
                         df_new_ingresos['Fecha_Vencimiento'] = pd.to_datetime(df_new_ingresos['Fecha_Vencimiento']).dt.strftime('%Y-%m-%d')
                     
                     if 'Fecha' in df_new_salidas.columns:
-                        df_new_salidas['Fecha'] = pd.to_datetime(df_new_salidas['Fecha']).dt.strftime('%Y-%m-%d')
+                        # Convierte a fecha, ignorando los errores (como el número "2")
+                        df_new_salidas['Fecha'] = pd.to_datetime(df_new_salidas['Fecha'], errors='coerce')
+                        # Elimina las filas donde la conversión falló
+                        df_new_salidas.dropna(subset=['Fecha'], inplace=True)
+                        # Formatea las fechas válidas restantes a texto
+                        df_new_salidas['Fecha'] = df_new_salidas['Fecha'].dt.strftime('%Y-%m-%d')
 
                     st.write("Insertando nuevos productos...")
                     columnas_productos_final = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion', 'Stock_Minimo']

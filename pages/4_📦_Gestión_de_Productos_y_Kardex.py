@@ -96,16 +96,17 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
             with st.spinner("Procesando archivo y actualizando Supabase..."):
                 try:
                     # --- LÓGICA ORIGINAL PARA PROCESAR EL EXCEL ---
-                    # 1. Leer Catálogo de Productos
+                    # 1. Leer Catálogo de Productos desde la hoja 'Cod_Producto'
                     df_new_productos = pd.read_excel(uploaded_file, sheet_name='Cod_Producto', header=1).rename(columns={'CODIGO': 'Codigo', 'PRODUCTOS': 'Producto'})
                     df_new_productos.dropna(subset=['Codigo', 'Producto'], inplace=True)
+                    # Asegurarse de que las columnas coincidan con la tabla de Supabase
                     df_new_productos['Ingrediente_Activo'] = df_new_productos.get('ING. ACTIVO', None)
                     df_new_productos['Unidad'] = df_new_productos.get('UM', None)
-                    df_new_productos['Proveedor'] = None
+                    df_new_productos['Proveedor'] = None # Esta info no está en esta hoja
                     df_new_productos['Tipo_Accion'] = df_new_productos.get('SUBGRUPO', None)
-                    df_new_productos['Stock_Minimo'] = 0
+                    df_new_productos['Stock_Minimo'] = 0 # Valor por defecto
 
-                    # 2. Leer Stock Físico
+                    # 2. Leer Stock Físico desde la hoja 'STOCK'
                     df_stock_sheet = pd.read_excel(uploaded_file, sheet_name='STOCK', header=2)
                     p1 = df_stock_sheet[['PRODUCTO', 'CANT']].copy().rename(columns={'PRODUCTO': 'Producto', 'CANT': 'Cantidad'})
                     p2 = df_stock_sheet[['PRODUCTO.1', 'CANT.1']].copy().rename(columns={'PRODUCTO.1': 'Producto', 'CANT.1': 'Cantidad'})
@@ -114,13 +115,13 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
                     stock_data['Cantidad'] = pd.to_numeric(stock_data['Cantidad'], errors='coerce').fillna(0)
                     stock_data = stock_data[stock_data['Cantidad'] > 0]
 
-                    # 3. Leer Precios Históricos
+                    # 3. Leer Precios Históricos desde la hoja 'Ingreso'
                     df_ingresos_historicos = pd.read_excel(uploaded_file, sheet_name='Ingreso', header=1)
                     df_ingresos_historicos['F.DE ING.'] = pd.to_datetime(df_ingresos_historicos['F.DE ING.'])
                     df_ultimos_precios = df_ingresos_historicos.sort_values(by='F.DE ING.', ascending=False).drop_duplicates(subset=['PRODUCTOS'], keep='first')
                     df_ultimos_precios = df_ultimos_precios[['PRODUCTOS', 'PREC. UNI S/.']].rename(columns={'PRODUCTOS': 'Producto', 'PREC. UNI S/.': 'Precio_Unitario'})
 
-                    # 4. Unir todo para crear los registros de Ingresos
+                    # 4. Unir todo para crear los registros de Ingresos iniciales
                     stock_data['join_key'] = stock_data['Producto'].astype(str).str.strip().str.lower()
                     df_new_productos['join_key'] = df_new_productos['Producto'].astype(str).str.strip().str.lower()
                     df_ultimos_precios['join_key'] = df_ultimos_precios['Producto'].astype(str).str.strip().str.lower()
@@ -146,13 +147,18 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
                             })
                     df_new_ingresos = pd.DataFrame(ingresos_list).drop_duplicates(subset=['Codigo_Producto'], keep='first')
 
-                    # 5. Leer los datos de Salidas
+                    # 5. Leer los datos de Salidas desde la hoja 'Salida'
                     df_new_salidas = pd.read_excel(uploaded_file, sheet_name='Salida', header=1)
+                    # Renombrar columnas para que coincidan con la tabla de Supabase
                     df_new_salidas = df_new_salidas.rename(columns={
-                        'FECHA': 'Fecha', 'LOTE': 'Lote_Sector', 'CANT.': 'Cantidad',
-                        'COD. PROD': 'Codigo_Producto', 'OBJETIVO DEL TRATAMIENTO': 'Objetivo_Tratamiento',
+                        'FECHA': 'Fecha',
+                        'LOTE': 'Lote_Sector',
+                        'CANT.': 'Cantidad',
+                        'COD. PROD': 'Codigo_Producto',
+                        'OBJETIVO DEL TRATAMIENTO': 'Objetivo_Tratamiento',
                         'PRODUCTO': 'Producto'
                     })
+                    # Seleccionar solo las columnas que necesitamos
                     columnas_salidas_necesarias = ['Fecha', 'Lote_Sector', 'Cantidad', 'Codigo_Producto', 'Objetivo_Tratamiento', 'Producto']
                     df_new_salidas = df_new_salidas[[col for col in columnas_salidas_necesarias if col in df_new_salidas.columns]]
 
@@ -170,7 +176,9 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
                     df_new_salidas = df_new_salidas.astype(object).where(pd.notnull(df_new_salidas), None)
 
                     st.write("Insertando nuevos productos...")
-                    productos_records = df_new_productos[['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion', 'Stock_Minimo']].to_dict(orient='records')
+                    # Seleccionar solo las columnas que existen en la tabla de Supabase para evitar errores
+                    columnas_productos_final = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion', 'Stock_Minimo']
+                    productos_records = df_new_productos[columnas_productos_final].to_dict(orient='records')
                     supabase.table('Productos').insert(productos_records).execute()
                     
                     st.write("Insertando registros de inventario inicial (Ingresos)...")
@@ -190,7 +198,6 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
                     st.error(f"Ocurrió un error durante la carga masiva: {e}")
         else:
             st.warning("Por favor, sube un archivo Excel para procesar.")
-
 
 # SECCIÓN 2: AÑADIR NUEVO PRODUCTO (MANUALMENTE)
 with st.expander("➕ Añadir un solo Producto al Catálogo"):

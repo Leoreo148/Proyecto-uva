@@ -24,43 +24,26 @@ SHEET_SALIDAS = 'Salidas'
 # Añadimos la nueva columna 'Stock_Minimo' que conversamos
 COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion', 'Stock_Minimo']
 
-# (Asegúrate de tener todas las importaciones necesarias al inicio de tu archivo:
-# streamlit, json, base64, gspread, pandas, etc.)
-
-# (Asegúrate de tener todas las importaciones: streamlit, json, base64, etc.)
-
+# Reemplaza la función de diagnóstico con esta versión final
 @st.cache_resource
 def get_google_sheets_client():
-    """
-    VERSIÓN DE DIAGNÓSTICO:
-    Usa una credencial hardcodeada para aislar el problema.
-    """
-    # --- INICIO DE LA PRUEBA DE DIAGNÓSTICO ---
-    # ADVERTENCIA: ....
-    # ¡RECUERDA BORRAR ESTO DESPUÉS!
+    SECRET_KEY_NAME = "gcp_service_account" 
 
-    creds_b64_str_temporal = "......."
-
-    # --- FIN DE LA PRUEBA ---
-
-    if creds_b64_str_temporal == "AQUÍ_VA_EL_TEXTO_LARGO_BASE64":
-        st.error("Error de prueba: Debes reemplazar el texto de ejemplo con tu credencial Base64 en el código.")
+    if SECRET_KEY_NAME not in st.secrets:
+        st.error(f"Error: No se encontró la clave '{SECRET_KEY_NAME}' en los Secrets.")
         return None
 
+    creds_b64_str = st.secrets[SECRET_KEY_NAME]
+
     try:
-        # El resto del código usa esta variable temporal en lugar de st.secrets
-        creds_bytes = base64.b64decode(creds_b64_str_temporal)
+        creds_bytes = base64.b64decode(creds_b64_str)
         creds_json_str = creds_bytes.decode('utf-8')
         creds_dict = json.loads(creds_json_str)
         gspread_client = gspread.service_account_from_dict(creds_dict)
-
-        st.success("¡DIAGNÓSTICO EXITOSO! La credencial funciona desde el código.")
-        st.warning("RECUERDA QUITAR EL SECRETO DEL CÓDIGO AHORA.")
-
         return gspread_client
     except Exception as e:
-        st.error("DIAGNÓSTICO FALLIDO: La credencial no funciona ni siquiera desde el código.", icon="🔥")
-        st.code(f"El error sugiere que el texto Base64 está corrupto. Detalle: {e}", language="text")
+        st.error("FALLO CRÍTICO AL PROCESAR LAS CREDENCIALES.", icon="🔥")
+        st.code(f"Detalle técnico: {e}", language="text")
         return None
         
 @st.cache_data(ttl=60) # Cachear los datos por 60 segundos

@@ -6,5 +6,4 @@ plotly
 streamlit-local-storage
 openpyxl
 XlsxWriter
-gspread
-gspread-pandas
+supabase

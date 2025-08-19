@@ -1,4 +1,5 @@
 import json
+import base64
 import streamlit as st
 import pandas as pd
 import os
@@ -34,35 +35,35 @@ from gspread_pandas import Spread, Client
 @st.cache_resource
 def get_google_sheets_client():
     """
-    VERSIÓN FINAL CON LIMPIADOR AUTOMÁTICO:
-    Intenta eliminar caracteres invisibles ('\r') antes de procesar.
+    Decodifica las credenciales desde Base64 para evitar errores de caracteres.
     """
-    if "gcp_service_account" not in st.secrets:
-        st.error("Error Crítico: No se encontró `gcp_service_account` en los Secrets.")
+    if "gcp_service_account_base64" not in st.secrets:
+        st.error("Error: No se encontró la clave `gcp_service_account_base64` en los Secrets.")
         return None
 
-    creds_str = st.secrets["gcp_service_account"]
-
-    # --- INICIO DEL BLOQUE DE LIMPIEZA ---
-    # El carácter '\r' (retorno de carro) a veces se cuela desde Windows
-    # y rompe el JSON. Esta línea lo elimina de forma forzada.
-    cleaned_str = creds_str.replace('\r', '')
-    # --- FIN DEL BLOQUE DE LIMPIEZA ---
+    # Leemos el texto seguro (Base64) desde los secrets
+    creds_b64_str = st.secrets["gcp_service_account_base64"]
 
     try:
-        # Intentamos procesar la cadena ya limpiada
-        creds_dict = json.loads(cleaned_str)
-        
-        # Si llegamos aquí, la conexión debería funcionar
+        # 1. Decodificamos el texto Base64 de vuelta a bytes
+        creds_bytes = base64.b64decode(creds_b64_str)
+        # 2. Convertimos esos bytes a un string de texto JSON limpio
+        creds_json_str = creds_bytes.decode('utf-8')
+        # 3. Convertimos el string de texto JSON a un diccionario de Python
+        creds_dict = json.loads(creds_json_str)
+
+        # Si llegamos aquí, la conexión funcionará
         sa = gspread.service_account_from_dict(creds_dict)
         client = Client(auth=sa)
+        st.success("¡Conexión con Google Sheets establecida exitosamente!")
         return client
 
-    except json.JSONDecodeError as e:
-        st.error("FALLO CRÍTICO: El JSON sigue siendo inválido incluso después de la limpieza automática.", icon="🔥")
-        st.code(f"Detalle del error: {e}", language="text")
-        st.warning("Por favor, verifica que el texto copiado desde el archivo JSON sea exacto, sin caracteres añadidos o faltantes al principio o al final.")
+    except Exception as e:
+        st.error("FALLO CRÍTICO AL PROCESAR LAS CREDENCIALES BASE64.", icon="🔥")
+        st.write("El error sugiere un problema con el texto copiado desde el codificador Base64 o con el archivo original.")
+        st.code(f"Detalle técnico: {e}", language="text")
         return None
+        
 @st.cache_data(ttl=60) # Cachear los datos por 60 segundos
 def cargar_kardex_gsheet():
     """Carga las tres hojas del Kardex desde Google Sheets."""

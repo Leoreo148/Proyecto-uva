@@ -27,25 +27,40 @@ COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveed
 # (Asegúrate de tener todas las importaciones necesarias al inicio de tu archivo:
 # streamlit, json, base64, gspread, pandas, etc.)
 
+# (Asegúrate de tener todas las importaciones: streamlit, json, base64, etc.)
+
 @st.cache_resource
 def get_google_sheets_client():
-    SECRET_KEY_NAME = "gcp_service_account" 
+    """
+    VERSIÓN DE DIAGNÓSTICO:
+    Usa una credencial hardcodeada para aislar el problema.
+    """
+    # --- INICIO DE LA PRUEBA DE DIAGNÓSTICO ---
+    # ADVERTENCIA: ewogICJ0eXBlIjogInNlcnZpY2VfYWNjb3VudCIsCiAgInByb2plY3RfaWQiOiAibXktcHJvamVjdC01MDI3My00Njk1MTQiLAogICJwcml2YXRlX2tleV9pZCI6ICI2OTdjZjdlYjM5OWY4MTNiYWRkYWY4NjkxMWQ5OGVkYjQ4NGFiMTY2IiwKICAicHJpdmF0ZV9rZXkiOiAiLS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tXG5NSUlFdmdJQkFEQU5CZ2txaGtpRzl3MEJBUUVGQUFTQ0JLZ3dnZ1NrQWdFQUFvSUJBUUN5YmFydE12NlRIb3JOXG5QaGdqU2lSNGRTYnJoNVovK3VHLzVFQ2hlTmdzMXNNWU5Xa2V0dTYrMUpQblcvN2JTRWJDSkdEdm44NkRGWEFSXG5VbElLTlN2TW9yMFJoS09BbDNzd1dyRjZtZ2lsMitlTkpLRFhRME55NTdjc0o4UW9wbzJkWXNpd1k1bitEdkNNXG5pR2h3eEE1Ry9SR3Z0V285aEsyeUVRTFhCdXZ4cCtjMXQzc3FPcDhBMTdlL1Y5dVFmM0VtUHBseWdya290WVhUXG5tbEozNFRpMFdjMTM0Wk1zWno0bjRDVG56K2FNWW5OZXNLYTNIL3NST0tUKzBaVW9jQmZUZmltbjlyR0FjQ1A2XG5qbVpkNnVlS1REeDMzNUoyQXAxR2J5dDdMd0t6dk51VU9lT1YwY2Nkck5CZGtXYUZ3clYvVUdmVlVXZ2FVdHgxXG5Ha0xmOEpQdEFnTUJBQUVDZ2dFQUxhM1oxb1A1bkp4ekdIeFBIYW03a0lNZGhhcmVvc0VOemx5WEZ6K2l5RWZyXG5CbVdXRmVEcldqdDk2ZnNwVWVZOUJ6TGRCanU1V09IQ0lRMGNKN1RaRTdpT0F0QWNNNjJVUWhyVjJQZGFRMnY2XG42YTE0NStNMmYxSkhHS3pOa1VLaWVxcHhpb2JWUTY5N2NkN3lMZnhqVTFVeWsvTXowYkFINzlCZkU4R1g0Zk9XXG55TmRXRkVkbVZvejgwd2daRlgvb1BhMHVTN1Q5bW1TNWpHejJpVVE3L3c1UHJpZWkrcHB1VHdQMHQwamRyUnJXXG5PUXMxY3dkZFZqSWJDK1U2UWI4Z2RZa1FxZXB6ZGRYTk9qb2RiRFpMVzNVMUtubkcrK1RGSDI5NjRxS2xVRkx1XG4zU1Vjc1JiNk8vQklRcHB0Umdoem9jci9uZm4wN05FRFdQWGJJcm42bVFLQmdRRGNMTThiLzk3cHNEMnhQWkZOXG5iWWluaVRHQURpdHZoWjBCckpIYmNOZGdPNDZPc2krOHJESzRwNTVJVDZSVjdwYWY4T3A4MzZBRGJmWmhKRnAwXG5aZEFPU2RBcS9FdFlSUS9hTkR0K0V4QWFlaEhSV3A2bVlGNlNLYllTdzRsbSthV1JpSXZxWVcxQ1FzWS92cFMzXG5lZE1WN05VWTJZSlE0OGxza2NhQ1RmNVZ2d0tCZ1FEUGRmQ29lSndPc29uTTVHUEZ6ZDZ2Q2s3TkJ1bFJaY2lvXG5CWnd0ME5SNzdWeG1PUGJ3anRUVzVXSStVWmU2NGJlaWEvT256eENqaXJ0OG5RZzYzZ0h1RUN2dWt0ZTZnMWd2XG5hSWI1S2JBZGtadXA4NjBjTnFtOEF0M2RGa2plMlFBRWp5UytxKzN4aWlXamh3MUpWRXRFdU16akgrcUN6UnJBXG5vbGNFRit6NVV3S0JnUUM4Yi9WS0IzR25HOW1SQ2hxRDVBMGpKajRoVlA5RDBWMFJBN3RKem9mbXF0SlZ1cGMwXG5xVVEzMmUyVUFlV3FUaXJIOUk4Y0ZPQ0VUdWFoT1ZYWmJSSG1TTEpMTitiY1F5OVFGNGdiWFFGWlI4UmNJMnpKXG5CSTJzRnRybnNFYTJ4VTg1QVY2T1dKZ0VMOVl3MUZHL3ZobzFGNTlDUjFaTEdNbFpqR0lUUCtFL1RRS0JnUUNoXG5JVFFpVlZLMzQ1azlodUdySHlObWhqWC83ZTlISml1N3ZHZTUrZWtldTVNNVhlTUZvWm5Uc21Na2pkQ3YrR0hkXG5COFU5djRobnpQZWphSCtjNFJOVXFFREcwa3cxYzVBSmVrRGl3cXNqdkJUUDRnL0F5di8zbzY1WDZkZjlKVU5yXG5SeFk5OVdFZ2FiQ2tHdCtKNWF0MEc2Z2VlNHB6dndPWlBEMGpVOFhkT3dLQmdGbFc0NUNRZlFNZitsTTFBaUw1XG5ISmxsc21YdGdadytXTWJKaGVSb1dzcTRabCtnTGJNaHEzOFdaNVpONGFwbHR1SHp3OFU4NHh3a3V5Q2RicUM2XG5rTXVyMENEMVlud1haWHN0NWZHeVBESncyNUpsVVBNdWNaWmpoRnFjYmk2TmJOdFVyK1I4VGR6UllEdDJ5a1ZsXG5lTzRENlI0ZDN5MUFxK3k3SDFOdXcvckxcbi0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS1cbiIsCiAgImNsaWVudF9lbWFpbCI6ICJiZWxlc3NpYTIwMjVAbXktcHJvamVjdC01MDI3My00Njk1MTQuaWFtLmdzZXJ2aWNlYWNjb3VudC5jb20iLAogICJjbGllbnRfaWQiOiAiMTAxMTk4OTMwODU5ODY5MjExNDk4IiwKICAiYXV0aF91cmkiOiAiaHR0cHM6Ly9hY2NvdW50cy5nb29nbGUuY29tL28vb2F1dGgyL2F1dGgiLAogICJ0b2tlbl91cmkiOiAiaHR0cHM6Ly9vYXV0aDIuZ29vZ2xlYXBpcy5jb20vdG9rZW4iLAogICJhdXRoX3Byb3ZpZGVyX3g1MDlfY2VydF91cmwiOiAiaHR0cHM6Ly93d3cuZ29vZ2xlYXBpcy5jb20vb2F1dGgyL3YxL2NlcnRzIiwKICAiY2xpZW50X3g1MDlfY2VydF91cmwiOiAiaHR0cHM6Ly93d3cuZ29vZ2xlYXBpcy5jb20vcm9ib3QvdjEvbWV0YWRhdGEveDUwOS9iZWxlc3NpYTIwMjUlNDBteS1wcm9qZWN0LTUwMjczLTQ2OTUxNC5pYW0uZ3NlcnZpY2VhY2NvdW50LmNvbSIsCiAgInVuaXZlcnNlX2RvbWFpbiI6ICJnb29nbGVhcGlzLmNvbSIKfQo=
+    # ¡RECUERDA BORRAR ESTO DESPUÉS!
 
-    if SECRET_KEY_NAME not in st.secrets:
-        st.error(f"Error: No se encontró la clave '{SECRET_KEY_NAME}' en los Secrets.")
+    creds_b64_str_temporal = "AQUÍ_VA_EL_TEXTO_LARGO_BASE64"
+
+    # --- FIN DE LA PRUEBA ---
+
+    if creds_b64_str_temporal == "AQUÍ_VA_EL_TEXTO_LARGO_BASE64":
+        st.error("Error de prueba: Debes reemplazar el texto de ejemplo con tu credencial Base64 en el código.")
         return None
 
-    creds_b64_str = st.secrets[SECRET_KEY_NAME]
-
     try:
-        creds_bytes = base64.b64decode(creds_b64_str)
+        # El resto del código usa esta variable temporal en lugar de st.secrets
+        creds_bytes = base64.b64decode(creds_b64_str_temporal)
         creds_json_str = creds_bytes.decode('utf-8')
         creds_dict = json.loads(creds_json_str)
         gspread_client = gspread.service_account_from_dict(creds_dict)
+
+        st.success("¡DIAGNÓSTICO EXITOSO! La credencial funciona desde el código.")
+        st.warning("RECUERDA QUITAR EL SECRETO DEL CÓDIGO AHORA.")
+
         return gspread_client
     except Exception as e:
-        st.error("FALLO CRÍTICO AL PROCESAR LAS CREDENCIALES.", icon="🔥")
-        st.code(f"Detalle técnico: {e}", language="text")
+        st.error("DIAGNÓSTICO FALLIDO: La credencial no funciona ni siquiera desde el código.", icon="🔥")
+        st.code(f"El error sugiere que el texto Base64 está corrupto. Detalle: {e}", language="text")
         return None
         
 @st.cache_data(ttl=60) # Cachear los datos por 60 segundos

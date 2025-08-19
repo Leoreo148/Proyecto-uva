@@ -1,4 +1,4 @@
-import streamlit as st
+eimport streamlit as st
 import pandas as pd
 import os
 import json
@@ -103,7 +103,8 @@ with st.expander("👨‍🔬 Programar Nueva Receta de Mezcla (Ingeniero)"):
                 column_config={
                     "Lote_Seleccionado": st.column_config.SelectboxColumn("Seleccione el Lote a Usar", options=opciones_lotes, required=True),
                     "Total_Producto": st.column_config.NumberColumn("Total Producto (kg o L)", min_value=0.00001, format="%.5f"),
-                    "Total_Pre_Mezcla": st.column_config.NumberColumn("Total Pre-Mezcla (L)", min_value=0.01, format="%.2f")
+                    "Agua": st.column_config.NumberColumn("Agua (L)", min_value=0.001, format="%.2f")
+                    "Total_Pre_Mezcla": st.column_config.NumberColumn("Total Pre-Mezcla (L)", min_value=0.0001, format="%.2f")
                 }, key="editor_mezcla_premezcla"
             )
 

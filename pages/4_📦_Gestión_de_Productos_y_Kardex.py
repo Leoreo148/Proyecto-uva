@@ -1,11 +1,10 @@
 import streamlit as st
 import pandas as pd
-import os
 from datetime import datetime
-import openpyxl
 from io import BytesIO
-from supabase import create\_client, Client
 
+# --- LIBRERÍAS NUEVAS PARA LA CONEXIÓN A SUPABASE ---
+from supabase import create_client, Client
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión de Productos y Kardex", page_icon="📦", layout="wide")
@@ -25,6 +24,7 @@ def init_supabase_connection():
         return client
     except Exception as e:
         st.error(f"Error al conectar con Supabase: {e}")
+        st.info("Asegúrate de haber configurado SUPABASE_URL y SUPABASE_KEY en los Secrets de tu app.")
         return None
 
 supabase = init_supabase_connection()
@@ -45,18 +45,22 @@ def cargar_datos_supabase():
         df_productos = pd.DataFrame(response_productos.data)
 
         # Cargar Ingresos
-        response_ingresos = supabase.table('Ingresos').select("*").execute()
-        df_ingresos = pd.DataFrame(response_ingresos.data)
+        # (Descomentar cuando la tabla 'Ingresos' exista en Supabase)
+        # response_ingresos = supabase.table('Ingresos').select("*").execute()
+        # df_ingresos = pd.DataFrame(response_ingresos.data)
+        df_ingresos = pd.DataFrame() # Placeholder mientras no existe la tabla
 
         # Cargar Salidas
-        response_salidas = supabase.table('Salidas').select("*").execute()
-        df_salidas = pd.DataFrame(response_salidas.data)
+        # (Descomentar cuando la tabla 'Salidas' exista en Supabase)
+        # response_salidas = supabase.table('Salidas').select("*").execute()
+        # df_salidas = pd.DataFrame(response_salidas.data)
+        df_salidas = pd.DataFrame() # Placeholder mientras no existe la tabla
         
         # Convertir columnas de fecha al formato correcto
         for df in [df_ingresos, df_salidas]:
-            if 'Fecha' in df.columns:
+            if not df.empty and 'Fecha' in df.columns:
                 df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
-        if 'Fecha_Vencimiento' in df_ingresos.columns:
+        if not df_ingresos.empty and'Fecha_Vencimiento' in df_ingresos.columns:
             df_ingresos['Fecha_Vencimiento'] = pd.to_datetime(df_ingresos['Fecha_Vencimiento'], errors='coerce')
 
         st.success("¡Datos cargados desde Supabase exitosamente!")
@@ -67,8 +71,6 @@ def cargar_datos_supabase():
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 # --- FUNCIONES DE LÓGICA DE NEGOCIO (SIN CAMBIOS) ---
-# Estas funciones no necesitan cambiar porque operan sobre DataFrames,
-# y la función de carga les provee los DataFrames que necesitan.
 def calcular_stock_por_lote(df_ingresos, df_salidas):
     """Calcula el stock detallado por lote y el total por producto."""
     if df_ingresos.empty:
@@ -76,7 +78,6 @@ def calcular_stock_por_lote(df_ingresos, df_salidas):
         cols_lotes = ['Codigo_Lote', 'Stock_Restante', 'Valor_Lote', 'Codigo_Producto', 'Producto', 'Fecha_Vencimiento', 'Precio_Unitario']
         return pd.DataFrame(columns=cols_totales), pd.DataFrame(columns=cols_lotes)
     
-    # Asegurarse de que las columnas de cantidad sean numéricas
     df_ingresos['Cantidad'] = pd.to_numeric(df_ingresos['Cantidad'], errors='coerce').fillna(0)
     if not df_salidas.empty:
         df_salidas['Cantidad'] = pd.to_numeric(df_salidas['Cantidad'], errors='coerce').fillna(0)
@@ -94,7 +95,6 @@ def calcular_stock_por_lote(df_ingresos, df_salidas):
     lote_info = df_ingresos.drop_duplicates(subset=['Codigo_Lote'])[['Codigo_Lote', 'Codigo_Producto', 'Producto', 'Precio_Unitario', 'Fecha_Vencimiento']]
     stock_lotes_detallado = pd.merge(stock_lotes, lote_info, on='Codigo_Lote', how='left')
     
-    # Asegurarse de que las columnas de precio sean numéricas
     stock_lotes_detallado['Precio_Unitario'] = pd.to_numeric(stock_lotes_detallado['Precio_Unitario'], errors='coerce').fillna(0)
     stock_lotes_detallado['Valor_Lote'] = stock_lotes_detallado['Stock_Restante'] * stock_lotes_detallado['Precio_Unitario']
     
@@ -120,7 +120,6 @@ with st.expander("➕ Añadir Nuevo Producto al Catálogo"):
     with st.form("nuevo_producto_form", clear_on_submit=True):
         st.subheader("Detalles del Nuevo Producto")
         
-        # Creamos columnas para un mejor layout del formulario
         col1, col2 = st.columns(2)
         with col1:
             prod_codigo = st.text_input("Código del Producto (ej: F001)")
@@ -139,7 +138,6 @@ with st.expander("➕ Añadir Nuevo Producto al Catálogo"):
                 st.warning("Por favor, complete al menos Código, Nombre y Unidad.")
             else:
                 try:
-                    # Creamos un diccionario con los datos del nuevo producto
                     nuevo_producto_data = {
                         'Codigo': prod_codigo,
                         'Producto': prod_nombre,
@@ -149,10 +147,9 @@ with st.expander("➕ Añadir Nuevo Producto al Catálogo"):
                         'Tipo_Accion': prod_tipo_accion,
                         'Stock_Minimo': prod_stock_min
                     }
-                    # Insertamos el nuevo registro en la tabla 'Productos' de Supabase
                     supabase.table('Productos').insert(nuevo_producto_data).execute()
                     st.success(f"¡Producto '{prod_nombre}' añadido a la base de datos!")
-                    st.cache_data.clear() # Limpiamos el caché para que se recarguen los datos
+                    st.cache_data.clear()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error al guardar el producto en Supabase: {e}")
@@ -165,7 +162,6 @@ if df_productos.empty:
 else:
     df_total_stock, df_stock_lotes = calcular_stock_por_lote(df_ingresos, df_salidas)
     
-    # Renombramos la columna 'id' de Supabase para evitar conflictos
     if 'id' in df_productos.columns:
         df_productos = df_productos.rename(columns={'id': 'supabase_id'})
 
@@ -184,7 +180,6 @@ else:
 
     st.dataframe(df_display, use_container_width=True, hide_index=True)
     
-    # (El resto de la interfaz para descargar reportes y ver lotes se mantiene igual)
     st.subheader("📥 Descargar Reportes")
     col1, col2 = st.columns(2)
     with col1:
@@ -199,8 +194,8 @@ else:
     st.divider()
     
     st.subheader("Ver Desglose de Lotes Activos por Producto")
-    if not df_productos.empty:
-        producto_seleccionado = st.selectbox("Seleccione un producto:", options=df_productos['Producto'])
+    if not df_productos.empty and 'Producto' in df_productos.columns and df_productos['Producto'].notna().any():
+        producto_seleccionado = st.selectbox("Seleccione un producto:", options=df_productos['Producto'].dropna())
         if producto_seleccionado:
             codigo_seleccionado = df_productos.loc[df_productos['Producto'] == producto_seleccionado, 'Codigo'].iloc[0]
             
@@ -215,3 +210,4 @@ else:
                     lotes_activos['Stock_Restante'] = lotes_activos['Stock_Restante'].map('{:,.2f}'.format)
                     lotes_activos['Valor_Lote'] = lotes_activos['Valor_Lote'].map('S/{:,.2f}'.format)
                     st.dataframe(lotes_activos[['Codigo_Lote', 'Stock_Restante', 'Precio_Unitario', 'Valor_Lote', 'Fecha_Vencimiento']], use_container_width=True, hide_index=True)
+

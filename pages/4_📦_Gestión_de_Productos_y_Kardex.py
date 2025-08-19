@@ -4,52 +4,83 @@ import os
 from datetime import datetime
 import openpyxl
 from io import BytesIO
+from supabase import create\_client, Client
+
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión de Productos y Kardex", page_icon="📦", layout="wide")
 st.title("📦 Gestión de Productos y Kardex")
-st.write("Catálogo de productos y visualización del stock total, valorizado y detallado por lotes.")
+st.write("Catálogo de productos y stock, conectado a una base de datos permanente con Supabase.")
 
-# --- CONSTANTES Y NOMBRES DE ARCHIVOS ---
-KARDEX_FILE = 'kardex_fundo.xlsx'
-SHEET_PRODUCTS = 'Productos'
-SHEET_INGRESOS = 'Ingresos'
-SHEET_SALIDAS = 'Salidas'
+# --- FUNCIÓN DE CONEXIÓN SEGURA A SUPABASE ---
+@st.cache_resource
+def init_supabase_connection():
+    """
+    Inicializa y cachea la conexión a Supabase usando las credenciales de st.secrets.
+    """
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        client = create_client(url, key)
+        return client
+    except Exception as e:
+        st.error(f"Error al conectar con Supabase: {e}")
+        return None
 
-COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion']
-COLS_INGRESOS = ['Codigo_Lote', 'Fecha', 'Tipo', 'Proveedor', 'Factura', 'Producto', 'Codigo_Producto', 'Cantidad', 'Precio_Unitario', 'Fecha_Vencimiento']
-COLS_SALIDAS = ['Fecha', 'Lote_Sector', 'Turno', 'Producto', 'Cantidad', 'Codigo_Producto', 'Objetivo_Tratamiento', 'Codigo_Lote']
+supabase = init_supabase_connection()
 
-# --- FUNCIONES CORE DEL KARDEX ---
-def cargar_kardex():
-    if os.path.exists(KARDEX_FILE):
-        try:
-            xls = pd.ExcelFile(KARDEX_FILE)
-            df_productos = pd.read_excel(xls, sheet_name=SHEET_PRODUCTS) if SHEET_PRODUCTS in xls.sheet_names else pd.DataFrame(columns=COLS_PRODUCTOS)
-            df_ingresos = pd.read_excel(xls, sheet_name=SHEET_INGRESOS) if SHEET_INGRESOS in xls.sheet_names else pd.DataFrame(columns=COLS_INGRESOS)
-            df_salidas = pd.read_excel(xls, sheet_name=SHEET_SALIDAS) if SHEET_SALIDAS in xls.sheet_names else pd.DataFrame(columns=COLS_SALIDAS)
-        except Exception as e:
-            st.error(f"Error al leer el archivo Kardex: {e}")
-            return pd.DataFrame(columns=COLS_PRODUCTOS), pd.DataFrame(columns=COLS_INGRESOS), pd.DataFrame(columns=COLS_SALIDAS)
-    else:
-        return pd.DataFrame(columns=COLS_PRODUCTOS), pd.DataFrame(columns=COLS_INGRESOS), pd.DataFrame(columns=COLS_SALIDAS)
-    return df_productos, df_ingresos, df_salidas
+# --- NUEVAS FUNCIONES PARA CARGAR Y GUARDAR DATOS EN SUPABASE ---
+@st.cache_data(ttl=60) # Cachear los datos por 60 segundos
+def cargar_datos_supabase():
+    """
+    Carga las tres tablas del Kardex (Productos, Ingresos, Salidas) desde Supabase.
+    """
+    if supabase is None:
+        st.warning("La conexión con Supabase no está disponible. No se pueden cargar los datos.")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-def guardar_kardex(df_productos, df_ingresos, df_salidas):
-    with pd.ExcelWriter(KARDEX_FILE, engine='openpyxl') as writer:
-        df_productos.to_excel(writer, sheet_name=SHEET_PRODUCTS, index=False)
-        df_ingresos.to_excel(writer, sheet_name=SHEET_INGRESOS, index=False)
-        df_salidas.to_excel(writer, sheet_name=SHEET_SALIDAS, index=False)
-    return True
+    try:
+        # Cargar Productos
+        response_productos = supabase.table('Productos').select("*").execute()
+        df_productos = pd.DataFrame(response_productos.data)
 
+        # Cargar Ingresos
+        response_ingresos = supabase.table('Ingresos').select("*").execute()
+        df_ingresos = pd.DataFrame(response_ingresos.data)
+
+        # Cargar Salidas
+        response_salidas = supabase.table('Salidas').select("*").execute()
+        df_salidas = pd.DataFrame(response_salidas.data)
+        
+        # Convertir columnas de fecha al formato correcto
+        for df in [df_ingresos, df_salidas]:
+            if 'Fecha' in df.columns:
+                df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
+        if 'Fecha_Vencimiento' in df_ingresos.columns:
+            df_ingresos['Fecha_Vencimiento'] = pd.to_datetime(df_ingresos['Fecha_Vencimiento'], errors='coerce')
+
+        st.success("¡Datos cargados desde Supabase exitosamente!")
+        return df_productos, df_ingresos, df_salidas
+
+    except Exception as e:
+        st.error(f"Error al leer los datos de Supabase: {e}")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+# --- FUNCIONES DE LÓGICA DE NEGOCIO (SIN CAMBIOS) ---
+# Estas funciones no necesitan cambiar porque operan sobre DataFrames,
+# y la función de carga les provee los DataFrames que necesitan.
 def calcular_stock_por_lote(df_ingresos, df_salidas):
     """Calcula el stock detallado por lote y el total por producto."""
     if df_ingresos.empty:
-        # Devuelve dataframes vacíos con la estructura de columnas completa para evitar errores
         cols_totales = ['Codigo_Producto', 'Stock_Actual', 'Stock_Valorizado']
         cols_lotes = ['Codigo_Lote', 'Stock_Restante', 'Valor_Lote', 'Codigo_Producto', 'Producto', 'Fecha_Vencimiento', 'Precio_Unitario']
         return pd.DataFrame(columns=cols_totales), pd.DataFrame(columns=cols_lotes)
     
+    # Asegurarse de que las columnas de cantidad sean numéricas
+    df_ingresos['Cantidad'] = pd.to_numeric(df_ingresos['Cantidad'], errors='coerce').fillna(0)
+    if not df_salidas.empty:
+        df_salidas['Cantidad'] = pd.to_numeric(df_salidas['Cantidad'], errors='coerce').fillna(0)
+
     ingresos_por_lote = df_ingresos.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Ingresada'})
     
     if not df_salidas.empty and 'Codigo_Lote' in df_salidas.columns:
@@ -63,9 +94,8 @@ def calcular_stock_por_lote(df_ingresos, df_salidas):
     lote_info = df_ingresos.drop_duplicates(subset=['Codigo_Lote'])[['Codigo_Lote', 'Codigo_Producto', 'Producto', 'Precio_Unitario', 'Fecha_Vencimiento']]
     stock_lotes_detallado = pd.merge(stock_lotes, lote_info, on='Codigo_Lote', how='left')
     
-    if 'Precio_Unitario' not in stock_lotes_detallado.columns:
-        stock_lotes_detallado['Precio_Unitario'] = 0
-        
+    # Asegurarse de que las columnas de precio sean numéricas
+    stock_lotes_detallado['Precio_Unitario'] = pd.to_numeric(stock_lotes_detallado['Precio_Unitario'], errors='coerce').fillna(0)
     stock_lotes_detallado['Valor_Lote'] = stock_lotes_detallado['Stock_Restante'] * stock_lotes_detallado['Precio_Unitario']
     
     agg_funcs = {'Stock_Restante': 'sum', 'Valor_Lote': 'sum'}
@@ -74,99 +104,87 @@ def calcular_stock_por_lote(df_ingresos, df_salidas):
     return total_stock_producto, stock_lotes_detallado
 
 def to_excel(df):
+    """Convierte un DataFrame a un archivo Excel en memoria para descarga."""
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Reporte')
     return output.getvalue()
 
-# --- CARGA INICIAL DE DATOS ---
-df_productos, df_ingresos, df_salidas = cargar_kardex()
+# --- CARGA INICIAL DE DATOS DESDE SUPABASE ---
+df_productos, df_ingresos, df_salidas = cargar_datos_supabase()
 
-# --- SECCIÓN 1: CARGA INICIAL (CON NOMBRES DE COLUMNA CORREGIDOS) ---
-with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel", expanded=True):
-    st.info("Utilice esta sección para cargar su catálogo de productos y stock inicial desde su archivo `2025AgroqFertil.xlsx`.")
-    uploaded_file = st.file_uploader("Suba su archivo Excel", type=["xlsx"])
-    if st.button("Procesar Archivo Excel Completo"):
-        if uploaded_file:
-            with st.spinner("Procesando archivo Excel..."):
+# --- INTERFAZ DE USUARIO ---
+
+# SECCIÓN 1: AÑADIR NUEVO PRODUCTO
+with st.expander("➕ Añadir Nuevo Producto al Catálogo"):
+    with st.form("nuevo_producto_form", clear_on_submit=True):
+        st.subheader("Detalles del Nuevo Producto")
+        
+        # Creamos columnas para un mejor layout del formulario
+        col1, col2 = st.columns(2)
+        with col1:
+            prod_codigo = st.text_input("Código del Producto (ej: F001)")
+            prod_nombre = st.text_input("Nombre del Producto")
+            prod_ing_activo = st.text_input("Ingrediente Activo")
+            prod_stock_min = st.number_input("Stock Mínimo", min_value=0.0, step=1.0, format="%.2f")
+        with col2:
+            prod_unidad = st.selectbox("Unidad", ["Litro", "Kilo", "Unidad", "Galón", "Bolsa"])
+            prod_proveedor = st.text_input("Proveedor Principal")
+            prod_tipo_accion = st.selectbox("Tipo de Acción", ["Fertilizante", "Fungicida", "Insecticida", "Herbicida", "Bioestimulante", "Otro"])
+
+        submitted = st.form_submit_button("Añadir Producto a Supabase")
+        
+        if submitted and supabase:
+            if not all([prod_codigo, prod_nombre, prod_unidad]):
+                st.warning("Por favor, complete al menos Código, Nombre y Unidad.")
+            else:
                 try:
-                    # 1. Leer Catálogo de Productos
-                    df_new_productos = pd.read_excel(uploaded_file, sheet_name='Cod_Producto', header=1).rename(columns={'CODIGO': 'Codigo', 'PRODUCTOS': 'Producto'})
-                    df_new_productos.dropna(subset=['Codigo', 'Producto'], inplace=True)
-
-                    # 2. Leer Stock Físico
-                    df_stock_sheet = pd.read_excel(uploaded_file, sheet_name='STOCK', header=2)
-                    p1 = df_stock_sheet[['PRODUCTO', 'CANT']].copy().rename(columns={'PRODUCTO': 'Producto', 'CANT': 'Cantidad'})
-                    p2 = df_stock_sheet[['PRODUCTO.1', 'CANT.1']].copy().rename(columns={'PRODUCTO.1': 'Producto', 'CANT.1': 'Cantidad'})
-                    p3 = df_stock_sheet[['PRODUCTO.2', 'CANT.2']].copy().rename(columns={'PRODUCTO.2': 'Producto', 'CANT.2': 'Cantidad'})
-                    stock_data = pd.concat([p1, p2, p3], ignore_index=True).dropna(subset=['Producto'])
-                    stock_data['Cantidad'] = pd.to_numeric(stock_data['Cantidad'], errors='coerce').fillna(0)
-                    stock_data = stock_data[stock_data['Cantidad'] > 0]
-
-                    # 3. Leer Precios Históricos usando los nombres de columna que nos diste
-                    df_ingresos_historicos = pd.read_excel(uploaded_file, sheet_name='Ingreso', header=1)
-                    # Usamos los nombres exactos de tu archivo
-                    df_ingresos_historicos['F.DE ING.'] = pd.to_datetime(df_ingresos_historicos['F.DE ING.'])
-                    df_ultimos_precios = df_ingresos_historicos.sort_values(by='F.DE ING.', ascending=False).drop_duplicates(subset=['PRODUCTOS'], keep='first')
-                    df_ultimos_precios = df_ultimos_precios[['PRODUCTOS', 'PREC. UNI S/.']].rename(columns={'PRODUCTOS': 'Producto', 'PREC. UNI S/.': 'Precio_Unitario'})
-
-                    # 4. Unir todo
-                    stock_data['join_key'] = stock_data['Producto'].astype(str).str.strip().str.lower()
-                    df_new_productos['join_key'] = df_new_productos['Producto'].astype(str).str.strip().str.lower()
-                    df_ultimos_precios['join_key'] = df_ultimos_precios['Producto'].astype(str).str.strip().str.lower()
-                    
-                    df_merged = pd.merge(stock_data, df_new_productos, on='join_key', how='left')
-                    df_final_merged = pd.merge(df_merged, df_ultimos_precios, on='join_key', how='left')
-                    df_final_merged['Precio_Unitario'].fillna(0, inplace=True)
-
-                    # 5. Crear lotes iniciales usando el precio encontrado
-                    ingresos_list = []
-                    for _, row in df_final_merged.iterrows():
-                        if pd.notna(row['Codigo']):
-                            ingresos_list.append({
-                                'Codigo_Lote': f"{row['Codigo']}-INV-INICIAL",
-                                'Fecha': datetime.now().strftime("%Y-%m-%d"), 'Tipo': 'Ajuste de Inventario Inicial',
-                                'Proveedor': row.get('PROVEEDOR', 'N/A'), 'Factura': row.get('FACTURA', 'N/A'),
-                                'Producto': row['Producto_y'],
-                                'Codigo_Producto': row['Codigo'], 'Cantidad': row['Cantidad'],
-                                'Precio_Unitario': row['Precio_Unitario'],
-                                'Fecha_Vencimiento': None
-                            })
-                    
-                    df_new_ingresos = pd.DataFrame(ingresos_list).drop_duplicates(subset=['Codigo_Producto'], keep='first')
-                    guardar_kardex(df_productos=df_new_productos, df_ingresos=df_new_ingresos, df_salidas=pd.DataFrame(columns=COLS_SALIDAS))
-                    st.success("¡Catálogo y stock inicial (con precios) cargados exitosamente!")
+                    # Creamos un diccionario con los datos del nuevo producto
+                    nuevo_producto_data = {
+                        'Codigo': prod_codigo,
+                        'Producto': prod_nombre,
+                        'Ingrediente_Activo': prod_ing_activo,
+                        'Unidad': prod_unidad,
+                        'Proveedor': prod_proveedor,
+                        'Tipo_Accion': prod_tipo_accion,
+                        'Stock_Minimo': prod_stock_min
+                    }
+                    # Insertamos el nuevo registro en la tabla 'Productos' de Supabase
+                    supabase.table('Productos').insert(nuevo_producto_data).execute()
+                    st.success(f"¡Producto '{prod_nombre}' añadido a la base de datos!")
+                    st.cache_data.clear() # Limpiamos el caché para que se recarguen los datos
                     st.rerun()
-
-                except KeyError as e:
-                    st.error(f"Error de columna: No se encontró la columna {e}. Revisa que los nombres en tu Excel sean correctos.")
                 except Exception as e:
-                    st.error(f"Ocurrió un error. Verifique su archivo Excel. Detalle: {e}")
-                    
-# --- (El resto del código se mantiene igual) ---
+                    st.error(f"Error al guardar el producto en Supabase: {e}")
+
+# SECCIÓN 2: VISUALIZACIÓN DEL KARDEX Y STOCK
 st.divider()
 st.header("Kardex y Stock Actual")
 if df_productos.empty:
-    st.warning("El catálogo de productos está vacío. Cargue el archivo inicial o añada un producto manualmente.")
+    st.warning("El catálogo de productos está vacío. Añada un producto para empezar.")
 else:
     df_total_stock, df_stock_lotes = calcular_stock_por_lote(df_ingresos, df_salidas)
     
+    # Renombramos la columna 'id' de Supabase para evitar conflictos
+    if 'id' in df_productos.columns:
+        df_productos = df_productos.rename(columns={'id': 'supabase_id'})
+
     df_vista_kardex = pd.merge(df_productos, df_total_stock, left_on='Codigo', right_on='Codigo_Producto', how='left').fillna(0)
     
-    # --- AJUSTE DE ROBUSTEZ ---
-    # Se asegura de mostrar solo las columnas que realmente existen para evitar KeyErrors
-    columnas_a_mostrar = ['Codigo', 'Producto', 'Stock_Actual', 'Unidad', 'Stock_Valorizado']
-    columnas_existentes = [col for col in columnas_a_mostrar if col in df_vista_kardex.columns]
-    df_vista_kardex = df_vista_kardex[columnas_existentes]
+    columnas_a_mostrar = ['Codigo', 'Producto', 'Stock_Actual', 'Unidad', 'Stock_Valorizado', 'Stock_Minimo']
+    for col in columnas_a_mostrar:
+        if col not in df_vista_kardex.columns:
+            df_vista_kardex[col] = 0
+
+    df_vista_kardex = df_vista_kardex[columnas_a_mostrar]
     
     df_display = df_vista_kardex.copy()
-    if 'Stock_Valorizado' in df_display.columns:
-        df_display['Stock_Valorizado'] = df_display['Stock_Valorizado'].map('${:,.2f}'.format)
-    if 'Stock_Actual' in df_display.columns:
-        df_display['Stock_Actual'] = df_display['Stock_Actual'].map('{:,.2f}'.format)
+    df_display['Stock_Valorizado'] = df_display['Stock_Valorizado'].map('S/{:,.2f}'.format)
+    df_display['Stock_Actual'] = df_display['Stock_Actual'].map('{:,.2f}'.format)
 
     st.dataframe(df_display, use_container_width=True, hide_index=True)
     
+    # (El resto de la interfaz para descargar reportes y ver lotes se mantiene igual)
     st.subheader("📥 Descargar Reportes")
     col1, col2 = st.columns(2)
     with col1:
@@ -176,23 +194,24 @@ else:
         if not df_stock_lotes.empty:
             lotes_activos_full = df_stock_lotes[df_stock_lotes['Stock_Restante'] > 0.001]
             excel_detallado = to_excel(lotes_activos_full)
-            st.download_button(label="Descargar Inventario Detallado por Lote", data=excel_detallado, file_name=f"Detalle_Lotes_{datetime.now().strftime('%Y%m%d')}.xlsx")
+            st.download_button(label="Descargar Inventario por Lote", data=excel_detallado, file_name=f"Detalle_Lotes_{datetime.now().strftime('%Y%m%d')}.xlsx")
     
     st.divider()
     
     st.subheader("Ver Desglose de Lotes Activos por Producto")
-    producto_seleccionado = st.selectbox("Seleccione un producto:", options=df_productos['Producto'])
-    if producto_seleccionado:
-        codigo_seleccionado = df_productos.loc[df_productos['Producto'] == producto_seleccionado, 'Codigo'].iloc[0]
-        
-        if not df_stock_lotes.empty and 'Codigo_Producto' in df_stock_lotes.columns:
-            lotes_del_producto = df_stock_lotes[df_stock_lotes['Codigo_Producto'] == codigo_seleccionado]
-            lotes_activos = lotes_del_producto[lotes_del_producto['Stock_Restante'] > 0.001].copy()
+    if not df_productos.empty:
+        producto_seleccionado = st.selectbox("Seleccione un producto:", options=df_productos['Producto'])
+        if producto_seleccionado:
+            codigo_seleccionado = df_productos.loc[df_productos['Producto'] == producto_seleccionado, 'Codigo'].iloc[0]
             
-            if lotes_activos.empty:
-                st.info(f"No hay lotes con stock activo para '{producto_seleccionado}'.")
-            else:
-                lotes_activos['Precio_Unitario'] = lotes_activos['Precio_Unitario'].map('${:,.2f}'.format)
-                lotes_activos['Stock_Restante'] = lotes_activos['Stock_Restante'].map('{:,.2f}'.format)
-                lotes_activos['Valor_Lote'] = lotes_activos['Valor_Lote'].map('${:,.2f}'.format)
-                st.dataframe(lotes_activos[['Codigo_Lote', 'Stock_Restante', 'Precio_Unitario', 'Valor_Lote', 'Fecha_Vencimiento']], use_container_width=True, hide_index=True)
+            if not df_stock_lotes.empty and 'Codigo_Producto' in df_stock_lotes.columns:
+                lotes_del_producto = df_stock_lotes[df_stock_lotes['Codigo_Producto'] == codigo_seleccionado]
+                lotes_activos = lotes_del_producto[lotes_del_producto['Stock_Restante'] > 0.001].copy()
+                
+                if lotes_activos.empty:
+                    st.info(f"No hay lotes con stock activo para '{producto_seleccionado}'.")
+                else:
+                    lotes_activos['Precio_Unitario'] = lotes_activos['Precio_Unitario'].map('S/{:,.2f}'.format)
+                    lotes_activos['Stock_Restante'] = lotes_activos['Stock_Restante'].map('{:,.2f}'.format)
+                    lotes_activos['Valor_Lote'] = lotes_activos['Valor_Lote'].map('S/{:,.2f}'.format)
+                    st.dataframe(lotes_activos[['Codigo_Lote', 'Stock_Restante', 'Precio_Unitario', 'Valor_Lote', 'Fecha_Vencimiento']], use_container_width=True, hide_index=True)

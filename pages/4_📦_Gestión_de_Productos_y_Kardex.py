@@ -29,11 +29,6 @@ COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveed
 
 @st.cache_resource
 def get_google_sheets_client():
-    """
-    Decodifica las credenciales desde Base64 y devuelve el cliente
-    de gspread autenticado.
-    """
-    # El código busca la clave 'gcp_service_account' que ya tienes configurada.
     SECRET_KEY_NAME = "gcp_service_account" 
 
     if SECRET_KEY_NAME not in st.secrets:
@@ -43,16 +38,11 @@ def get_google_sheets_client():
     creds_b64_str = st.secrets[SECRET_KEY_NAME]
 
     try:
-        # Decodificamos el texto Base64 a un JSON limpio
         creds_bytes = base64.b64decode(creds_b64_str)
         creds_json_str = creds_bytes.decode('utf-8')
         creds_dict = json.loads(creds_json_str)
-
-        # Autenticamos el cliente de gspread
         gspread_client = gspread.service_account_from_dict(creds_dict)
-        
         return gspread_client
-
     except Exception as e:
         st.error("FALLO CRÍTICO AL PROCESAR LAS CREDENCIALES.", icon="🔥")
         st.code(f"Detalle técnico: {e}", language="text")

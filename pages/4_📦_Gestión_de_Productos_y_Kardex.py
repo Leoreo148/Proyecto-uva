@@ -24,16 +24,17 @@ SHEET_SALIDAS = 'Salidas'
 # Añadimos la nueva columna 'Stock_Minimo' que conversamos
 COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion', 'Stock_Minimo']
 
-# Reemplaza la función de diagnóstico con esta versión final
 @st.cache_resource
 def get_google_sheets_client():
-    SECRET_KEY_NAME = "gcp_service_account" 
+    """
+    Lee las credenciales desde una variable de entorno.
+    """
+    # Buscamos la credencial en las variables de entorno
+    creds_b64_str = os.environ.get("GCP_CREDS_B64")
 
-    if SECRET_KEY_NAME not in st.secrets:
-        st.error(f"Error: No se encontró la clave '{SECRET_KEY_NAME}' en los Secrets.")
+    if not creds_b64_str:
+        st.error("Error: No se encontró la variable de entorno 'GCP_CREDS_B64'.")
         return None
-
-    creds_b64_str = st.secrets[SECRET_KEY_NAME]
 
     try:
         creds_bytes = base64.b64decode(creds_b64_str)

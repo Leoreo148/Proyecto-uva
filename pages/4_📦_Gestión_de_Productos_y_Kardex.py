@@ -206,37 +206,7 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
         else:
             st.warning("Por favor, sube un archivo Excel para procesar.")
 
-# SECCIÓN 2: AÑADIR NUEVO PRODUCTO (MANUALMENTE)
-with st.expander("➕ Añadir un solo Producto al Catálogo"):
-    with st.form("nuevo_producto_form", clear_on_submit=True):
-        st.subheader("Detalles del Nuevo Producto")
-        col1, col2 = st.columns(2)
-        with col1:
-            prod_codigo = st.text_input("Código del Producto (ej: F001)")
-            prod_nombre = st.text_input("Nombre del Producto")
-        with col2:
-            prod_unidad = st.selectbox("Unidad", ["Litro", "Kilo", "Unidad", "Galón", "Bolsa"])
-            prod_stock_min = st.number_input("Stock Mínimo", min_value=0.0, step=1.0, format="%.2f")
-        
-        if st.form_submit_button("Añadir Producto"):
-            if supabase and prod_codigo and prod_nombre:
-                try:
-                    nuevo_producto_data = {
-                        'Codigo': prod_codigo,
-                        'Producto': prod_nombre,
-                        'Unidad': prod_unidad,
-                        'Stock_Minimo': prod_stock_min
-                    }
-                    supabase.table('Productos').insert(nuevo_producto_data).execute()
-                    st.success(f"¡Producto '{prod_nombre}' añadido!")
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
-            else:
-                st.warning("Código y Nombre son obligatorios.")
-
-# SECCIÓN 3: VISUALIZACIÓN DEL KARDEX
+# SECCIÓN 2: VISUALIZACIÓN DEL KARDEX
 st.divider()
 st.header("Kardex y Stock Actual")
 if df_productos.empty:

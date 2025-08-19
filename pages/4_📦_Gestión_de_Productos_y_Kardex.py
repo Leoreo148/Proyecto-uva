@@ -24,43 +24,34 @@ SHEET_SALIDAS = 'Salidas'
 # Añadimos la nueva columna 'Stock_Minimo' que conversamos
 COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion', 'Stock_Minimo']
 
+# (Asegúrate de tener todas las importaciones necesarias al inicio de tu archivo:
+# streamlit, json, base64, gspread, pandas, etc.)
+
 @st.cache_resource
 def get_google_sheets_client():
     """
-    VERSIÓN DE DEPURACIÓN:
-    Verifica y muestra qué claves de secretos está leyendo la aplicación.
+    Decodifica las credenciales desde Base64 buscando la clave 'gcp_service_account'.
     """
-    # --- INICIO DEL BLOQUE DE DEPURACIÓN ---
-    st.warning("INICIANDO MODO DEPURACIÓN DE SECRETS", icon="🕵️")
-    
-    # Obtenemos una lista de todas las claves de secretos que la app encontró
-    available_secrets = list(st.secrets.keys())
-    st.write("La aplicación encontró las siguientes claves de secretos:")
-    st.code(str(available_secrets), language="text")
+    # El nombre de la clave que buscaremos ahora coincide con el que tienes en tus Secrets
+    SECRET_KEY_NAME = "gcp_service_account" 
 
-    # Verificamos si nuestra clave específica está en la lista
-    required_key = "gcp_service_account_base64"
-    if required_key in available_secrets:
-        st.success(f"¡Éxito! La clave requerida '{required_key}' fue encontrada.")
-    else:
-        st.error(f"¡FALLO! La clave requerida '{required_key}' NO fue encontrada.")
-        st.info("Por favor, ve a tus Secrets y asegúrate de que el nombre de la clave sea exactamente ese, todo en minúsculas y sin espacios.")
-        return None # Detenemos la ejecución aquí si la clave no existe
-    # --- FIN DEL BLOQUE DE DEPURACIÓN ---
+    if SECRET_KEY_NAME not in st.secrets:
+        st.error(f"Error: No se encontró la clave '{SECRET_KEY_NAME}' en los Secrets.")
+        return None
 
-    creds_b64_str = st.secrets[required_key]
+    # Leemos el texto Base64 usando el nombre correcto
+    creds_b64_str = st.secrets[SECRET_KEY_NAME]
 
     try:
+        # Decodificamos el texto Base64 a un JSON limpio
         creds_bytes = base64.b64decode(creds_b64_str)
         creds_json_str = creds_bytes.decode('utf-8')
         creds_dict = json.loads(creds_json_str)
 
+        # Autenticamos el cliente de gspread
         gspread_client = gspread.service_account_from_dict(creds_dict)
         
-        # Una vez que la conexión funcione, puedes eliminar este bloque de depuración.
-        st.balloons()
-        st.success("¡CONEXIÓN EXITOSA! Ya puedes restaurar la versión anterior de la función.")
-        
+        st.success("¡Conexión con Google Sheets establecida exitosamente!")
         return gspread_client
 
     except Exception as e:

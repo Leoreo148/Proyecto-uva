@@ -26,53 +26,43 @@ COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveed
 # --- NUEVO: FUNCIONES DE CONEXIÓN A GOOGLE SHEETS ---
 # (Recuerda tener 'import json' al inicio de tu archivo)
 
+import json
+import gspread
+from gspread_pandas import Spread, Client
+# ... (el resto de tus importaciones) ...
+
 @st.cache_resource
 def get_google_sheets_client():
     """
-    VERSIÓN DE DEPURACIÓN:
-    Esta función nos ayudará a encontrar el error en el JSON de los Secrets.
+    VERSIÓN FINAL CON LIMPIADOR AUTOMÁTICO:
+    Intenta eliminar caracteres invisibles ('\r') antes de procesar.
     """
-    st.warning(" MODO DEPURACIÓN ACTIVO ", icon="🐞")
-
     if "gcp_service_account" not in st.secrets:
-        st.error("Error Crítico: No se encontró la llave `gcp_service_account` en los Secrets de Streamlit.")
+        st.error("Error Crítico: No se encontró `gcp_service_account` en los Secrets.")
         return None
 
     creds_str = st.secrets["gcp_service_account"]
 
-    st.subheader("1. Inspección Visual del Secreto")
-    st.write("A continuación se muestran los primeros y los últimos 50 caracteres del secreto que la app está leyendo. Revisa que no haya caracteres extraños, espacios, o llaves dobles `{{`.")
-    
-    st.text("Primeros 50 caracteres:")
-    st.code(creds_str[:50], language="text")
+    # --- INICIO DEL BLOQUE DE LIMPIEZA ---
+    # El carácter '\r' (retorno de carro) a veces se cuela desde Windows
+    # y rompe el JSON. Esta línea lo elimina de forma forzada.
+    cleaned_str = creds_str.replace('\r', '')
+    # --- FIN DEL BLOQUE DE LIMPIEZA ---
 
-    st.text("Últimos 50 caracteres:")
-    st.code(creds_str[-50:], language="text")
-
-    st.subheader("2. Resultado del Análisis JSON")
     try:
-        # Intentamos convertir el string a un diccionario
-        creds_dict = json.loads(creds_str)
-        st.success("¡ÉXITO! El texto del secreto es un JSON válido.")
-        st.write("Ahora la app intentará conectarse a Google Sheets...")
-
-        # Si es válido, procedemos a conectar
+        # Intentamos procesar la cadena ya limpiada
+        creds_dict = json.loads(cleaned_str)
+        
+        # Si llegamos aquí, la conexión debería funcionar
         sa = gspread.service_account_from_dict(creds_dict)
         client = Client(auth=sa)
-        # Una vez que funcione, quita este modo de depuración
-        st.info("MODO DEPURACIÓN: La conexión fue exitosa. Recuerda restaurar la función `get_google_sheets_client` original.")
         return client
 
     except json.JSONDecodeError as e:
-        st.error("FALLO: El texto del secreto NO es un JSON válido.", icon="🔥")
-        st.write("El analizador de JSON encontró un error específico. Este es el detalle técnico que nos dirá dónde está el problema:")
-        
-        # Mostramos el error detallado del analizador
-        st.code(f"Detalle del error JSON: {e}", language="text")
-        
-        st.write("**¿Cómo interpretar este error?** El mensaje suele indicar la línea (`line`), columna (`col`) y el carácter donde se encontró el primer problema. Por ejemplo, `Expecting property name enclosed in double quotes: line 1 column 2 (char 2)` significa que en el segundo carácter del texto, se esperaba una comilla `\"`.")
+        st.error("FALLO CRÍTICO: El JSON sigue siendo inválido incluso después de la limpieza automática.", icon="🔥")
+        st.code(f"Detalle del error: {e}", language="text")
+        st.warning("Por favor, verifica que el texto copiado desde el archivo JSON sea exacto, sin caracteres añadidos o faltantes al principio o al final.")
         return None
-
 @st.cache_data(ttl=60) # Cachear los datos por 60 segundos
 def cargar_kardex_gsheet():
     """Carga las tres hojas del Kardex desde Google Sheets."""

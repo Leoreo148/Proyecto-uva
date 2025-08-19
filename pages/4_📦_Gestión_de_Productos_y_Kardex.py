@@ -2,6 +2,19 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from io import BytesIO
+import numpy as np
+
+def limpiar_json_no_compliant(obj):
+    """Convierte NaN, inf y -inf a None en estructuras anidadas."""
+    if isinstance(obj, float):
+        if np.isnan(obj) or np.isinf(obj):
+            return None
+        return obj
+    elif isinstance(obj, dict):
+        return {k: limpiar_json_no_compliant(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [limpiar_json_no_compliant(x) for x in obj]
+    return obj
 
 # --- LIBRERÍAS PARA LA CONEXIÓN A SUPABASE ---
 from supabase import create_client, Client

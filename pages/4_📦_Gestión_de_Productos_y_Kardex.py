@@ -24,27 +24,54 @@ SHEET_SALIDAS = 'Salidas'
 COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion', 'Stock_Minimo']
 
 # --- NUEVO: FUNCIONES DE CONEXIÓN A GOOGLE SHEETS ---
+# (Recuerda tener 'import json' al inicio de tu archivo)
+
 @st.cache_resource
 def get_google_sheets_client():
-    """Crea y cachea el cliente de conexión a Google Sheets."""
+    """
+    VERSIÓN DE DEPURACIÓN:
+    Esta función nos ayudará a encontrar el error en el JSON de los Secrets.
+    """
+    st.warning(" MODO DEPURACIÓN ACTIVO ", icon="🐞")
+
     if "gcp_service_account" not in st.secrets:
-        st.error("Credenciales de Google no encontradas. Asegúrate de configurar `gcp_service_account` en los Secrets de Streamlit.")
+        st.error("Error Crítico: No se encontró la llave `gcp_service_account` en los Secrets de Streamlit.")
         return None
 
-    # Obtenemos el secreto, que gracias a las comillas triples es un string
     creds_str = st.secrets["gcp_service_account"]
-    
-    try:
-        # Lo convertimos de string (texto) a un diccionario de Python
-        creds_dict = json.loads(creds_str)
-    except json.JSONDecodeError:
-        st.error("Error al procesar las credenciales de Google. Revisa que el JSON copiado en los Secrets sea válido.")
-        return None
 
-    # Usamos el diccionario ya convertido para autenticar
-    sa = gspread.service_account_from_dict(creds_dict)
-    client = Client(auth=sa)
-    return client
+    st.subheader("1. Inspección Visual del Secreto")
+    st.write("A continuación se muestran los primeros y los últimos 50 caracteres del secreto que la app está leyendo. Revisa que no haya caracteres extraños, espacios, o llaves dobles `{{`.")
+    
+    st.text("Primeros 50 caracteres:")
+    st.code(creds_str[:50], language="text")
+
+    st.text("Últimos 50 caracteres:")
+    st.code(creds_str[-50:], language="text")
+
+    st.subheader("2. Resultado del Análisis JSON")
+    try:
+        # Intentamos convertir el string a un diccionario
+        creds_dict = json.loads(creds_str)
+        st.success("¡ÉXITO! El texto del secreto es un JSON válido.")
+        st.write("Ahora la app intentará conectarse a Google Sheets...")
+
+        # Si es válido, procedemos a conectar
+        sa = gspread.service_account_from_dict(creds_dict)
+        client = Client(auth=sa)
+        # Una vez que funcione, quita este modo de depuración
+        st.info("MODO DEPURACIÓN: La conexión fue exitosa. Recuerda restaurar la función `get_google_sheets_client` original.")
+        return client
+
+    except json.JSONDecodeError as e:
+        st.error("FALLO: El texto del secreto NO es un JSON válido.", icon="🔥")
+        st.write("El analizador de JSON encontró un error específico. Este es el detalle técnico que nos dirá dónde está el problema:")
+        
+        # Mostramos el error detallado del analizador
+        st.code(f"Detalle del error JSON: {e}", language="text")
+        
+        st.write("**¿Cómo interpretar este error?** El mensaje suele indicar la línea (`line`), columna (`col`) y el carácter donde se encontró el primer problema. Por ejemplo, `Expecting property name enclosed in double quotes: line 1 column 2 (char 2)` significa que en el segundo carácter del texto, se esperaba una comilla `\"`.")
+        return None
 
 @st.cache_data(ttl=60) # Cachear los datos por 60 segundos
 def cargar_kardex_gsheet():

@@ -79,14 +79,14 @@ if not tareas_para_aplicar.empty:
                     tipo_aplicacion = st.selectbox("Tipo de Aplicación", ["Pulverizado (Turbo)", "Nebulizado (Turbo)", "Pistolas/Winch", "Inyectores", "Foliar", "Drench"], index=0)
                     volumen_agua_ha = st.number_input("Volumen de Agua / Ha (L)", min_value=0, value=2200)
                     volumen_hectarea = st.number_input("Volumen Hectárea", min_value=0.0, value=1.55, format="%.2f")
-                    rpm = st.number_input("RPM", min_value=0, step=1, value=9)
-                    color_boquilla = st.text_input("Color de Boquilla", value="q Mast")
+                    marcha = st.number_input("Marcha", min_value=0, step=1, value=18)
+                    presion = st.text_input("Presión Bar", value="bares")
                 
                 with col_app2:
                     full_maquinarias = st.checkbox("Full Maquinarias", value=True)
                     num_boquillas = st.number_input("N° Boquillas Total", min_value=0, step=1, value=18)
-                    presion_a = st.text_input("Presión Bar A", value="neg")
-                    presion_b = st.text_input("Presión Bar B", value="neg")
+                    color_boquilla = st.text_input("Color de Boquilla", value="q Mast")
+                    cultivo = st.text_input("Cultivo", value="Vid")
                 
                 observaciones = st.text_area("Observaciones Generales (Clima, Novedades, etc.)", value="Aplicación con turbo y con boquillas intercaladas una negra y una marrón.")
 

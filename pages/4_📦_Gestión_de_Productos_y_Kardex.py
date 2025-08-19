@@ -4,6 +4,8 @@ import os
 from datetime import datetime
 import openpyxl 
 from io import BytesIO
+import gspread
+from gspread_pandas import Spread, Client
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión de Productos y Kardex", page_icon="📦", layout="wide")
@@ -11,37 +13,73 @@ st.title("📦 Gestión de Productos y Kardex")
 st.write("Catálogo de productos y visualización del stock total, valorizado y detallado por lotes.")
 
 # --- CONSTANTES Y NOMBRES DE ARCHIVOS ---
-KARDEX_FILE = 'kardex_fundo.xlsx'
+# Ya no usamos nombres de archivos locales, sino el nombre de la Hoja de Google
+SPREADSHEET_NAME = "BaseDeDatos_Fundo"
 SHEET_PRODUCTS = 'Productos'
 SHEET_INGRESOS = 'Ingresos'
 SHEET_SALIDAS = 'Salidas'
 
-COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion']
-COLS_INGRESOS = ['Codigo_Lote', 'Fecha', 'Tipo', 'Proveedor', 'Factura', 'Producto', 'Codigo_Producto', 'Cantidad', 'Precio_Unitario', 'Fecha_Vencimiento']
-COLS_SALIDAS = ['Fecha', 'Lote_Sector', 'Turno', 'Producto', 'Cantidad', 'Codigo_Producto', 'Objetivo_Tratamiento', 'Codigo_Lote']
+# Añadimos la nueva columna 'Stock_Minimo' que conversamos
+COLS_PRODUCTOS = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion', 'Stock_Minimo']
 
-# --- FUNCIONES CORE DEL KARDEX ---
-def cargar_kardex():
-    if os.path.exists(KARDEX_FILE):
-        try:
-            xls = pd.ExcelFile(KARDEX_FILE)
-            df_productos = pd.read_excel(xls, sheet_name=SHEET_PRODUCTS) if SHEET_PRODUCTS in xls.sheet_names else pd.DataFrame(columns=COLS_PRODUCTOS)
-            df_ingresos = pd.read_excel(xls, sheet_name=SHEET_INGRESOS) if SHEET_INGRESOS in xls.sheet_names else pd.DataFrame(columns=COLS_INGRESOS)
-            df_salidas = pd.read_excel(xls, sheet_name=SHEET_SALIDAS) if SHEET_SALIDAS in xls.sheet_names else pd.DataFrame(columns=COLS_SALIDAS)
-        except Exception as e:
-            st.error(f"Error al leer el archivo Kardex: {e}")
-            return pd.DataFrame(columns=COLS_PRODUCTOS), pd.DataFrame(columns=COLS_INGRESOS), pd.DataFrame(columns=COLS_SALIDAS)
-    else:
+# --- NUEVO: FUNCIONES DE CONEXIÓN A GOOGLE SHEETS ---
+@st.cache_resource
+def get_google_sheets_client():
+    """Crea y cachea el cliente de conexión a Google Sheets."""
+    creds = st.secrets["gcp_service_account"]
+    # Reemplaza 'gspread.service_account_from_dict' por 'Client'
+    client = Client(creds)
+    return client
+
+@st.cache_data(ttl=60) # Cachear los datos por 60 segundos
+def cargar_kardex_gsheet():
+    """Carga las tres hojas del Kardex desde Google Sheets."""
+    try:
+        client = get_google_sheets_client()
+        spread = Spread(SPREADSHEET_NAME, client=client)
+        
+        # Leer cada hoja, si no existe, crear un DataFrame vacío
+        df_productos = spread.sheet_to_df(sheet=SHEET_PRODUCTS, index=None) if SHEET_PRODUCTS in [s.title for s in spread.sheets] else pd.DataFrame(columns=COLS_PRODUCTOS)
+        df_ingresos = spread.sheet_to_df(sheet=SHEET_INGRESOS, index=None) if SHEET_INGRESOS in [s.title for s in spread.sheets] else pd.DataFrame(columns=COLS_INGRESOS)
+        df_salidas = spread.sheet_to_df(sheet=SHEET_SALIDAS, index=None) if SHEET_SALIDAS in [s.title for s in spread.sheets] else pd.DataFrame(columns=COLS_SALIDAS)
+        
+        # Convertir columnas de fecha
+        if 'Fecha' in df_ingresos.columns: df_ingresos['Fecha'] = pd.to_datetime(df_ingresos['Fecha'], errors='coerce')
+        if 'Fecha_Vencimiento' in df_ingresos.columns: df_ingresos['Fecha_Vencimiento'] = pd.to_datetime(df_ingresos['Fecha_Vencimiento'], errors='coerce')
+        if 'Fecha' in df_salidas.columns: df_salidas['Fecha'] = pd.to_datetime(df_salidas['Fecha'], errors='coerce')
+
+        return df_productos, df_ingresos, df_salidas
+    except Exception as e:
+        st.error(f"Error al conectar con Google Sheets: {e}")
         return pd.DataFrame(columns=COLS_PRODUCTOS), pd.DataFrame(columns=COLS_INGRESOS), pd.DataFrame(columns=COLS_SALIDAS)
-    return df_productos, df_ingresos, df_salidas
 
-def guardar_kardex(df_productos, df_ingresos, df_salidas):
-    with pd.ExcelWriter(KARDEX_FILE, engine='openpyxl') as writer:
-        df_productos.to_excel(writer, sheet_name=SHEET_PRODUCTS, index=False)
-        df_ingresos.to_excel(writer, sheet_name=SHEET_INGRESOS, index=False)
-        df_salidas.to_excel(writer, sheet_name=SHEET_SALIDAS, index=False)
-    return True
+def guardar_kardex_gsheet(df_productos, df_ingresos, df_salidas):
+    """Guarda los DataFrames en sus respectivas hojas en Google Sheets."""
+    try:
+        client = get_google_sheets_client()
+        spread = Spread(SPREADSHEET_NAME, client=client)
+        
+        # Asegurarse que las columnas de fecha se guarden como texto
+        df_ingresos_guardar = df_ingresos.copy()
+        if 'Fecha' in df_ingresos_guardar.columns:
+            df_ingresos_guardar['Fecha'] = pd.to_datetime(df_ingresos_guardar['Fecha']).dt.strftime('%Y-%m-%d')
+        if 'Fecha_Vencimiento' in df_ingresos_guardar.columns:
+            df_ingresos_guardar['Fecha_Vencimiento'] = pd.to_datetime(df_ingresos_guardar['Fecha_Vencimiento']).dt.strftime('%Y-%m-%d')
 
+        df_salidas_guardar = df_salidas.copy()
+        if 'Fecha' in df_salidas_guardar.columns:
+            df_salidas_guardar['Fecha'] = pd.to_datetime(df_salidas_guardar['Fecha']).dt.strftime('%Y-%m-%d')
+
+        spread.df_to_sheet(df_productos, index=False, sheet=SHEET_PRODUCTS, replace=True)
+        spread.df_to_sheet(df_ingresos_guardar, index=False, sheet=SHEET_INGRESOS, replace=True)
+        spread.df_to_sheet(df_salidas_guardar, index=False, sheet=SHEET_SALIDAS, replace=True)
+        
+        st.cache_data.clear() # Limpiar el cache para que la próxima lectura vea los cambios
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar en Google Sheets: {e}")
+        return False
+        
 def calcular_stock_por_lote(df_ingresos, df_salidas):
     """Calcula el stock detallado por lote y el total por producto."""
     if df_ingresos.empty:
@@ -80,7 +118,7 @@ def to_excel(df):
     return output.getvalue()
 
 # --- CARGA INICIAL DE DATOS ---
-df_productos, df_ingresos, df_salidas = cargar_kardex()
+df_productos, df_ingresos, df_salidas = cargar_kardex_gsheet()
 
 # --- SECCIÓN 1: CARGA INICIAL (CON NOMBRES DE COLUMNA CORREGIDOS) ---
 with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel", expanded=True):
@@ -134,7 +172,7 @@ with st.expander("⬆️ Cargar Catálogo Inicial desde un único archivo Excel"
                             })
                     
                     df_new_ingresos = pd.DataFrame(ingresos_list).drop_duplicates(subset=['Codigo_Producto'], keep='first')
-                    guardar_kardex(df_productos=df_new_productos, df_ingresos=df_new_ingresos, df_salidas=pd.DataFrame(columns=COLS_SALIDAS))
+                    guardar_kardex_gsheet(df_productos=df_new_productos, df_ingresos=df_new_ingresos, df_salidas=pd.DataFrame(columns=COLS_SALIDAS))
                     st.success("¡Catálogo y stock inicial (con precios) cargados exitosamente!")
                     st.rerun()
 

@@ -1,4 +1,4 @@
-eimport streamlit as st
+import streamlit as st
 import pandas as pd
 import os
 import json
@@ -9,7 +9,7 @@ from io import BytesIO
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión de Mezclas", page_icon="⚗️", layout="wide")
 st.title("⚗️ Gestión de Mezclas y Pre-Mezclas por Lote")
-st.write("El ingeniero programa la receta y cálculos de pre-mezcla. El encargado confirma la preparación.")
+st.write("El ingeniero programa la receta y los cálculos de pre-mezcla. El encargado confirma la preparación.")
 
 # --- CONSTANTES Y NOMBRES DE ARCHIVOS ---
 KARDEX_FILE = 'kardex_fundo.xlsx'
@@ -42,6 +42,7 @@ def guardar_kardex(df_productos, df_ingresos, df_salidas):
         df_productos.to_excel(writer, sheet_name=SHEET_PRODUCTS, index=False)
         df_ingresos.to_excel(writer, sheet_name=SHEET_INGRESOS, index=False)
         df_salidas.to_excel(writer, sheet_name=SHEET_SALIDAS, index=False)
+    st.cache_data.clear()
     return True
 
 def calcular_stock_por_lote(df_ingresos, df_salidas):
@@ -67,6 +68,7 @@ def cargar_ordenes():
 
 def guardar_ordenes(df):
     df.to_excel(ORDENES_FILE, index=False, engine='openpyxl')
+    st.cache_data.clear()
 
 # --- CARGA DE DATOS ---
 df_productos, df_ingresos, df_salidas = cargar_kardex()
@@ -74,7 +76,7 @@ df_stock_lotes = calcular_stock_por_lote(df_ingresos, df_salidas)
 df_ordenes = cargar_ordenes()
 
 # --- SECCIÓN 1 (INGENIERO): PROGRAMAR NUEVA RECETA ---
-with st.expander("👨‍🔬 Programar Nueva Receta de Mezcla (Ingeniero)"):
+with st.expander("👨‍🔬 Programar Nueva Receta de Mezcla (Ingeniero)", expanded=True):
     lotes_activos = df_stock_lotes[df_stock_lotes['Stock_Restante'] > 0].copy()
     opciones_lotes = []
     if not lotes_activos.empty:
@@ -101,10 +103,9 @@ with st.expander("👨‍🔬 Programar Nueva Receta de Mezcla (Ingeniero)"):
                 pd.DataFrame([{"Lote_Seleccionado": opciones_lotes[0], "Total_Producto": 1.0, "Total_Pre_Mezcla": 10.0}]),
                 num_rows="dynamic",
                 column_config={
-                    "Lote_Seleccionado": st.column_config.SelectboxColumn("Seleccione el Lote a Usar", options=opciones_lotes, required=True),
-                    "Total_Producto": st.column_config.NumberColumn("Total Producto (kg o L)", min_value=0.00001, format="%.5f"),
-                    "Agua": st.column_config.NumberColumn("Agua (L)", min_value=0.001, format="%.2f")
-                    "Total_Pre_Mezcla": st.column_config.NumberColumn("Total Pre-Mezcla (L)", min_value=0.0001, format="%.2f")
+                    "Lote_Seleccionado": st.column_config.SelectboxColumn("Seleccione el Lote a Usar", options=opciones_lotes, required=True, width="large"),
+                    "Total_Producto": st.column_config.NumberColumn("Total Producto (kg/L)", help="Cantidad de producto a usar.", min_value=0.00001, format="%.5f"),
+                    "Total_Pre_Mezcla": st.column_config.NumberColumn("Total Pre-Mezcla (L)", help="Volumen final de la pre-mezcla con agua.", min_value=0.1, format="%.2f")
                 }, key="editor_mezcla_premezcla"
             )
 
@@ -122,8 +123,8 @@ with st.expander("👨‍🔬 Programar Nueva Receta de Mezcla (Ingeniero)"):
                     error_validacion = True
                     break
                 
-                if row['Total_Producto'] > row['Total_Pre_Mezcla']:
-                    st.error(f"El Total de Producto ({row['Total_Producto']}) no puede ser mayor al Total de Pre-Mezcla ({row['Total_Pre_Mezcla']}).")
+                if row['Total_Producto'] >= row['Total_Pre_Mezcla']:
+                    st.error(f"El Total de Producto ({row['Total_Producto']}) debe ser menor al Total de Pre-Mezcla ({row['Total_Pre_Mezcla']}).")
                     error_validacion = True
                     break
 
@@ -131,10 +132,9 @@ with st.expander("👨‍🔬 Programar Nueva Receta de Mezcla (Ingeniero)"):
                 agua_necesaria = row['Total_Pre_Mezcla'] - row['Total_Producto']
                 
                 receta_final.append({
-                    'Codigo_Lote': codigo_lote,
-                    'Producto': info_lote['Producto'],
+                    'Codigo_Lote': codigo_lote, 'Producto': info_lote['Producto'],
                     'Codigo_Producto': info_lote['Codigo_Producto'],
-                    'Cantidad_Usada': row['Total_Producto'],
+                    'Total_Producto': row['Total_Producto'],
                     'Agua_Necesaria_L': agua_necesaria,
                     'Volumen_Pre_Mezcla_L': row['Total_Pre_Mezcla']
                 })
@@ -160,9 +160,8 @@ if not tareas_pendientes.empty:
             receta = json.loads(tarea['Receta_Mezcla_Lotes'])
             df_receta = pd.DataFrame(receta)
             
-            # Renombrar columnas para la visualización
             df_display = df_receta.rename(columns={
-                'Cantidad_Usada': 'Total Producto',
+                'Total_Producto': 'Total Producto',
                 'Agua_Necesaria_L': 'Agua (L)',
                 'Volumen_Pre_Mezcla_L': 'Total Pre-Mezcla (L)'
             })
@@ -170,13 +169,17 @@ if not tareas_pendientes.empty:
             st.dataframe(
                 df_display[['Producto', 'Total Producto', 'Agua (L)', 'Total Pre-Mezcla (L)']],
                 use_container_width=True,
-                column_config={"Total Producto": st.column_config.NumberColumn(format="%.5f")}
+                column_config={
+                    "Total Producto": st.column_config.NumberColumn(format="%.5f"),
+                    "Agua (L)": st.column_config.NumberColumn(format="%.3f"),
+                    "Total Pre-Mezcla (L)": st.column_config.NumberColumn(format="%.2f")
+                }
             )
             
             if st.button("✅ Confirmar Preparación y Registrar Salida", key=f"confirm_{tarea['ID_Orden']}"):
                 nuevas_salidas = []
                 for item in receta:
-                    nuevas_salidas.append({'Fecha': datetime.now().strftime("%Y-%m-%d"), 'Lote_Sector': tarea['Sector_Aplicacion'], 'Turno': tarea['Turno'], 'Producto': item['Producto'], 'Cantidad': item['Cantidad_Usada'], 'Codigo_Producto': item['Codigo_Producto'], 'Objetivo_Tratamiento': tarea['Objetivo'], 'Codigo_Lote': item['Codigo_Lote']})
+                    nuevas_salidas.append({'Fecha': datetime.now().strftime("%Y-%m-%d"), 'Lote_Sector': tarea['Sector_Aplicacion'], 'Turno': tarea['Turno'], 'Producto': item['Producto'], 'Cantidad': item['Total_Producto'], 'Codigo_Producto': item['Codigo_Producto'], 'Objetivo_Tratamiento': tarea['Objetivo'], 'Codigo_Lote': item['Codigo_Lote']})
                 df_nuevas_salidas = pd.DataFrame(nuevas_salidas)
                 df_salidas_final = pd.concat([df_salidas, df_nuevas_salidas], ignore_index=True)
                 guardar_kardex(df_productos, df_ingresos, df_salidas_final)

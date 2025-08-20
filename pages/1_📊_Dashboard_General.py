@@ -1,161 +1,177 @@
 import streamlit as st
 import pandas as pd
-import os
-import plotly.express as px
-from datetime import datetime, timedelta
+import json
+from datetime import datetime
+
+# --- LIBRERÍAS PARA LA CONEXIÓN A SUPABASE ---
+from supabase import create_client, Client
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Dashboard General", page_icon="📊", layout="wide")
-st.title("📊 Dashboard General del Fundo")
-st.write("Métricas clave de inventario, operaciones y estado del cultivo para una visión completa.")
+st.set_page_config(page_title="Gestión de Aplicación y Horas", page_icon="🚜", layout="wide")
+st.title("🚜 Cartilla de Aplicación y Control de Horas")
+st.write("El operario completa la cartilla unificada para finalizar la aplicación y registrar las horas de maquinaria.")
 
-# --- FUNCIONES DE CARGA Y CÁLCULO ---
-@st.cache_data
-def cargar_datos(nombre_archivo, columnas_fecha=None):
-    if not os.path.exists(nombre_archivo): return None
+# --- FUNCIÓN DE CONEXIÓN SEGURA A SUPABASE ---
+@st.cache_resource
+def init_supabase_connection():
     try:
-        df = pd.read_excel(nombre_archivo)
-        if columnas_fecha:
-            for col in columnas_fecha:
-                if col in df.columns: df[col] = pd.to_datetime(df[col], errors='coerce')
-        return df
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
     except Exception as e:
-        st.error(f"Error al leer el archivo {nombre_archivo}: {e}")
+        st.error(f"Error al conectar con Supabase: {e}")
         return None
 
-@st.cache_data
-def cargar_hoja_especifica(nombre_archivo, nombre_hoja, columnas_fecha=None):
-    if not os.path.exists(nombre_archivo): return None
-    try:
-        df = pd.read_excel(nombre_archivo, sheet_name=nombre_hoja)
-        if columnas_fecha:
-            for col in columnas_fecha:
-                if col in df.columns: df[col] = pd.to_datetime(df[col], errors='coerce')
-        return df
-    except ValueError: return None
-    except Exception as e:
-        st.error(f"Error al leer la hoja '{nombre_hoja}' de {nombre_archivo}: {e}")
-        return None
+supabase = init_supabase_connection()
 
-def calcular_stock(df_ingresos, df_salidas):
-    if df_ingresos is None or df_ingresos.empty:
-        return pd.DataFrame(columns=['Codigo_Lote', 'Stock_Restante', 'Valor_Lote', 'Fecha_Vencimiento', 'Codigo_Producto'])
-    
-    ingresos_por_lote = df_ingresos.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Ingresada'})
-    
-    if df_salidas is not None and not df_salidas.empty and 'Codigo_Lote' in df_salidas.columns:
-        salidas_por_lote = df_salidas.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Consumida'})
-        stock_lotes = pd.merge(ingresos_por_lote, salidas_por_lote, on='Codigo_Lote', how='left').fillna(0)
-        stock_lotes['Stock_Restante'] = stock_lotes['Cantidad_Ingresada'] - stock_lotes['Cantidad_Consumida']
-    else:
-        stock_lotes = ingresos_por_lote
-        stock_lotes['Stock_Restante'] = stock_lotes['Cantidad_Ingresada']
-        
-    lote_info = df_ingresos.drop_duplicates(subset=['Codigo_Lote'])
-    stock_lotes_detallado = pd.merge(stock_lotes, lote_info, on='Codigo_Lote', how='left')
-    
-    if 'Precio_Unitario' not in stock_lotes_detallado.columns: stock_lotes_detallado['Precio_Unitario'] = 0
-    stock_lotes_detallado['Valor_Lote'] = stock_lotes_detallado['Stock_Restante'] * stock_lotes_detallado['Precio_Unitario']
-    return stock_lotes_detallado
+# --- NUEVAS FUNCIONES ADAPTADAS PARA SUPABASE ---
+@st.cache_data(ttl=60)
+def cargar_datos_para_aplicacion():
+    """Carga las órdenes listas para aplicar y los historiales desde Supabase."""
+    if supabase:
+        try:
+            # Cargar órdenes con estado 'Lista para Aplicar'
+            res_ordenes = supabase.table('Ordenes_de_Trabajo').select("*").eq('Status', 'Lista para Aplicar').execute()
+            df_ordenes = pd.DataFrame(res_ordenes.data)
+            
+            # Cargar historial de horas de tractor
+            res_horas = supabase.table('Registro_Horas_Tractor').select("*").order('Fecha', desc=True).limit(50).execute()
+            df_horas = pd.DataFrame(res_horas.data)
+            
+            # Cargar historial de órdenes completadas
+            res_completadas = supabase.table('Ordenes_de_Trabajo').select("*").eq('Status', 'Completada').order('created_at', desc=True).limit(50).execute()
+            df_completadas = pd.DataFrame(res_completadas.data)
 
-# --- CARGA DE TODOS LOS DATOS ---
-df_kardex_productos = cargar_hoja_especifica('kardex_fundo.xlsx', 'Productos')
-df_kardex_ingresos = cargar_hoja_especifica('kardex_fundo.xlsx', 'Ingresos', columnas_fecha=['Fecha', 'Fecha_Vencimiento'])
-df_kardex_salidas = cargar_hoja_especifica('kardex_fundo.xlsx', 'Salidas', columnas_fecha=['Fecha'])
-df_raleo = cargar_datos('Registro_Raleo.xlsx', columnas_fecha=['Fecha'])
-df_horas_tractor = cargar_datos('Registro_Horas_Tractor.xlsx', columnas_fecha=['Fecha'])
-df_ordenes = cargar_datos('Ordenes_de_Trabajo.xlsx', columnas_fecha=['Fecha_Programada', 'Aplicacion_Completada_Fecha'])
-df_baya = cargar_datos('Registro_Diametro_Baya_Detallado.xlsx', columnas_fecha=['Fecha'])
-df_mosca = cargar_datos('Monitoreo_Mosca_Fruta.xlsx', columnas_fecha=['Fecha'])
+            return df_ordenes, df_horas, df_completadas
+        except Exception as e:
+            st.error(f"Error al cargar datos de Supabase: {e}")
+    return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-df_stock_lotes = calcular_stock(df_kardex_ingresos, df_kardex_salidas)
+def to_excel(df):
+    """Convierte un DataFrame a un archivo Excel en memoria para descarga."""
+    from io import BytesIO
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Reporte')
+    return output.getvalue()
 
-# --- BARRA LATERAL ---
-st.sidebar.header("Filtros del Dashboard")
-today = datetime.now().date()
-fecha_inicio = st.sidebar.date_input("Fecha de Inicio", today - timedelta(days=30))
-fecha_fin = st.sidebar.date_input("Fecha de Fin", today)
+# --- CARGA DE DATOS ---
+df_ordenes_pendientes, df_historial_horas, df_historial_apps = cargar_datos_para_aplicacion()
 
-# --- FILTRADO DE DATOS ---
-df_raleo_filtrado = df_raleo[(df_raleo['Fecha'].dt.date >= fecha_inicio) & (df_raleo['Fecha'].dt.date <= fecha_fin)] if df_raleo is not None else pd.DataFrame()
-df_horas_filtrado = df_horas_tractor[(df_horas_tractor['Fecha'].dt.date >= fecha_inicio) & (df_horas_tractor['Fecha'].dt.date <= fecha_fin)] if df_horas_tractor is not None else pd.DataFrame()
-df_ordenes_filtrado = df_ordenes[(df_ordenes['Fecha_Programada'].dt.date >= fecha_inicio) & (df_ordenes['Fecha_Programada'].dt.date <= fecha_fin)] if df_ordenes is not None else pd.DataFrame()
+# --- SECCIÓN 1: TAREAS LISTAS PARA APLICAR ---
+st.subheader("✅ Tareas Listas para Aplicar")
 
-# --- VISTA PRINCIPAL ---
-st.header("Resumen General")
+if not df_ordenes_pendientes.empty:
+    for index, tarea in df_ordenes_pendientes.iterrows():
+        expander_title = f"**Orden ID:** `{tarea['ID_Orden_Personalizado']}` | **Sector:** {tarea['Sector_Aplicacion']}"
+        with st.expander(expander_title, expanded=True):
+            st.write("**Receta de la Mezcla:**")
+            receta = tarea['Receta_Mezcla_Lotes']
+            st.dataframe(pd.DataFrame(receta), use_container_width=True)
+            
+            with st.form(key=f"form_unificado_{tarea['id']}"):
+                st.subheader("Cartilla Unificada de Aplicación y Horas")
+                
+                # --- DATOS DEL CONTROL DE HORAS ---
+                st.markdown("##### Parte Diario de Maquinaria")
+                col_parte1, col_parte2 = st.columns(2)
+                with col_parte1:
+                    operario = st.text_input("Nombre del Operador", value="Antonio Cornejo")
+                    implemento = st.text_input("Implemento Utilizado", "Nebulizadora")
+                with col_parte2:
+                    tractor_utilizado = st.text_input("Tractor Utilizado", "CASE")
+                    labor_realizada = st.text_input("Labor Realizada", value=f"Aplicación {tarea['Objetivo']}")
 
-# --- KPIs ---
-kpi_cols = st.columns(6)
+                col_h1, col_h2 = st.columns(2)
+                with col_h1:
+                    h_inicial = st.number_input("Horómetro Inicial", min_value=0.0, format="%.2f", step=0.1)
+                with col_h2:
+                    h_final = st.number_input("Horómetro Final", min_value=0.0, format="%.2f", step=0.1)
 
-with kpi_cols[0]:
-    valor_total_inventario = df_stock_lotes['Valor_Lote'].sum() if not df_stock_lotes.empty else 0
-    st.metric("💰 Valor Inventario", f"S/ {valor_total_inventario:,.2f}")
+                # --- DATOS DE LA CARTILLA DE APLICACIÓN ---
+                st.markdown("##### Detalles de la Aplicación")
+                col_app1, col_app2 = st.columns(2)
+                with col_app1:
+                    tipo_aplicacion = st.selectbox("Tipo de Aplicación", ["Pulverizado (Turbo)", "Nebulizado (Turbo)", "Pistolas/Winch", "Inyectores", "Foliar", "Drench"])
+                    volumen_agua_ha = st.number_input("Volumen de Agua / Ha (L)", min_value=0, value=2200)
+                    volumen_hectarea = st.number_input("Volumen Hectárea", min_value=0.0, value=1.55, format="%.2f")
+                    marcha = st.number_input("Marcha", min_value=0, step=1, value=18)
+                    presion = st.text_input("Presión Bar", value="bares")
+                with col_app2:
+                    full_maquinarias = st.checkbox("Full Maquinarias", value=True)
+                    num_boquillas = st.number_input("N° Boquillas Total", min_value=0, step=1, value=18)
+                    color_boquilla = st.text_input("Color de Boquilla", value="q Mast")
+                    cultivo = st.text_input("Cultivo", value="Vid")
+                
+                observaciones = st.text_area("Observaciones Generales (Clima, Novedades, etc.)", value="Aplicación con turbo y con boquillas intercaladas una negra y una marrón.")
 
-with kpi_cols[1]:
-    ordenes_activas = len(df_ordenes[df_ordenes['Status'] != 'Completada']) if df_ordenes is not None else 0
-    st.metric("🛠️ Órdenes Activas", f"{ordenes_activas}")
+                submitted = st.form_submit_button("🏁 Finalizar Tarea y Guardar Registros")
 
-with kpi_cols[2]:
-    horas_totales = df_horas_filtrado['Total_Horas'].sum() if not df_horas_filtrado.empty else 0
-    st.metric(f"🚜 Horas Tractor (Período)", f"{horas_totales:,.1f} h")
+                if submitted and supabase:
+                    if h_final <= h_inicial:
+                        st.error("El Horómetro Final debe ser mayor que el Inicial.")
+                    else:
+                        try:
+                            # 1. Preparar y guardar el registro de horas en Supabase
+                            total_horas = h_final - h_inicial
+                            nuevo_registro_horas = {
+                                'Fecha': tarea['Fecha_Programada'],
+                                'Turno': tarea['Turno'], 'Operador': operario, 'Tractor': tractor_utilizado,
+                                'Implemento': implemento, 'Labor_Realizada': labor_realizada, 
+                                'Sector': tarea['Sector_Aplicacion'],
+                                'Horometro_Inicial': h_inicial, 'Horometro_Final': h_final,
+                                'Total_Horas': total_horas, 'Observaciones': observaciones
+                            }
+                            supabase.table('Registro_Horas_Tractor').insert(nuevo_registro_horas).execute()
 
-with kpi_cols[3]:
-    diametro_promedio = 0
-    if df_baya is not None and not df_baya.empty and 'Fecha' in df_baya.columns:
-        ultima_fecha_baya = df_baya['Fecha'].max()
-        df_ultima_medicion = df_baya[df_baya['Fecha'] == ultima_fecha_baya]
-        columnas_medicion = [col for col in df_ultima_medicion.columns if 'Racimo' in col]
-        if columnas_medicion:
-            valores = df_ultima_medicion[columnas_medicion].to_numpy().flatten()
-            diametro_promedio = valores[valores > 0].mean() if len(valores[valores > 0]) > 0 else 0
-    st.metric("🍇 Diámetro Baya (mm)", f"{diametro_promedio:.2f}")
+                            # 2. Preparar y actualizar la orden de trabajo en Supabase
+                            datos_actualizacion_orden = {
+                                'Status': 'Completada',
+                                'Tractor_Responsable': operario,
+                                'Aplicacion_Completada_Fecha': datetime.now().isoformat(),
+                                'Tipo_Aplicacion': tipo_aplicacion,
+                                'Volumen_Agua_Ha': volumen_agua_ha,
+                                'Volumen_Hectarea': volumen_hectarea,
+                                'Marcha': marcha,
+                                'Presion_Bar': presion,
+                                'Full_Maquinarias': full_maquinarias,
+                                'Num_Boquillas_Total': num_boquillas,
+                                'Color_Boquilla': color_boquilla,
+                                'Cultivo': cultivo,
+                                'Observaciones_Aplicacion': observaciones
+                            }
+                            supabase.table('Ordenes_de_Trabajo').update(datos_actualizacion_orden).eq('id', tarea['id']).execute()
 
-with kpi_cols[4]:
-    umbral_mosca = st.number_input("Umbral Capturas:", min_value=1, value=7, step=1, key="umbral_kpi")
-    sectores_en_alerta = 0
-    if df_mosca is not None and not df_mosca.empty and 'Fecha' in df_mosca.columns:
-        df_mosca['Total_Capturas'] = df_mosca[['Ceratitis_capitata', 'Anastrepha_fraterculus', 'Anastrepha_distinta']].sum(axis=1)
-        df_ultimas_moscas = df_mosca.loc[df_mosca.groupby('Numero_Trampa')['Fecha'].idxmax()]
-        trampas_en_alerta = df_ultimas_moscas[df_ultimas_moscas['Total_Capturas'] >= umbral_mosca]
-        sectores_en_alerta = trampas_en_alerta['Sector'].nunique()
-    st.metric("🪰 Sectores en Alerta (Mosca)", f"{sectores_en_alerta}")
-    
-with kpi_cols[5]:
-    lotes_por_vencer = 0
-    if not df_stock_lotes.empty and 'Fecha_Vencimiento' in df_stock_lotes.columns:
-        df_stock_lotes['Fecha_Vencimiento'] = pd.to_datetime(df_stock_lotes['Fecha_Vencimiento'], errors='coerce')
-        df_activos = df_stock_lotes[df_stock_lotes['Stock_Restante'] > 0].dropna(subset=['Fecha_Vencimiento'])
-        lotes_por_vencer = len(df_activos[(df_activos['Fecha_Vencimiento'].dt.date <= today + timedelta(days=30)) & (df_activos['Fecha_Vencimiento'].dt.date >= today)])
-    st.metric("⚠️ Lotes por Vencer (30d)", f"{lotes_por_vencer}")
+                            st.success(f"¡Tarea '{tarea['ID_Orden_Personalizado']}' completada y horas registradas!")
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al guardar los registros en Supabase: {e}")
+else:
+    st.info("No hay aplicaciones con mezcla lista para ser aplicadas.")
 
 st.divider()
 
-# --- GRÁFICOS ---
-st.header("Análisis Visual")
-gcol1, gcol2 = st.columns(2)
+# --- HISTORIALES Y DESCARGAS ---
+st.header("📚 Historiales")
 
-with gcol1:
-    st.subheader("Valor de Inventario por Tipo")
-    if df_kardex_productos is not None and not df_stock_lotes.empty:
-        df_valor_tipo = pd.merge(df_stock_lotes, df_kardex_productos, left_on='Codigo_Producto', right_on='Codigo', how='left')
-        df_valor_tipo = df_valor_tipo.groupby('Tipo_Accion')['Valor_Lote'].sum().reset_index()
-        fig_pie = px.pie(df_valor_tipo, values='Valor_Lote', names='Tipo_Accion', title="Distribución del Valor en Almacén", hole=.3)
-        st.plotly_chart(fig_pie, use_container_width=True)
-    else:
-        st.info("No hay datos de inventario para mostrar.")
+# Historial de Horas de Tractor
+st.subheader("Historial de Horas de Tractor")
+if not df_historial_horas.empty:
+    st.dataframe(df_historial_horas.sort_values(by="Fecha", ascending=False), use_container_width=True)
+    excel_horas = to_excel(df_historial_horas)
+    st.download_button(
+        label="📥 Descargar Historial de Horas",
+        data=excel_horas,
+        file_name=f"Reporte_Horas_Tractor_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    )
+else:
+    st.info("Aún no se ha registrado ninguna hora de tractor.")
 
-with gcol2:
-    st.subheader("Evolución del Diámetro de Baya")
-    if df_baya is not None and not df_baya.empty and 'Fecha' in df_baya.columns:
-        df_baya_filtrado = df_baya[(df_baya['Fecha'].dt.date >= fecha_inicio) & (df_baya['Fecha'].dt.date <= fecha_fin)]
-        if not df_baya_filtrado.empty:
-            columnas_medicion = [col for col in df_baya_filtrado.columns if 'Racimo' in col]
-            if columnas_medicion:
-                df_baya_filtrado['Diametro_Prom_Planta'] = df_baya_filtrado[columnas_medicion].mean(axis=1)
-                df_tendencia_baya = df_baya_filtrado.groupby(['Fecha', 'Sector'])['Diametro_Prom_Planta'].mean().reset_index()
-                fig_baya = px.line(df_tendencia_baya, x='Fecha', y='Diametro_Prom_Planta', color='Sector', title='Crecimiento Promedio de Baya por Sector', markers=True, labels={'Diametro_Prom_Planta': 'Diámetro (mm)'})
-                st.plotly_chart(fig_baya, use_container_width=True)
-        else:
-            st.info("No hay datos de diámetro de baya para el rango de fechas seleccionado.")
-    else:
-        st.info("Aún no se han registrado mediciones de diámetro de baya.")
+# Historial de Aplicaciones Completadas
+st.subheader("Historial de Aplicaciones Completadas")
+if not df_historial_apps.empty:
+    columnas_a_mostrar = ['ID_Orden_Personalizado', 'Sector_Aplicacion', 'Tractor_Responsable', 'Aplicacion_Completada_Fecha']
+    st.dataframe(df_historial_apps[columnas_a_mostrar].sort_values(by="Aplicacion_Completada_Fecha", ascending=False), use_container_width=True)
+else:
+    st.info("Aún no se ha completado ninguna aplicación.")

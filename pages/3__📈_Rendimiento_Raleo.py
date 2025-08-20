@@ -1,9 +1,11 @@
 import streamlit as st
 import pandas as pd
-import os
 from datetime import datetime, timedelta
 import plotly.express as px
 from io import BytesIO
+
+# --- LIBRERÍAS PARA LA CONEXIÓN A SUPABASE ---
+from supabase import create_client, Client
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Dashboard de Raleo", page_icon="📈", layout="wide")
@@ -11,19 +13,44 @@ st.title("📈 Dashboard de Rendimiento de Raleo")
 st.write("Analiza el rendimiento del personal, calcula los pagos y visualiza el avance por fecha y sector.")
 
 # --- CONSTANTES ---
+# Define la tarifa que se paga por cada racimo estimado.
 TARIFA_POR_RACIMO = 0.07
-ARCHIVO_RALEO = 'Registro_Raleo.xlsx'
 
-# --- FUNCIONES ---
-def cargar_datos_raleo():
-    """Carga, limpia y procesa los datos de raleo desde el archivo Excel."""
-    if not os.path.exists(ARCHIVO_RALEO):
+# --- FUNCIÓN DE CONEXIÓN SEGURA A SUPABASE ---
+@st.cache_resource
+def init_supabase_connection():
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
+    except Exception as e:
+        st.error(f"Error al conectar con Supabase: {e}")
+        return None
+
+supabase = init_supabase_connection()
+
+# --- NUEVAS FUNCIONES ADAPTADAS PARA SUPABASE ---
+@st.cache_data(ttl=60)
+def cargar_datos_raleo_supabase():
+    """Carga, limpia y procesa los datos de raleo desde la tabla de Supabase."""
+    if supabase is None:
         return pd.DataFrame()
     
-    df = pd.read_excel(ARCHIVO_RALEO)
-    df['Fecha'] = pd.to_datetime(df['Fecha'])
-    df['Pago Calculado (S/)'] = df['Racimos Raleados'] * TARIFA_POR_RACIMO
-    return df
+    try:
+        response = supabase.table('Control_Raleo').select("*").execute()
+        df = pd.DataFrame(response.data)
+        
+        if df.empty:
+            return pd.DataFrame()
+
+        # Limpieza y procesamiento de datos
+        df['Fecha'] = pd.to_datetime(df['Fecha'])
+        # Usamos 'Racimos_Estimados' para el cálculo del pago
+        df['Pago_Calculado_S'] = df['Racimos_Estimados'] * TARIFA_POR_RACIMO
+        return df
+    except Exception as e:
+        st.error(f"Error al cargar los datos de raleo: {e}")
+        return pd.DataFrame()
 
 def to_excel(df):
     """Convierte un DataFrame a un archivo Excel en memoria para descarga."""
@@ -33,8 +60,7 @@ def to_excel(df):
     return output.getvalue()
 
 # --- CARGA Y FILTROS ---
-# La línea @st.cache_data ha sido eliminada de la función de carga
-df_raleo = cargar_datos_raleo()
+df_raleo = cargar_datos_raleo_supabase()
 
 if df_raleo.empty:
     st.warning("Aún no se ha registrado ninguna jornada de raleo. Por favor, ingrese datos en 'Control de Raleo'.")
@@ -44,7 +70,6 @@ st.sidebar.header("Filtros del Dashboard")
 
 # Filtro de Fechas
 today = datetime.now().date()
-# Usamos .date() para asegurar que no haya conflictos de zona horaria
 fecha_inicio = st.sidebar.date_input("Fecha de Inicio", today - timedelta(days=7))
 fecha_fin = st.sidebar.date_input("Fecha de Fin", today)
 
@@ -67,12 +92,12 @@ else:
     st.header(f"Mostrando Datos del {fecha_inicio.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}")
 
     # KPIs
-    total_racimos = df_filtrado['Racimos Raleados'].sum()
-    pago_total = df_filtrado['Pago Calculado (S/)'].sum()
+    total_racimos = df_filtrado['Racimos_Estimados'].sum()
+    pago_total = df_filtrado['Pago_Calculado_S'].sum()
     promedio_diario = total_racimos / df_filtrado['Fecha'].nunique() if df_filtrado['Fecha'].nunique() > 0 else 0
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Total Racimos Raleados", f"{total_racimos:,.0f}")
+    col1.metric("Total Racimos Estimados", f"{total_racimos:,.0f}")
     col2.metric("Pago Total Calculado", f"S/ {pago_total:,.2f}")
     col3.metric("Promedio Racimos por Día", f"{promedio_diario:,.1f}")
 
@@ -82,26 +107,26 @@ else:
     col_graf1, col_graf2 = st.columns(2)
     with col_graf1:
         st.subheader("🏆 Ranking de Personal")
-        df_ranking = df_filtrado.groupby('Nombre del Trabajador').agg(
-            Total_Racimos=('Racimos Raleados', 'sum'),
-            Pago_Total=('Pago Calculado (S/)', 'sum')
+        df_ranking = df_filtrado.groupby('Nombre_del_Trabajador').agg(
+            Total_Racimos=('Racimos_Estimados', 'sum'),
+            Pago_Total=('Pago_Calculado_S', 'sum')
         ).sort_values(by='Total_Racimos', ascending=False).reset_index()
 
         fig_ranking = px.bar(
-            df_ranking, x='Total_Racimos', y='Nombre del Trabajador', orientation='h',
-            title='Total de Racimos Raleados por Persona', text='Total_Racimos',
-            labels={'Nombre del Trabajador': 'Trabajador', 'Total_Racimos': 'Nº de Racimos'}
+            df_ranking, x='Total_Racimos', y='Nombre_del_Trabajador', orientation='h',
+            title='Total de Racimos Estimados por Persona', text='Total_Racimos',
+            labels={'Nombre_del_Trabajador': 'Trabajador', 'Total_Racimos': 'Nº de Racimos Estimados'}
         )
         fig_ranking.update_layout(yaxis={'categoryorder':'total ascending'})
         st.plotly_chart(fig_ranking, use_container_width=True)
 
     with col_graf2:
         st.subheader("📅 Evolución Diaria del Raleo")
-        df_evolucion = df_filtrado.groupby(df_filtrado['Fecha'].dt.date)['Racimos Raleados'].sum().reset_index()
+        df_evolucion = df_filtrado.groupby(df_filtrado['Fecha'].dt.date)['Racimos_Estimados'].sum().reset_index()
         fig_evolucion = px.line(
-            df_evolucion, x='Fecha', y='Racimos Raleados',
-            title='Total de Racimos Raleados por Día', markers=True,
-            labels={'Fecha': 'Día', 'Racimos Raleados': 'Nº de Racimos'}
+            df_evolucion, x='Fecha', y='Racimos_Estimados',
+            title='Total de Racimos Estimados por Día', markers=True,
+            labels={'Fecha': 'Día', 'Racimos_Estimados': 'Nº de Racimos Estimados'}
         )
         st.plotly_chart(fig_evolucion, use_container_width=True)
     
@@ -109,12 +134,12 @@ else:
 
     # Tabla detallada y botón de descarga
     st.subheader("📋 Tabla de Datos Detallada")
-    # Aseguramos que el pago tenga 2 decimales en la tabla
+    columnas_display = ['Fecha', 'Sector', 'Evaluador', 'Nombre_del_Trabajador', 'Tandas_Completadas', 'Racimos_Estimados', 'Pago_Calculado_S']
     df_display = df_filtrado.copy()
-    df_display['Pago Calculado (S/)'] = df_display['Pago Calculado (S/)'].round(2)
-    st.dataframe(df_display[['Fecha', 'Sector', 'Nombre del Trabajador', 'Racimos Raleados', 'Pago Calculado (S/)']].sort_values(by="Fecha", ascending=False), use_container_width=True)
+    df_display['Pago_Calculado_S'] = df_display['Pago_Calculado_S'].round(2)
+    st.dataframe(df_display[columnas_display].sort_values(by="Fecha", ascending=False), use_container_width=True)
     
-    excel_data = to_excel(df_filtrado)
+    excel_data = to_excel(df_filtrado[columnas_display])
     st.download_button(
         label="📥 Descargar Reporte Filtrado a Excel",
         data=excel_data,

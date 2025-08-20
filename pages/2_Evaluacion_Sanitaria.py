@@ -1,46 +1,68 @@
 import streamlit as st
 import pandas as pd
-import os
 from datetime import datetime
 from io import BytesIO
 import json
+
+# --- LIBRERÍAS PARA LA CONEXIÓN A SUPABASE ---
+from supabase import create_client, Client
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Evaluación Sanitaria", page_icon="🔬", layout="wide")
 st.title("🔬 Evaluación Sanitaria de Campo")
 st.write("Registre aquí la evaluación completa de plagas y enfermedades para un lote específico.")
 
-# --- NOMBRES DE ARCHIVOS ---
-ARCHIVO_EVALUACION = 'Evaluacion_Sanitaria_Completa.xlsx'
-
-# --- FUNCIONES ---
-def cargar_datos_excel():
-    if os.path.exists(ARCHIVO_EVALUACION):
-        return pd.read_excel(ARCHIVO_EVALUACION)
-    return None
-
-def guardar_datos_excel(df_nuevos):
+# --- FUNCIÓN DE CONEXIÓN SEGURA A SUPABASE ---
+@st.cache_resource
+def init_supabase_connection():
     try:
-        df_existente = cargar_datos_excel()
-        df_final = pd.concat([df_existente, df_nuevos], ignore_index=True) if df_existente is not None else df_nuevos
-        df_final.to_excel(ARCHIVO_EVALUACION, index=False, engine='openpyxl')
-        return True, "Guardado exitoso."
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        client = create_client(url, key)
+        return client
     except Exception as e:
-        return False, str(e)
+        st.error(f"Error al conectar con Supabase: {e}")
+        st.info("Asegúrate de haber configurado SUPABASE_URL y SUPABASE_KEY en los Secrets de tu app.")
+        return None
+
+supabase = init_supabase_connection()
+
+# --- NUEVAS FUNCIONES ADAPTADAS PARA SUPABASE ---
+@st.cache_data(ttl=60)
+def cargar_evaluaciones_supabase():
+    """Carga el historial de evaluaciones desde la tabla de Supabase."""
+    if supabase:
+        try:
+            response = supabase.table('Evaluaciones_Sanitarias').select("*").execute()
+            df = pd.DataFrame(response.data)
+            return df
+        except Exception as e:
+            st.error(f"Error al cargar los datos de Supabase: {e}")
+    return pd.DataFrame()
 
 def to_excel_detailed(evaluacion_row):
+    """Genera un reporte Excel detallado a partir de una fila de datos de Supabase."""
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        resumen_df = pd.DataFrame([{"Fecha": evaluacion_row['Fecha'], "Sector": evaluacion_row['Sector'], "Evaluador": evaluacion_row['Evaluador']}])
-        resumen_df.to_excel(writer, index=False, sheet_name='Resumen')
+        # Hoja de Resumen
+        resumen_data = {
+            "Fecha": [pd.to_datetime(evaluacion_row['Fecha']).strftime('%Y-%m-%d')],
+            "Sector": [evaluacion_row['Sector']],
+            "Evaluador": [evaluacion_row['Evaluador']]
+        }
+        pd.DataFrame(resumen_data).to_excel(writer, index=False, sheet_name='Resumen')
         
-        pd.read_json(evaluacion_row['Datos_Plagas']).set_index('Planta').to_excel(writer, sheet_name='Plagas')
-        pd.read_json(evaluacion_row['Datos_Enfermedades']).set_index('Planta').to_excel(writer, sheet_name='Enfermedades')
-        pd.read_json(evaluacion_row['Datos_Perimetro']).set_index('Plaga/Enfermedad').to_excel(writer, sheet_name='Perimetro')
-        
+        # Hojas de Datos (leyendo desde las columnas jsonb)
+        if 'Datos_Plagas' in evaluacion_row and evaluacion_row['Datos_Plagas']:
+            pd.DataFrame(evaluacion_row['Datos_Plagas']).set_index('Planta').to_excel(writer, sheet_name='Plagas')
+        if 'Datos_Enfermedades' in evaluacion_row and evaluacion_row['Datos_Enfermedades']:
+            pd.DataFrame(evaluacion_row['Datos_Enfermedades']).set_index('Planta').to_excel(writer, sheet_name='Enfermedades')
+        if 'Datos_Perimetro' in evaluacion_row and evaluacion_row['Datos_Perimetro']:
+            pd.DataFrame(evaluacion_row['Datos_Perimetro']).set_index('Plaga/Enfermedad').to_excel(writer, sheet_name='Perimetro')
+            
     return output.getvalue()
 
-# --- INTERFAZ DE REGISTRO ---
+# --- INTERFAZ DE REGISTRO (CASI SIN CAMBIOS) ---
 with st.expander("➕ Registrar Nueva Evaluación Sanitaria", expanded=True):
     with st.form("evaluacion_sanitaria_form"):
         st.header("1. Datos Generales de la Evaluación")
@@ -96,41 +118,57 @@ with st.expander("➕ Registrar Nueva Evaluación Sanitaria", expanded=True):
         st.divider()
         submitted = st.form_submit_button("✅ Guardar Evaluación Completa")
 
-        if submitted:
-            plagas_json = df_plagas.reset_index().to_json(orient='records')
-            enfermedades_json = df_enfermedades.reset_index().to_json(orient='records')
-            perimetro_json = df_perimetro.reset_index().to_json(orient='records')
-
-            nueva_evaluacion = pd.DataFrame([{"Fecha": fecha_evaluacion.strftime("%Y-%m-%d"), "Sector": sector_evaluado, "Evaluador": evaluador, "Datos_Plagas": plagas_json, "Datos_Enfermedades": enfermedades_json, "Datos_Perimetro": perimetro_json}])
-            
-            exito, mensaje = guardar_datos_excel(nueva_evaluacion)
-            if exito:
-                st.success("¡Evaluación sanitaria guardada exitosamente!")
+        if submitted and supabase:
+            if not evaluador or not sector_evaluado:
+                st.warning("Por favor, complete los campos de Evaluador y Sector.")
             else:
-                st.error(f"Error al guardar: {mensaje}")
+                try:
+                    # Preparamos los datos para insertar en Supabase
+                    datos_para_insertar = {
+                        "Fecha": fecha_evaluacion.strftime("%Y-%m-%d"),
+                        "Sector": sector_evaluado,
+                        "Evaluador": evaluador,
+                        "Datos_Plagas": df_plagas.reset_index().to_dict(orient='records'),
+                        "Datos_Enfermedades": df_enfermedades.reset_index().to_dict(orient='records'),
+                        "Datos_Perimetro": df_perimetro.reset_index().to_dict(orient='records')
+                    }
+                    
+                    # Insertamos el nuevo registro en la tabla de Supabase
+                    supabase.table('Evaluaciones_Sanitarias').insert(datos_para_insertar).execute()
+                    st.success("¡Evaluación sanitaria guardada exitosamente en Supabase!")
+                    st.cache_data.clear() # Limpiamos el caché para recargar el historial
+                    st.rerun()
 
-# --- HISTORIAL Y DESCARGA ---
+                except Exception as e:
+                    st.error(f"Error al guardar en Supabase: {e}")
+
+# --- HISTORIAL Y DESCARGA (ADAPTADO PARA SUPABASE) ---
 st.divider()
 st.header("📚 Historial de Evaluaciones Sanitarias")
-df_historial = cargar_datos_excel()
+df_historial = cargar_evaluaciones_supabase()
 
 if df_historial is not None and not df_historial.empty:
     st.write("A continuación se muestra un resumen de las últimas evaluaciones realizadas.")
-    for index, evaluacion in df_historial.sort_values(by='Fecha', ascending=False).head(10).iterrows():
+    
+    # Ordenamos por fecha descendente
+    df_historial['Fecha'] = pd.to_datetime(df_historial['Fecha'])
+    df_historial_ordenado = df_historial.sort_values(by='Fecha', ascending=False)
+
+    for index, evaluacion in df_historial_ordenado.head(10).iterrows():
         with st.container(border=True):
             col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
-            col1.metric("Fecha", pd.to_datetime(evaluacion['Fecha']).strftime('%d/%m/%Y'))
+            col1.metric("Fecha", evaluacion['Fecha'].strftime('%d/%m/%Y'))
             col2.metric("Sector", evaluacion['Sector'])
             col3.metric("Evaluador", evaluacion['Evaluador'])
             with col4:
-                st.write("")
+                st.write("") # Espacio para alinear el botón
                 reporte_individual = to_excel_detailed(evaluacion)
                 st.download_button(
                     label="📥 Reporte",
                     data=reporte_individual,
-                    file_name=f"Reporte_Sanitario_{evaluacion['Sector']}_{pd.to_datetime(evaluacion['Fecha']).strftime('%Y%m%d')}.xlsx",
+                    file_name=f"Reporte_Sanitario_{evaluacion['Sector']}_{evaluacion['Fecha'].strftime('%Y%m%d')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"download_sanitario_{index}"
+                    key=f"download_sanitario_{evaluacion['id']}" # Usamos el id de Supabase como clave única
                 )
 else:
     st.info("Aún no se ha registrado ninguna evaluación sanitaria.")

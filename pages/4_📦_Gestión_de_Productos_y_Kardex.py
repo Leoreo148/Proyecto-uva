@@ -13,7 +13,6 @@ st.title("📦 Gestión de Productos y Kardex")
 st.write("Catálogo de productos y stock, conectado a una base de datos permanente con Supabase.")
 
 # --- INICIALIZAR SESSION STATE ---
-# Necesario para manejar el estado de la edición y eliminación
 if 'editing_product_id' not in st.session_state:
     st.session_state.editing_product_id = None
 if 'deleting_product_id' not in st.session_state:
@@ -114,7 +113,7 @@ with st.expander("➕ Añadir Nuevo Producto al Catálogo"):
             else:
                 st.warning("Código y Nombre son obligatorios.")
 
-# SECCIÓN 2: CATÁLOGO DE PRODUCTOS Y GESTIÓN (NUEVA SECCIÓN CON EDICIÓN/ELIMINACIÓN)
+# SECCIÓN 2: CATÁLOGO DE PRODUCTOS Y GESTIÓN
 st.divider()
 st.header("📖 Catálogo de Productos y Stock Actual")
 
@@ -128,8 +127,9 @@ else:
     if st.session_state.editing_product_id:
         producto_a_editar = df_productos[df_productos['id'] == st.session_state.editing_product_id].iloc[0]
         
-        with st.dialog("✏️ Editar Producto"):
-            with st.form("edit_form"):
+        @st.dialog("✏️ Editar Producto")
+        def edit_dialog():
+            with st.form("edit_form_dialog"):
                 st.write(f"**Editando:** {producto_a_editar['Producto']} (Código: {producto_a_editar['Codigo']})")
                 
                 new_nombre = st.text_input("Nombre del Producto", value=producto_a_editar['Producto'])
@@ -140,7 +140,7 @@ else:
                 new_tipo_accion = st.selectbox("Tipo de Acción", ["Fertilizante", "Fungicida", "Insecticida", "Herbicida", "Bioestimulante", "Otro"], index=["Fertilizante", "Fungicida", "Insecticida", "Herbicida", "Bioestimulante", "Otro"].index(producto_a_editar.get('Tipo_Accion', 'Otro')))
                 
                 col1, col2 = st.columns(2)
-                if col1.form_submit_button("💾 Guardar Cambios"):
+                if col1.form_submit_button("💾 Guardar Cambios", use_container_width=True):
                     try:
                         update_data = {
                             'Producto': new_nombre, 'Ingrediente_Activo': new_ing_activo,
@@ -148,66 +148,75 @@ else:
                             'Proveedor': new_proveedor, 'Tipo_Accion': new_tipo_accion
                         }
                         supabase.table('Productos').update(update_data).eq('id', st.session_state.editing_product_id).execute()
-                        st.success("Producto actualizado.")
+                        st.toast("✅ Producto actualizado.")
                         st.session_state.editing_product_id = None
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al actualizar: {e}")
 
-                if col2.form_submit_button("❌ Cancelar"):
+                if col2.form_submit_button("❌ Cancelar", use_container_width=True):
                     st.session_state.editing_product_id = None
                     st.rerun()
+        
+        edit_dialog()
 
-    # --- DIÁLOGO DE ELIMINACIÓN ---
-    if st.session_state.deleting_product_id:
-        producto_a_eliminar = df_productos[df_productos['id'] == st.session_state.deleting_product_id].iloc[0]
-        with st.dialog("🗑️ Confirmar Eliminación"):
-            st.warning(f"¿Estás seguro de que quieres eliminar el producto **'{producto_a_eliminar['Producto']}'**?")
-            st.write("Esta acción no se puede deshacer.")
-            col1, col2 = st.columns(2)
-            if col1.button("Sí, Eliminar Permanentemente"):
-                try:
-                    supabase.table('Productos').delete().eq('id', st.session_state.deleting_product_id).execute()
-                    st.success("Producto eliminado.")
-                    st.session_state.deleting_product_id = None
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al eliminar: {e}")
-            if col2.button("No, Cancelar"):
-                st.session_state.deleting_product_id = None
-                st.rerun()
-
-    # --- MOSTRAR LA TABLA CON BOTONES ---
-    # Columnas a mostrar en la tabla principal
+    # --- MOSTRAR LA TABLA CON BOTONES DENTRO USANDO DATA_EDITOR ---
     columnas_display = ['Codigo', 'Producto', 'Stock_Actual', 'Stock_Minimo', 'Unidad', 'Stock_Valorizado']
     for col in columnas_display:
         if col not in df_vista_kardex.columns:
             df_vista_kardex[col] = 0
     df_vista_kardex = df_vista_kardex[['id'] + columnas_display]
 
-    # Formateo para visualización
     df_display = df_vista_kardex.copy()
     df_display['Stock_Valorizado'] = df_display['Stock_Valorizado'].map('S/{:,.2f}'.format)
     df_display['Stock_Actual'] = df_display['Stock_Actual'].map('{:,.2f}'.format)
     
-    # Crear columnas para la tabla y los botones
-    col_data, col_edit, col_delete = st.columns([10, 1, 1])
+    # Añadimos columnas para los botones de acción
+    df_display['Editar'] = False
+    df_display['Eliminar'] = False
     
-    with col_data:
-        st.dataframe(df_display[columnas_display], use_container_width=True, hide_index=True)
-    
-    with col_edit:
-        st.write("✏️") # Encabezado para la columna de editar
-        for id_producto in df_vista_kardex['id']:
-            if st.button("Editar", key=f"edit_{id_producto}", use_container_width=True):
-                st.session_state.editing_product_id = id_producto
-                st.rerun()
+    edited_df = st.data_editor(
+        df_display,
+        use_container_width=True,
+        hide_index=True,
+        column_order=('Codigo', 'Producto', 'Stock_Actual', 'Stock_Minimo', 'Unidad', 'Stock_Valorizado', 'Editar', 'Eliminar'),
+        column_config={
+            "id": None, # Ocultamos la columna de id de Supabase
+            "Editar": st.column_config.ButtonColumn("✏️", help="Editar este producto"),
+            "Eliminar": st.column_config.ButtonColumn("🗑️", help="Eliminar este producto"),
+        },
+        disabled=columnas_display # Hacemos que los datos no se puedan editar directamente en la tabla
+    )
 
-    with col_delete:
-        st.write("🗑️") # Encabezado para la columna de borrar
-        for id_producto in df_vista_kardex['id']:
-            if st.button("Borrar", key=f"delete_{id_producto}", use_container_width=True):
-                st.session_state.deleting_product_id = id_producto
+    # Lógica para manejar el clic en el botón de Editar
+    edit_row = edited_df[edited_df.Editar].reset_index()
+    if not edit_row.empty:
+        product_id = df_display.loc[edit_row['index'][0], 'id']
+        st.session_state.editing_product_id = product_id
+        st.rerun()
+
+    # Lógica para manejar el clic en el botón de Eliminar
+    delete_row = edited_df[edited_df.Eliminar].reset_index()
+    if not delete_row.empty:
+        product_id = df_display.loc[delete_row['index'][0], 'id']
+        product_name = df_display.loc[delete_row['index'][0], 'Producto']
+        
+        # Usamos un diálogo de confirmación para la eliminación
+        @st.dialog("🗑️ Confirmar Eliminación")
+        def delete_dialog():
+            st.warning(f"¿Estás seguro de que quieres eliminar el producto **'{product_name}'**?")
+            st.write("Esta acción no se puede deshacer.")
+            col1, col2 = st.columns(2)
+            if col1.button("Sí, Eliminar Permanentemente", use_container_width=True):
+                try:
+                    supabase.table('Productos').delete().eq('id', product_id).execute()
+                    st.toast("✅ Producto eliminado.")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al eliminar: {e}")
+            if col2.button("No, Cancelar", use_container_width=True):
                 st.rerun()
+        
+        delete_dialog()

@@ -99,7 +99,15 @@ with st.expander("➕ Añadir Nuevo Producto al Catálogo"):
         if st.form_submit_button("Añadir Producto a Supabase"):
             if supabase and all([prod_codigo, prod_nombre]):
                 try:
-                    # Lógica para añadir producto...
+                    nuevo_producto_data = {
+                        'Codigo': prod_codigo, 'Producto': prod_nombre, 'Ingrediente_Activo': prod_ing_activo,
+                        'Unidad': prod_unidad, 'Proveedor': prod_proveedor, 'Tipo_Accion': prod_tipo_accion,
+                        'Stock_Minimo': prod_stock_min
+                    }
+                    supabase.table('Productos').insert(nuevo_producto_data).execute()
+                    st.success(f"¡Producto '{prod_nombre}' añadido!")
+                    st.cache_data.clear()
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Error al guardar: {e}")
             else:
@@ -115,17 +123,62 @@ else:
     df_total_stock, _ = calcular_stock_por_lote(df_ingresos, df_salidas)
     df_vista_kardex = pd.merge(df_productos, df_total_stock, left_on='Codigo', right_on='Codigo_Producto', how='left').fillna(0)
 
-    # --- DIÁLOGOS DE EDICIÓN Y ELIMINACIÓN ---
+    # --- DIÁLOGO DE EDICIÓN ---
     if st.session_state.editing_product_id:
-        # (La lógica de los diálogos se mantiene igual)
-        pass # Aquí iría el código de los diálogos como lo teníamos
+        producto_a_editar = df_productos[df_productos['id'] == st.session_state.editing_product_id].iloc[0]
+        
+        @st.dialog("✏️ Editar Producto")
+        def edit_dialog():
+            with st.form("edit_form_dialog"):
+                st.write(f"**Editando:** {producto_a_editar['Producto']} (Código: {producto_a_editar['Codigo']})")
+                unidades = ["Litro", "Kilo", "Unidad", "Galón", "Bolsa"]
+                tipos_accion = ["Fertilizante", "Fungicida", "Insecticida", "Herbicida", "Bioestimulante", "Otro"]
+                
+                new_nombre = st.text_input("Nombre del Producto", value=producto_a_editar['Producto'])
+                new_ing_activo = st.text_input("Ingrediente Activo", value=producto_a_editar.get('Ingrediente_Activo', ''))
+                new_stock_min = st.number_input("Stock Mínimo", min_value=0.0, format="%.2f", value=float(producto_a_editar.get('Stock_Minimo', 0.0)))
+                new_unidad = st.selectbox("Unidad", unidades, index=unidades.index(producto_a_editar.get('Unidad', 'Litro')))
+                new_proveedor = st.text_input("Proveedor", value=producto_a_editar.get('Proveedor', ''))
+                new_tipo_accion = st.selectbox("Tipo de Acción", tipos_accion, index=tipos_accion.index(producto_a_editar.get('Tipo_Accion', 'Otro')))
+                
+                col1, col2 = st.columns(2)
+                if col1.form_submit_button("💾 Guardar Cambios"):
+                    update_data = {
+                        'Producto': new_nombre, 'Ingrediente_Activo': new_ing_activo,
+                        'Stock_Minimo': new_stock_min, 'Unidad': new_unidad,
+                        'Proveedor': new_proveedor, 'Tipo_Accion': new_tipo_accion
+                    }
+                    supabase.table('Productos').update(update_data).eq('id', st.session_state.editing_product_id).execute()
+                    st.toast("✅ Producto actualizado.")
+                    st.session_state.editing_product_id = None
+                    st.cache_data.clear()
+                    st.rerun()
+                if col2.form_submit_button("❌ Cancelar"):
+                    st.session_state.editing_product_id = None
+                    st.rerun()
+        edit_dialog()
 
+    # --- DIÁLOGO DE ELIMINACIÓN ---
     if st.session_state.deleting_product_id:
-        # (La lógica de confirmación de borrado se mantiene igual)
-        pass # Aquí iría el código de confirmación de borrado
+        producto_a_eliminar = df_productos[df_productos['id'] == st.session_state.deleting_product_id].iloc[0]
+        @st.dialog("🗑️ Confirmar Eliminación")
+        def delete_dialog():
+            st.warning(f"¿Estás seguro de que quieres eliminar el producto **'{producto_a_eliminar['Producto']}'**?")
+            st.write("Esta acción no se puede deshacer.")
+            col1, col2 = st.columns(2)
+            if col1.button("Sí, Eliminar Permanentemente"):
+                supabase.table('Productos').delete().eq('id', st.session_state.deleting_product_id).execute()
+                st.toast("✅ Producto eliminado.")
+                st.session_state.deleting_product_id = None
+                st.cache_data.clear()
+                st.rerun()
+            if col2.button("No, Cancelar"):
+                st.session_state.deleting_product_id = None
+                st.rerun()
+        delete_dialog()
 
     # --- MOSTRAR LA TABLA CON BOTONES (MÉTODO ALTERNATIVO) ---
-    header_cols = st.columns([2, 3, 1, 1, 1, 1, 1, 1])
+    header_cols = st.columns([2, 4, 2, 2, 1, 2, 1, 1])
     headers = ['Código', 'Producto', 'Stock Actual', 'Stock Mínimo', 'Unidad', 'Valorizado', 'Editar', 'Borrar']
     for col, header in zip(header_cols, headers):
         col.markdown(f"**{header}**")
@@ -133,7 +186,7 @@ else:
     st.markdown("---")
 
     for index, row in df_vista_kardex.iterrows():
-        row_cols = st.columns([2, 3, 1, 1, 1, 1, 1, 1])
+        row_cols = st.columns([2, 4, 2, 2, 1, 2, 1, 1])
         row_cols[0].text(row.get('Codigo', ''))
         row_cols[1].text(row.get('Producto', ''))
         row_cols[2].text(f"{row.get('Stock_Actual', 0):.2f}")
@@ -148,4 +201,3 @@ else:
         if row_cols[7].button("🗑️", key=f"delete_{row['id']}", use_container_width=True):
             st.session_state.deleting_product_id = row['id']
             st.rerun()
-

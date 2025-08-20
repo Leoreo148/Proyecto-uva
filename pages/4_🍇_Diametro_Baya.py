@@ -1,11 +1,14 @@
 import streamlit as st
 import pandas as pd
-import os
 from datetime import datetime
 import json
-from streamlit_local_storage import LocalStorage
 from io import BytesIO
 import plotly.express as px
+
+# --- LIBRERÍAS PARA LA CONEXIÓN A SUPABASE ---
+from supabase import create_client, Client
+# NOTA: La librería streamlit_local_storage es un componente personalizado.
+from streamlit_local_storage import LocalStorage
 
 # --- Configuración de la Página ---
 st.set_page_config(page_title="Diámetro de Baya", page_icon="🍇", layout="wide")
@@ -14,22 +17,37 @@ st.write("Registre el diámetro (mm) de 3 bayas (superior, medio, inferior) para
 
 # --- Inicialización y Constantes ---
 localS = LocalStorage()
-ARCHIVO_DIAMETRO = 'Registro_Diametro_Baya_Detallado.xlsx'
 LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2'
-columnas_medicion = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior", "Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"]
+# Nombres de columna para la interfaz de usuario
+columnas_display = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior", "Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"]
+# Nombres de columna para la base de datos (sin espacios ni guiones)
+columnas_db = ["Racimo_1_Superior", "Racimo_1_Medio", "Racimo_1_Inferior", "Racimo_2_Superior", "Racimo_2_Medio", "Racimo_2_Inferior"]
 
-# --- Funciones ---
-def guardar_datos_excel(df_nuevos):
+# --- Conexión a Supabase ---
+@st.cache_resource
+def init_supabase_connection():
     try:
-        if os.path.exists(ARCHIVO_DIAMETRO):
-            df_existente = pd.read_excel(ARCHIVO_DIAMETRO)
-            df_final = pd.concat([df_existente, df_nuevos], ignore_index=True)
-        else:
-            df_final = df_nuevos
-        df_final.to_excel(ARCHIVO_DIAMETRO, index=False, engine='openpyxl')
-        return True, "Guardado exitoso."
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
     except Exception as e:
-        return False, str(e)
+        st.error(f"Error al conectar con Supabase: {e}")
+        return None
+
+supabase = init_supabase_connection()
+
+# --- Nuevas Funciones para Supabase ---
+@st.cache_data(ttl=60)
+def cargar_diametro_supabase():
+    """Carga el historial de mediciones desde la tabla de Supabase."""
+    if supabase:
+        try:
+            response = supabase.table('Diametro_Baya').select("*").execute()
+            df = pd.DataFrame(response.data)
+            return df
+        except Exception as e:
+            st.error(f"Error al cargar el historial de Supabase: {e}")
+    return pd.DataFrame()
 
 def to_excel(df):
     output = BytesIO()
@@ -39,22 +57,29 @@ def to_excel(df):
 
 # --- Interfaz de Registro ---
 with st.expander("➕ Registrar Nueva Medición", expanded=True):
-    # (El código de esta sección no cambia)
     col1, col2 = st.columns(2)
     with col1:
         sectores_baya = ['J1', 'J2', 'R1', 'R2', 'W1', 'W2', 'W3', 'K1', 'K2','K3']
         sector_seleccionado = st.selectbox('Seleccione el Sector de Medición:', options=sectores_baya)
     with col2:
         fecha_medicion = st.date_input("Fecha de Medición", datetime.now())
+    
     st.subheader("Tabla de Ingreso de Diámetros (mm)")
     plant_numbers = [f"Planta {i+1}" for i in range(25)]
-    df_plantilla = pd.DataFrame(0.0, index=plant_numbers, columns=columnas_medicion)
+    df_plantilla = pd.DataFrame(0.0, index=plant_numbers, columns=columnas_display)
     df_editada = st.data_editor(df_plantilla, use_container_width=True, key="editor_baya")
+    
     if st.button("💾 Guardar Medición en Dispositivo"):
         df_para_guardar = df_editada.copy()
         df_para_guardar['Sector'] = sector_seleccionado
         df_para_guardar['Fecha'] = fecha_medicion.strftime("%Y-%m-%d")
-        registros_json = df_para_guardar.reset_index().rename(columns={'index': 'Planta'}).to_dict('records')
+        
+        # Preparamos los registros para guardar, usando los nombres de columna de la DB
+        df_para_guardar = df_para_guardar.reset_index().rename(columns={'index': 'Planta'})
+        df_para_guardar.columns = ['Planta'] + columnas_db + ['Sector', 'Fecha']
+        
+        registros_json = df_para_guardar.to_dict('records')
+        
         registros_locales_str = localS.getItem(LOCAL_STORAGE_KEY)
         registros_locales = json.loads(registros_locales_str) if registros_locales_str else []
         registros_locales.extend(registros_json)
@@ -64,54 +89,52 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
 
 # --- Sección de Sincronización ---
 st.divider()
-st.subheader("📡 Sincronización con el Servidor")
-# (El código de esta sección no cambia)
+st.subheader("📡 Sincronización con la Base de Datos")
 registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
 registros_pendientes = json.loads(registros_pendientes_str) if registros_pendientes_str else []
+
 if registros_pendientes:
     st.warning(f"Hay **{len(registros_pendientes)}** mediciones de plantas guardadas localmente pendientes de sincronizar.")
-    if st.button("Sincronizar Ahora"):
-        df_pendientes = pd.DataFrame(registros_pendientes)
-        exito, mensaje = guardar_datos_excel(df_pendientes)
-        if exito:
-            localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
-            st.success("¡Sincronización completada!")
-            st.session_state['sync_success_baya'] = True
+    if st.button("Sincronizar Ahora con Supabase"):
+        if supabase:
+            with st.spinner("Sincronizando..."):
+                try:
+                    # Insertamos los registros pendientes en la tabla de Supabase
+                    supabase.table('Diametro_Baya').insert(registros_pendientes).execute()
+                    localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
+                    st.success("¡Sincronización completada!")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al guardar en Supabase: {e}. Sus datos locales están a salvo.")
         else:
-            st.error(f"Error al guardar: {mensaje}.")
+            st.error("No se pudo sincronizar. La conexión con Supabase no está disponible.")
 else:
     st.info("✅ Todas las mediciones de diámetro están sincronizadas.")
-
-if 'sync_success_baya' in st.session_state and st.session_state['sync_success_baya']:
-    del st.session_state['sync_success_baya']
-    st.rerun()
 
 st.divider()
 
 # --- HISTORIAL Y GRÁFICOS ---
 st.header("📊 Historial y Análisis de Tendencia")
+df_historial = cargar_diametro_supabase()
 
-df_historial = None
-if os.path.exists(ARCHIVO_DIAMETRO):
-    df_historial = pd.read_excel(ARCHIVO_DIAMETRO)
-
-if df_historial is None or df_historial.empty or not all(col in df_historial.columns for col in ['Fecha', 'Sector']):
+if df_historial is None or df_historial.empty:
     st.info("Aún no hay datos históricos para mostrar. Por favor, registre y sincronice algunas mediciones.")
 else:
     st.subheader("📚 Historial de Mediciones")
     df_historial['Fecha'] = pd.to_datetime(df_historial['Fecha'])
     sesiones = df_historial.groupby(['Fecha', 'Sector']).size().reset_index(name='counts')
+    
     for index, sesion in sesiones.sort_values(by='Fecha', ascending=False).head(5).iterrows():
         with st.container(border=True):
             df_sesion_actual = df_historial[(df_historial['Fecha'] == sesion['Fecha']) & (df_historial['Sector'] == sesion['Sector'])]
-            valores_medidos = df_sesion_actual[columnas_medicion].to_numpy().flatten()
+            valores_medidos = df_sesion_actual[columnas_db].to_numpy().flatten()
             promedio_sesion = valores_medidos[valores_medidos > 0].mean() if len(valores_medidos[valores_medidos > 0]) > 0 else 0
             
             col1, col2, col3, col4 = st.columns([2, 1, 2, 1])
             col1.metric("Fecha", pd.to_datetime(sesion['Fecha']).strftime('%d/%m/%Y'))
             col2.metric("Sector", sesion['Sector'])
             col3.metric("Promedio General (mm)", f"{promedio_sesion:.2f}")
-            # --- !! BOTÓN DE DESCARGA REINCORPORADO !! ---
             with col4:
                 st.write("")
                 reporte_individual = to_excel(df_sesion_actual)
@@ -119,14 +142,12 @@ else:
                     label="📥 Descargar",
                     data=reporte_individual,
                     file_name=f"Reporte_Diametro_{sesion['Sector']}_{pd.to_datetime(sesion['Fecha']).strftime('%Y%m%d')}.xlsx",
-                    key=f"download_diametro_{index}"
+                    key=f"download_diametro_{sesion['Fecha']}_{sesion['Sector']}"
                 )
 
     st.divider()
 
     st.subheader("📈 Gráfico de Tendencia")
-    # --- !! CORRECCIÓN DEL ERROR TYPEERROR !! ---
-    # Convertimos todos los valores de la columna a string antes de ordenar
     todos_los_sectores = sorted(df_historial['Sector'].astype(str).unique())
     sectores_a_graficar = st.multiselect(
         "Seleccione los sectores que desea comparar:",
@@ -134,8 +155,9 @@ else:
     )
     if sectores_a_graficar:
         df_filtrado = df_historial[df_historial['Sector'].isin(sectores_a_graficar)]
+        # Usamos los nombres de columna de la DB para el análisis
         df_melted = df_filtrado.melt(
-            id_vars=['Fecha', 'Sector'], value_vars=columnas_medicion,
+            id_vars=['Fecha', 'Sector'], value_vars=columnas_db,
             var_name='Posicion_Medicion', value_name='Diametro'
         )
         df_melted = df_melted[df_melted['Diametro'] > 0]

@@ -11,7 +11,7 @@ from supabase import create_client, Client
 from streamlit_local_storage import LocalStorage
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Monitoreo de Mosca", page_icon="�", layout="wide")
+st.set_page_config(page_title="Monitoreo de Mosca", page_icon="🪰", layout="wide")
 st.title("🪰 Monitoreo de Mosca de la Fruta")
 st.write("Inicie una sesión de monitoreo para un sector y registre las capturas de múltiples trampas.")
 
@@ -56,7 +56,7 @@ if 'sesion_monitoreo' not in st.session_state:
 if 'sector_actual' not in st.session_state:
     st.session_state.sector_actual = ""
 
-# --- INTERFAZ DE REGISTRO (SIN CAMBIOS EN LA LÓGICA) ---
+# --- INTERFAZ DE REGISTRO ---
 with st.expander("➕ Iniciar y Registrar Sesión de Monitoreo"):
     st.subheader("1. Iniciar Sesión")
     col1, col2 = st.columns(2)
@@ -91,7 +91,7 @@ with st.expander("➕ Iniciar y Registrar Sesión de Monitoreo"):
             elif submitted_trampa:
                 st.warning("Por favor, ingrese el número de la trampa.")
 
-# --- RESUMEN DE LA SESIÓN Y GUARDADO LOCAL (SIN CAMBIOS) ---
+# --- RESUMEN DE LA SESIÓN Y GUARDADO LOCAL ---
 if st.session_state.sesion_monitoreo:
     st.divider()
     st.subheader("Resumen de la Sesión Actual")
@@ -113,7 +113,7 @@ if st.session_state.sesion_monitoreo:
             st.session_state.sector_actual = ""
             st.rerun()
 
-# --- SECCIÓN DE SINCRONIZACIÓN (ADAPTADA PARA SUPABASE) ---
+# --- SECCIÓN DE SINCRONIZACIÓN ---
 st.divider()
 st.subheader("📡 Sincronización con la Base de Datos")
 
@@ -126,13 +126,10 @@ if registros_pendientes:
         if supabase:
             with st.spinner("Sincronizando..."):
                 try:
-                    # Insertamos los registros pendientes en la tabla de Supabase
                     supabase.table('Monitoreo_Mosca').insert(registros_pendientes).execute()
-                    
-                    # Si la inserción es exitosa, limpiamos el almacenamiento local
                     localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
                     st.success("¡Sincronización completada!")
-                    st.cache_data.clear() # Limpiamos caché para recargar historial
+                    st.cache_data.clear()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error al guardar en Supabase: {e}. Sus datos locales están a salvo.")
@@ -141,19 +138,17 @@ if registros_pendientes:
 else:
     st.info("✅ Todos los registros de monitoreo están sincronizados.")
 
-# --- HISTORIAL Y DESCARGA (ADAPTADO PARA SUPABASE) ---
+# --- HISTORIAL Y DESCARGA ---
 st.divider()
 st.subheader("📚 Historial de Monitoreo Sincronizado")
 df_historial = cargar_monitoreo_supabase()
 
 if df_historial is not None and not df_historial.empty:
-    # Aseguramos que la columna de Fecha sea del tipo correcto para ordenar
     df_historial['Fecha'] = pd.to_datetime(df_historial['Fecha'])
     df_historial_ordenado = df_historial.sort_values(by='Fecha', ascending=False)
     
     st.dataframe(df_historial_ordenado, use_container_width=True)
     
-    # Botón de descarga
     reporte_excel = to_excel(df_historial_ordenado)
     st.download_button(
         label="📥 Descargar Historial Completo",
@@ -163,4 +158,3 @@ if df_historial is not None and not df_historial.empty:
     )
 else:
     st.info("Aún no se ha sincronizado ninguna sesión de monitoreo.")
-�

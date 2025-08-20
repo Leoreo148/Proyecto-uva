@@ -7,3 +7,4 @@ streamlit-local-storage
 openpyxl
 XlsxWriter
 supabase
+streamlit>=1.30.0

@@ -13,10 +13,9 @@ st.title("📦 Gestión de Productos y Kardex")
 st.write("Catálogo de productos y stock, conectado a una base de datos permanente con Supabase.")
 
 # --- INICIALIZAR SESSION STATE ---
+# Usaremos esto para saber qué producto editar
 if 'editing_product_id' not in st.session_state:
     st.session_state.editing_product_id = None
-if 'deleting_product_id' not in st.session_state:
-    st.session_state.deleting_product_id = None
 
 # --- FUNCIÓN DE CONEXIÓN SEGURA A SUPABASE ---
 @st.cache_resource
@@ -132,12 +131,16 @@ else:
             with st.form("edit_form_dialog"):
                 st.write(f"**Editando:** {producto_a_editar['Producto']} (Código: {producto_a_editar['Codigo']})")
                 
+                # Pre-llenar el formulario con los datos existentes
+                unidades = ["Litro", "Kilo", "Unidad", "Galón", "Bolsa"]
+                tipos_accion = ["Fertilizante", "Fungicida", "Insecticida", "Herbicida", "Bioestimulante", "Otro"]
+                
                 new_nombre = st.text_input("Nombre del Producto", value=producto_a_editar['Producto'])
                 new_ing_activo = st.text_input("Ingrediente Activo", value=producto_a_editar.get('Ingrediente_Activo', ''))
                 new_stock_min = st.number_input("Stock Mínimo", min_value=0.0, step=1.0, format="%.2f", value=float(producto_a_editar.get('Stock_Minimo', 0.0)))
-                new_unidad = st.selectbox("Unidad", ["Litro", "Kilo", "Unidad", "Galón", "Bolsa"], index=["Litro", "Kilo", "Unidad", "Galón", "Bolsa"].index(producto_a_editar.get('Unidad', 'Litro')))
+                new_unidad = st.selectbox("Unidad", unidades, index=unidades.index(producto_a_editar.get('Unidad', 'Litro')))
                 new_proveedor = st.text_input("Proveedor", value=producto_a_editar.get('Proveedor', ''))
-                new_tipo_accion = st.selectbox("Tipo de Acción", ["Fertilizante", "Fungicida", "Insecticida", "Herbicida", "Bioestimulante", "Otro"], index=["Fertilizante", "Fungicida", "Insecticida", "Herbicida", "Bioestimulante", "Otro"].index(producto_a_editar.get('Tipo_Accion', 'Otro')))
+                new_tipo_accion = st.selectbox("Tipo de Acción", tipos_accion, index=tipos_accion.index(producto_a_editar.get('Tipo_Accion', 'Otro')))
                 
                 col1, col2 = st.columns(2)
                 if col1.form_submit_button("💾 Guardar Cambios", use_container_width=True):
@@ -172,7 +175,7 @@ else:
     df_display['Stock_Valorizado'] = df_display['Stock_Valorizado'].map('S/{:,.2f}'.format)
     df_display['Stock_Actual'] = df_display['Stock_Actual'].map('{:,.2f}'.format)
     
-    # Añadimos columnas para los botones de acción
+    # Añadimos columnas booleanas para los botones de acción
     df_display['Editar'] = False
     df_display['Eliminar'] = False
     
@@ -183,8 +186,8 @@ else:
         column_order=('Codigo', 'Producto', 'Stock_Actual', 'Stock_Minimo', 'Unidad', 'Stock_Valorizado', 'Editar', 'Eliminar'),
         column_config={
             "id": None, # Ocultamos la columna de id de Supabase
-            "Editar": st.column_config.ButtonColumn("✏️", help="Editar este producto"),
-            "Eliminar": st.column_config.ButtonColumn("🗑️", help="Eliminar este producto"),
+            "Editar": st.column_config.ButtonColumn("✏️ Editar", help="Editar este producto"),
+            "Eliminar": st.column_config.ButtonColumn("🗑️ Eliminar", help="Eliminar este producto"),
         },
         disabled=columnas_display # Hacemos que los datos no se puedan editar directamente en la tabla
     )
@@ -199,18 +202,18 @@ else:
     # Lógica para manejar el clic en el botón de Eliminar
     delete_row = edited_df[edited_df.Eliminar].reset_index()
     if not delete_row.empty:
-        product_id = df_display.loc[delete_row['index'][0], 'id']
-        product_name = df_display.loc[delete_row['index'][0], 'Producto']
+        product_id_to_delete = df_display.loc[delete_row['index'][0], 'id']
+        product_name_to_delete = df_display.loc[delete_row['index'][0], 'Producto']
         
         # Usamos un diálogo de confirmación para la eliminación
         @st.dialog("🗑️ Confirmar Eliminación")
         def delete_dialog():
-            st.warning(f"¿Estás seguro de que quieres eliminar el producto **'{product_name}'**?")
+            st.warning(f"¿Estás seguro de que quieres eliminar el producto **'{product_name_to_delete}'**?")
             st.write("Esta acción no se puede deshacer.")
             col1, col2 = st.columns(2)
             if col1.button("Sí, Eliminar Permanentemente", use_container_width=True):
                 try:
-                    supabase.table('Productos').delete().eq('id', product_id).execute()
+                    supabase.table('Productos').delete().eq('id', product_id_to_delete).execute()
                     st.toast("✅ Producto eliminado.")
                     st.cache_data.clear()
                     st.rerun()

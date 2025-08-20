@@ -36,7 +36,7 @@ def cargar_datos_para_mezclas():
             res_salidas = supabase.table('Salidas').select("*").execute()
             df_salidas = pd.DataFrame(res_salidas.data)
             
-            res_ordenes = supabase.table('Ordenes_de_Trabajo').select("*").execute()
+            res_ordenes = supabase.table('Ordenes_de_Trabajo').select("*").order('created_at', desc=True).execute()
             df_ordenes = pd.DataFrame(res_ordenes.data)
             
             return df_ingresos, df_salidas, df_ordenes

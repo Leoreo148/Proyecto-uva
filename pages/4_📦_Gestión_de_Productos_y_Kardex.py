@@ -137,9 +137,24 @@ else:
                 new_nombre = st.text_input("Nombre del Producto", value=producto_a_editar['Producto'])
                 new_ing_activo = st.text_input("Ingrediente Activo", value=producto_a_editar.get('Ingrediente_Activo', ''))
                 new_stock_min = st.number_input("Stock Mínimo", min_value=0.0, format="%.2f", value=float(producto_a_editar.get('Stock_Minimo', 0.0)))
-                new_unidad = st.selectbox("Unidad", unidades, index=unidades.index(producto_a_editar.get('Unidad', 'Litro')))
+                
+                # --- CORRECCIÓN PARA EVITAR ValueError ---
+                current_unidad = str(producto_a_editar.get('Unidad', '')).strip()
+                try:
+                    unidad_index = unidades.index(current_unidad)
+                except ValueError:
+                    unidad_index = 0 # Default to first item if not found
+                new_unidad = st.selectbox("Unidad", unidades, index=unidad_index)
+
                 new_proveedor = st.text_input("Proveedor", value=producto_a_editar.get('Proveedor', ''))
-                new_tipo_accion = st.selectbox("Tipo de Acción", tipos_accion, index=tipos_accion.index(producto_a_editar.get('Tipo_Accion', 'Otro')))
+
+                # --- CORRECCIÓN PARA EVITAR ValueError ---
+                current_tipo = str(producto_a_editar.get('Tipo_Accion', '')).strip()
+                try:
+                    tipo_index = tipos_accion.index(current_tipo)
+                except ValueError:
+                    tipo_index = 0 # Default to first item if not found
+                new_tipo_accion = st.selectbox("Tipo de Acción", tipos_accion, index=tipo_index)
                 
                 col1, col2 = st.columns(2)
                 if col1.form_submit_button("💾 Guardar Cambios"):

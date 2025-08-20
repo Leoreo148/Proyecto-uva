@@ -129,7 +129,7 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
 
                     # 3. Leer Precios Históricos
                     df_ingresos_historicos = pd.read_excel(uploaded_file, sheet_name='Ingreso', header=1)
-                    df_ingresos_historicos['F.DE ING.'] = pd.to_datetime(df_ingresos_historicos['F.DE ING.'])
+                    df_ingresos_historicos['F.DE ING.'] = pd.to_datetime(df_ingresos_historicos['F.DE ING.'], errors='coerce')
                     df_ultimos_precios = df_ingresos_historicos.sort_values(by='F.DE ING.', ascending=False).drop_duplicates(subset=['PRODUCTOS'], keep='first')
                     df_ultimos_precios = df_ultimos_precios[['PRODUCTOS', 'PREC. UNI S/.']].rename(columns={'PRODUCTOS': 'Producto', 'PREC. UNI S/.': 'Precio_Unitario'})
 
@@ -147,7 +147,7 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
                         if pd.notna(row['Codigo']):
                             ingresos_list.append({
                                 'Codigo_Lote': f"{row['Codigo']}-INV-INICIAL",
-                                'Fecha': datetime.now(), # Dejar como objeto datetime por ahora
+                                'Fecha': datetime.now().strftime("%Y-%m-%d"),
                                 'Tipo': 'Ajuste de Inventario Inicial',
                                 'Proveedor': row.get('PROVEEDOR', 'N/A'),
                                 'Factura': row.get('FACTURA', 'N/A'),
@@ -168,7 +168,9 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
                     })
                     columnas_salidas_necesarias = ['Fecha', 'Lote_Sector', 'Cantidad', 'Codigo_Producto', 'Objetivo_Tratamiento', 'Producto']
                     df_new_salidas = df_new_salidas[[col for col in columnas_salidas_necesarias if col in df_new_salidas.columns]]
-
+                    df_new_salidas['Fecha'] = pd.to_datetime(df_new_salidas['Fecha'], errors='coerce')
+                    df_new_salidas.dropna(subset=['Fecha'], inplace=True)
+                    df_new_salidas['Fecha'] = df_new_salidas['Fecha'].dt.strftime('%Y-%m-%d')
 
                     # --- LÓGICA PARA GUARDAR EN SUPABASE ---
                     st.write("Vaciando tablas existentes para una carga limpia...")
@@ -176,36 +178,24 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
                     supabase.table('Ingresos').delete().neq('id', -1).execute()
                     supabase.table('Productos').delete().neq('id', -1).execute()
 
-                    # --- CORRECCIÓN: Limpieza de valores NaN antes de insertar ---
-                    # Reemplazamos NaN con None, que Supabase entiende como NULL
-                    df_new_productos = df_new_productos.astype(object).where(pd.notnull(df_new_productos), None)
-                    df_new_ingresos = df_new_ingresos.astype(object).where(pd.notnull(df_new_ingresos), None)
-                    df_new_salidas = df_new_salidas.astype(object).where(pd.notnull(df_new_salidas), None)
-
-                    # --- CONVERSIÓN DE FECHAS A TEXTO ---
-                    # Convertimos las columnas de fecha a formato de texto 'YYYY-MM-DD'
-                    if 'Fecha' in df_new_ingresos.columns:
-                        df_new_ingresos['Fecha'] = pd.to_datetime(df_new_ingresos['Fecha']).dt.strftime('%Y-%m-%d')
-                    if 'Fecha_Vencimiento' in df_new_ingresos.columns:
-                        df_new_ingresos['Fecha_Vencimiento'] = pd.to_datetime(df_new_ingresos['Fecha_Vencimiento']).dt.strftime('%Y-%m-%d')
-                    
-                    if 'Fecha' in df_new_salidas.columns:
-                        df_new_salidas['Fecha'] = pd.to_datetime(df_new_salidas['Fecha'], errors='coerce')
-                        df_new_salidas.dropna(subset=['Fecha'], inplace=True)
-                        df_new_salidas['Fecha'] = df_new_salidas['Fecha'].dt.strftime('%Y-%m-%d')
-
                     st.write("Insertando nuevos productos...")
                     columnas_productos_final = ['Codigo', 'Producto', 'Ingrediente_Activo', 'Unidad', 'Proveedor', 'Tipo_Accion', 'Stock_Minimo']
                     productos_records = df_new_productos[columnas_productos_final].to_dict(orient='records')
-                    supabase.table('Productos').insert(productos_records).execute()
+                    # Usamos tu función para limpiar los datos antes de enviarlos
+                    productos_records_limpios = limpiar_json_no_compliant(productos_records)
+                    supabase.table('Productos').insert(productos_records_limpios).execute()
                     
                     st.write("Insertando registros de inventario inicial (Ingresos)...")
                     ingresos_records = df_new_ingresos.to_dict(orient='records')
-                    supabase.table('Ingresos').insert(ingresos_records).execute()
+                    # Usamos tu función para limpiar los datos antes de enviarlos
+                    ingresos_records_limpios = limpiar_json_no_compliant(ingresos_records)
+                    supabase.table('Ingresos').insert(ingresos_records_limpios).execute()
 
                     st.write("Insertando registros históricos de Salidas...")
                     salidas_records = df_new_salidas.to_dict(orient='records')
-                    supabase.table('Salidas').insert(salidas_records).execute()
+                    # Usamos tu función para limpiar los datos antes de enviarlos
+                    salidas_records_limpios = limpiar_json_no_compliant(salidas_records)
+                    supabase.table('Salidas').insert(salidas_records_limpios).execute()
                     
                     st.success("¡Datos del archivo Excel cargados en Supabase exitosamente!")
                     st.balloons()
@@ -216,6 +206,7 @@ with st.expander("⬆️ Cargar Datos Iniciales desde un único archivo Excel"):
                     st.error(f"Ocurrió un error durante la carga masiva: {e}")
         else:
             st.warning("Por favor, sube un archivo Excel para procesar.")
+
 
 # SECCIÓN 2: VISUALIZACIÓN DEL KARDEX
 st.divider()

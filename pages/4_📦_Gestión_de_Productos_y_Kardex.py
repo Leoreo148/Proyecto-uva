@@ -105,7 +105,8 @@ with st.expander("➕ Añadir Nuevo Producto al Catálogo"):
                         'Stock_Minimo': prod_stock_min
                     }
                     supabase.table('Productos').insert(nuevo_producto_data).execute()
-                    st.success(f"¡Producto '{prod_nombre}' añadido!")
+                    # --- CAMBIO A st.toast ---
+                    st.toast(f"✅ ¡Producto '{prod_nombre}' añadido!", icon="🎉")
                     st.cache_data.clear()
                     st.rerun()
                 except Exception as e:
@@ -138,22 +139,16 @@ else:
                 new_ing_activo = st.text_input("Ingrediente Activo", value=producto_a_editar.get('Ingrediente_Activo', ''))
                 new_stock_min = st.number_input("Stock Mínimo", min_value=0.0, format="%.2f", value=float(producto_a_editar.get('Stock_Minimo', 0.0)))
                 
-                # --- CORRECCIÓN PARA EVITAR ValueError ---
                 current_unidad = str(producto_a_editar.get('Unidad', '')).strip()
-                try:
-                    unidad_index = unidades.index(current_unidad)
-                except ValueError:
-                    unidad_index = 0 # Default to first item if not found
+                try: unidad_index = unidades.index(current_unidad)
+                except ValueError: unidad_index = 0
                 new_unidad = st.selectbox("Unidad", unidades, index=unidad_index)
 
                 new_proveedor = st.text_input("Proveedor", value=producto_a_editar.get('Proveedor', ''))
 
-                # --- CORRECCIÓN PARA EVITAR ValueError ---
                 current_tipo = str(producto_a_editar.get('Tipo_Accion', '')).strip()
-                try:
-                    tipo_index = tipos_accion.index(current_tipo)
-                except ValueError:
-                    tipo_index = 0 # Default to first item if not found
+                try: tipo_index = tipos_accion.index(current_tipo)
+                except ValueError: tipo_index = 0
                 new_tipo_accion = st.selectbox("Tipo de Acción", tipos_accion, index=tipo_index)
                 
                 col1, col2 = st.columns(2)
@@ -164,7 +159,7 @@ else:
                         'Proveedor': new_proveedor, 'Tipo_Accion': new_tipo_accion
                     }
                     supabase.table('Productos').update(update_data).eq('id', st.session_state.editing_product_id).execute()
-                    st.toast("✅ Producto actualizado.")
+                    st.toast("✅ Producto actualizado.", icon="👍")
                     st.session_state.editing_product_id = None
                     st.cache_data.clear()
                     st.rerun()
@@ -183,7 +178,7 @@ else:
             col1, col2 = st.columns(2)
             if col1.button("Sí, Eliminar Permanentemente"):
                 supabase.table('Productos').delete().eq('id', st.session_state.deleting_product_id).execute()
-                st.toast("✅ Producto eliminado.")
+                st.toast("🗑️ Producto eliminado.", icon="✅")
                 st.session_state.deleting_product_id = None
                 st.cache_data.clear()
                 st.rerun()
@@ -192,7 +187,7 @@ else:
                 st.rerun()
         delete_dialog()
 
-    # --- MOSTRAR LA TABLA CON BOTONES (MÉTODO ALTERNATIVO) ---
+    # --- MOSTRAR LA TABLA CON BOTONES ---
     header_cols = st.columns([2, 4, 2, 2, 1, 2, 1, 1])
     headers = ['Código', 'Producto', 'Stock Actual', 'Stock Mínimo', 'Unidad', 'Valorizado', 'Editar', 'Borrar']
     for col, header in zip(header_cols, headers):

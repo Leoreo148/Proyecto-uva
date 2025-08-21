@@ -27,7 +27,7 @@ supabase = init_supabase_connection()
 # --- NUEVAS FUNCIONES ADAPTADAS PARA SUPABASE ---
 @st.cache_data(ttl=60)
 def cargar_datos_para_aplicacion():
-    """Carga las órdenes listas para aplicar y el historial de horas desde Supabase."""
+    """Carga las órdenes listas para aplicar y los historiales desde Supabase."""
     if supabase:
         try:
             # Cargar órdenes con estado 'Lista para Aplicar'
@@ -46,6 +46,14 @@ def cargar_datos_para_aplicacion():
         except Exception as e:
             st.error(f"Error al cargar datos de Supabase: {e}")
     return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+def to_excel(df):
+    """Convierte un DataFrame a un archivo Excel en memoria para descarga."""
+    from io import BytesIO
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Reporte')
+    return output.getvalue()
 
 # --- CARGA DE DATOS ---
 df_ordenes_pendientes, df_historial_horas, df_historial_apps = cargar_datos_para_aplicacion()
@@ -104,7 +112,7 @@ if not df_ordenes_pendientes.empty:
                         st.error("El Horómetro Final debe ser mayor que el Inicial.")
                     else:
                         try:
-                            # 1. Preparar y guardar el registro de horas
+                            # 1. Preparar y guardar el registro de horas en Supabase
                             total_horas = h_final - h_inicial
                             nuevo_registro_horas = {
                                 'Fecha': tarea['Fecha_Programada'],
@@ -116,7 +124,7 @@ if not df_ordenes_pendientes.empty:
                             }
                             supabase.table('Registro_Horas_Tractor').insert(nuevo_registro_horas).execute()
 
-                            # 2. Preparar y actualizar la orden de trabajo
+                            # 2. Preparar y actualizar la orden de trabajo en Supabase
                             datos_actualizacion_orden = {
                                 'Status': 'Completada',
                                 'Tractor_Responsable': operario,
@@ -150,7 +158,13 @@ st.header("📚 Historiales")
 # Historial de Horas de Tractor
 st.subheader("Historial de Horas de Tractor")
 if not df_historial_horas.empty:
-    st.dataframe(df_historial_horas, use_container_width=True)
+    st.dataframe(df_historial_horas.sort_values(by="Fecha", ascending=False), use_container_width=True)
+    excel_horas = to_excel(df_historial_horas)
+    st.download_button(
+        label="📥 Descargar Historial de Horas",
+        data=excel_horas,
+        file_name=f"Reporte_Horas_Tractor_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    )
 else:
     st.info("Aún no se ha registrado ninguna hora de tractor.")
 
@@ -158,6 +172,6 @@ else:
 st.subheader("Historial de Aplicaciones Completadas")
 if not df_historial_apps.empty:
     columnas_a_mostrar = ['ID_Orden_Personalizado', 'Sector_Aplicacion', 'Tractor_Responsable', 'Aplicacion_Completada_Fecha']
-    st.dataframe(df_historial_apps[columnas_a_mostrar], use_container_width=True)
+    st.dataframe(df_historial_apps[columnas_a_mostrar].sort_values(by="Aplicacion_Completada_Fecha", ascending=False), use_container_width=True)
 else:
     st.info("Aún no se ha completado ninguna aplicación.")

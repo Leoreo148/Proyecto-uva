@@ -4,6 +4,7 @@ from datetime import datetime
 import json
 from io import BytesIO
 import plotly.express as px
+import numpy as np
 
 # --- LIBRERÍAS PARA LA CONEXIÓN A SUPABASE ---
 from supabase import create_client, Client
@@ -13,7 +14,7 @@ from streamlit_local_storage import LocalStorage
 # --- Configuración de la Página ---
 st.set_page_config(page_title="Diámetro de Baya", page_icon="🍇", layout="wide")
 st.title("🍇 Medición de Diámetro de Baya")
-st.write("Registre el diámetro (mm) de 3 bayas (superior, medio, inferior) para 2 racimos por cada una de las 25 plantas.")
+st.write("Registre el diámetro (mm) y analice la tasa y curva de crecimiento.")
 
 # --- Inicialización y Constantes ---
 localS = LocalStorage()
@@ -22,6 +23,7 @@ LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2'
 columnas_display = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior", "Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"]
 # Nombres de columna para la base de datos (sin espacios ni guiones)
 columnas_db = ["Racimo_1_Superior", "Racimo_1_Medio", "Racimo_1_Inferior", "Racimo_2_Superior", "Racimo_2_Medio", "Racimo_2_Inferior"]
+mapeo_columnas = dict(zip(columnas_display, columnas_db))
 
 # --- Conexión a Supabase ---
 @st.cache_resource
@@ -36,7 +38,7 @@ def init_supabase_connection():
 
 supabase = init_supabase_connection()
 
-# --- Nuevas Funciones para Supabase ---
+# --- Funciones de Datos ---
 @st.cache_data(ttl=60)
 def cargar_diametro_supabase():
     """Carga el historial de mediciones desde la tabla de Supabase."""
@@ -44,6 +46,8 @@ def cargar_diametro_supabase():
         try:
             response = supabase.table('Diametro_Baya').select("*").execute()
             df = pd.DataFrame(response.data)
+            if not df.empty:
+                df['Fecha'] = pd.to_datetime(df['Fecha'])
             return df
         except Exception as e:
             st.error(f"Error al cargar el historial de Supabase: {e}")
@@ -54,6 +58,44 @@ def to_excel(df):
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Reporte_Diametro')
     return output.getvalue()
+
+# --- NUEVA FUNCIÓN DE ANÁLISIS ---
+def calcular_tasa_crecimiento(df):
+    """Calcula la tasa de crecimiento en mm/día para cada sector."""
+    if df.shape[0] < 2:
+        return pd.DataFrame()
+
+    # Calcula el diámetro promedio por planta para cada registro
+    df['Diametro_Prom_Planta'] = df[columnas_db].mean(axis=1)
+    
+    tasas = []
+    # Agrupa por sector para analizar cada uno por separado
+    for sector in df['Sector'].unique():
+        df_sector = df[df['Sector'] == sector].copy()
+        # Calcula el promedio por fecha
+        promedio_por_fecha = df_sector.groupby('Fecha')['Diametro_Prom_Planta'].mean()
+        
+        if len(promedio_por_fecha) >= 2:
+            # Ordena las fechas y toma las dos más recientes
+            ultimas_dos_mediciones = promedio_por_fecha.sort_index().tail(2)
+            
+            # Extrae los valores y fechas
+            promedio_ultimo, promedio_penultimo = ultimas_dos_mediciones.values
+            ultima_fecha, penultima_fecha = ultimas_dos_mediciones.index
+            
+            dias_diferencia = (ultima_fecha - penultima_fecha).days
+            
+            if dias_diferencia > 0:
+                tasa = (promedio_ultimo - promedio_penultimo) / dias_diferencia
+                tasas.append({
+                    "Sector": sector,
+                    "Tasa (mm/día)": tasa,
+                    "Desde": penultima_fecha.strftime('%d/%m/%Y'),
+                    "Hasta": ultima_fecha.strftime('%d/%m/%Y'),
+                    "Días Transcurridos": dias_diferencia
+                })
+    
+    return pd.DataFrame(tasas)
 
 # --- Interfaz de Registro ---
 with st.expander("➕ Registrar Nueva Medición", expanded=True):
@@ -74,9 +116,8 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
         df_para_guardar['Sector'] = sector_seleccionado
         df_para_guardar['Fecha'] = fecha_medicion.strftime("%Y-%m-%d")
         
-        # Preparamos los registros para guardar, usando los nombres de columna de la DB
         df_para_guardar = df_para_guardar.reset_index().rename(columns={'index': 'Planta'})
-        df_para_guardar.columns = ['Planta'] + columnas_db + ['Sector', 'Fecha']
+        df_para_guardar = df_para_guardar.rename(columns=mapeo_columnas)
         
         registros_json = df_para_guardar.to_dict('records')
         
@@ -99,7 +140,6 @@ if registros_pendientes:
         if supabase:
             with st.spinner("Sincronizando..."):
                 try:
-                    # Insertamos los registros pendientes en la tabla de Supabase
                     supabase.table('Diametro_Baya').insert(registros_pendientes).execute()
                     localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
                     st.success("¡Sincronización completada!")
@@ -114,40 +154,34 @@ else:
 
 st.divider()
 
-# --- HISTORIAL Y GRÁFICOS ---
+# --- HISTORIAL Y ANÁLISIS (MODIFICADO) ---
 st.header("📊 Historial y Análisis de Tendencia")
 df_historial = cargar_diametro_supabase()
 
 if df_historial is None or df_historial.empty:
     st.info("Aún no hay datos históricos para mostrar. Por favor, registre y sincronice algunas mediciones.")
 else:
-    st.subheader("📚 Historial de Mediciones")
-    df_historial['Fecha'] = pd.to_datetime(df_historial['Fecha'])
-    sesiones = df_historial.groupby(['Fecha', 'Sector']).size().reset_index(name='counts')
+    # --- NUEVO: WIDGET DE TASA DE CRECIMIENTO ---
+    st.subheader("🚀 Tasa de Crecimiento Actual (mm/día)")
+    df_tasas = calcular_tasa_crecimiento(df_historial.copy())
+    if not df_tasas.empty:
+        st.write("Crecimiento promedio diario calculado entre las dos últimas mediciones de cada sector.")
+        st.dataframe(
+            df_tasas,
+            column_config={
+                "Tasa (mm/día)": st.column_config.NumberColumn(format="%.2f"),
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.info("Se necesitan al menos dos mediciones en un sector para calcular la tasa de crecimiento.")
     
-    for index, sesion in sesiones.sort_values(by='Fecha', ascending=False).head(5).iterrows():
-        with st.container(border=True):
-            df_sesion_actual = df_historial[(df_historial['Fecha'] == sesion['Fecha']) & (df_historial['Sector'] == sesion['Sector'])]
-            valores_medidos = df_sesion_actual[columnas_db].to_numpy().flatten()
-            promedio_sesion = valores_medidos[valores_medidos > 0].mean() if len(valores_medidos[valores_medidos > 0]) > 0 else 0
-            
-            col1, col2, col3, col4 = st.columns([2, 1, 2, 1])
-            col1.metric("Fecha", pd.to_datetime(sesion['Fecha']).strftime('%d/%m/%Y'))
-            col2.metric("Sector", sesion['Sector'])
-            col3.metric("Promedio General (mm)", f"{promedio_sesion:.2f}")
-            with col4:
-                st.write("")
-                reporte_individual = to_excel(df_sesion_actual)
-                st.download_button(
-                    label="📥 Descargar",
-                    data=reporte_individual,
-                    file_name=f"Reporte_Diametro_{sesion['Sector']}_{pd.to_datetime(sesion['Fecha']).strftime('%Y%m%d')}.xlsx",
-                    key=f"download_diametro_{sesion['Fecha']}_{sesion['Sector']}"
-                )
-
     st.divider()
 
-    st.subheader("📈 Gráfico de Tendencia")
+    # --- MODIFICADO: CURVA Y TABLA DE CRECIMIENTO ---
+    st.subheader("📈 Curva y Tabla de Crecimiento")
+    
     todos_los_sectores = sorted(df_historial['Sector'].astype(str).unique())
     sectores_a_graficar = st.multiselect(
         "Seleccione los sectores que desea comparar:",
@@ -155,7 +189,6 @@ else:
     )
     if sectores_a_graficar:
         df_filtrado = df_historial[df_historial['Sector'].isin(sectores_a_graficar)]
-        # Usamos los nombres de columna de la DB para el análisis
         df_melted = df_filtrado.melt(
             id_vars=['Fecha', 'Sector'], value_vars=columnas_db,
             var_name='Posicion_Medicion', value_name='Diametro'
@@ -164,6 +197,13 @@ else:
         df_tendencia = df_melted.groupby(['Fecha', 'Sector'])['Diametro'].mean().reset_index()
         
         if not df_tendencia.empty:
+            # --- NUEVO: TABLA DE CURVA DE CRECIMIENTO ---
+            st.write("Tabla de Diámetro Promedio (mm) por Fecha y Sector:")
+            df_pivot = df_tendencia.pivot_table(index='Fecha', columns='Sector', values='Diametro').sort_index(ascending=False)
+            st.dataframe(df_pivot.style.format("{:.2f}", na_rep="-"), use_container_width=True)
+
+            # Gráfico de tendencia (sin cambios)
+            st.write("Gráfico de Tendencia:")
             fig = px.line(
                 df_tendencia, x='Fecha', y='Diametro', color='Sector',
                 title='Evolución del Diámetro Promedio de Baya por Sector', markers=True,

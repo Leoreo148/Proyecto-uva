@@ -13,14 +13,18 @@ from streamlit_local_storage import LocalStorage
 # --- Configuración de la Página ---
 st.set_page_config(page_title="Diámetro de Baya", page_icon="🍇", layout="wide")
 st.title("🍇 Medición de Diámetro de Baya")
-st.write("Registre el diámetro (mm) y analice la tasa y curva de crecimiento.")
+st.write("Registre el diámetro (mm) y visualice los promedios por racimo y planta en tiempo real.")
 
 # --- Inicialización y Constantes ---
 localS = LocalStorage()
 LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2'
-columnas_display = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior", "Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"]
-columnas_db = ["Racimo_1_Superior", "Racimo_1_Medio", "Racimo_1_Inferior", "Racimo_2_Superior", "Racimo_2_Medio", "Racimo_2_Inferior"]
-mapeo_columnas = dict(zip(columnas_display, columnas_db))
+# Nombres de columna para la base de datos y la UI
+columnas_racimo1 = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior"]
+columnas_racimo2 = ["Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"]
+columnas_medicion = columnas_racimo1 + columnas_racimo2
+# Nombres para la base de datos (sin espacios ni guiones)
+columnas_db = [c.replace(' ', '_').replace('-', '') for c in columnas_medicion]
+mapeo_columnas = dict(zip(columnas_medicion, columnas_db))
 
 # --- Conexión a Supabase ---
 @st.cache_resource
@@ -38,7 +42,6 @@ supabase = init_supabase_connection()
 # --- Funciones de Datos ---
 @st.cache_data(ttl=60)
 def cargar_diametro_supabase():
-    """Carga el historial de mediciones desde la tabla de Supabase."""
     if supabase:
         try:
             response = supabase.table('Diametro_Baya').select("*").execute()
@@ -56,33 +59,6 @@ def to_excel(df):
         df.to_excel(writer, index=False, sheet_name='Reporte_Diametro')
     return output.getvalue()
 
-# --- Función de Análisis ---
-def calcular_tasa_crecimiento(df):
-    """Calcula la tasa de crecimiento en mm/día para cada sector."""
-    if df.shape[0] < 2:
-        return pd.DataFrame()
-
-    df['Diametro_Prom_Planta'] = df[columnas_db].mean(axis=1)
-    
-    tasas = []
-    for sector in df['Sector'].unique():
-        df_sector = df[df['Sector'] == sector].copy()
-        promedio_por_fecha = df_sector.groupby('Fecha')['Diametro_Prom_Planta'].mean()
-        
-        if len(promedio_por_fecha) >= 2:
-            ultimas_dos_mediciones = promedio_por_fecha.sort_index().tail(2)
-            promedio_ultimo, promedio_penultimo = ultimas_dos_mediciones.values
-            ultima_fecha, penultima_fecha = ultimas_dos_mediciones.index
-            dias_diferencia = (ultima_fecha - penultima_fecha).days
-            
-            if dias_diferencia > 0:
-                tasa = (promedio_ultimo - promedio_penultimo) / dias_diferencia
-                tasas.append({
-                    "Sector": sector, "Tasa (mm/día)": tasa, "Desde": penultima_fecha.strftime('%d/%m/%Y'),
-                    "Hasta": ultima_fecha.strftime('%d/%m/%Y'), "Días Transcurridos": dias_diferencia
-                })
-    return pd.DataFrame(tasas)
-
 # --- Interfaz de Registro ---
 with st.expander("➕ Registrar Nueva Medición", expanded=True):
     col1, col2 = st.columns(2)
@@ -94,11 +70,34 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
     
     st.subheader("Tabla de Ingreso de Diámetros (mm)")
     plant_numbers = [f"Planta {i+1}" for i in range(25)]
-    df_plantilla = pd.DataFrame(0.0, index=plant_numbers, columns=columnas_display)
-    df_editada = st.data_editor(df_plantilla, use_container_width=True, key="editor_baya")
+    
+    # --- MODIFICADO: Plantilla con columnas de promedio ---
+    columnas_editor = columnas_racimo1 + ["PROMEDIO 1"] + columnas_racimo2 + ["PROMEDIO 2", "PROMEDIO FINAL"]
+    df_plantilla = pd.DataFrame(0.0, index=plant_numbers, columns=columnas_editor)
+    
+    df_editada = st.data_editor(
+        df_plantilla, 
+        use_container_width=True, 
+        key="editor_baya",
+        # Configuración para las columnas de promedio
+        column_config={
+            "PROMEDIO 1": st.column_config.NumberColumn("Promedio R1", disabled=True, format="%.2f"),
+            "PROMEDIO 2": st.column_config.NumberColumn("Promedio R2", disabled=True, format="%.2f"),
+            "PROMEDIO FINAL": st.column_config.NumberColumn("Promedio Final", disabled=True, format="%.2f"),
+        }
+    )
+    
+    # --- NUEVO: Cálculo de promedios en tiempo real ---
+    df_editada['PROMEDIO 1'] = df_editada[columnas_racimo1].mean(axis=1)
+    df_editada['PROMEDIO 2'] = df_editada[columnas_racimo2].mean(axis=1)
+    df_editada['PROMEDIO FINAL'] = df_editada[columnas_medicion].mean(axis=1)
+    
+    # Mostramos la tabla actualizada con los promedios
+    st.data_editor(df_editada, use_container_width=True, key="editor_baya_display", disabled=True) # Usamos una key diferente para mostrar
     
     if st.button("💾 Guardar Medición en Dispositivo"):
-        df_para_guardar = df_editada.copy()
+        # Guardamos solo las columnas de medición, no los promedios
+        df_para_guardar = df_editada[columnas_medicion].copy()
         df_para_guardar['Sector'] = sector_seleccionado
         df_para_guardar['Fecha'] = fecha_medicion.strftime("%Y-%m-%d")
         

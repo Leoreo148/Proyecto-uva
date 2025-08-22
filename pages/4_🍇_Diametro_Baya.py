@@ -19,9 +19,7 @@ st.write("Registre el diámetro (mm) y analice la tasa y curva de crecimiento.")
 # --- Inicialización y Constantes ---
 localS = LocalStorage()
 LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2'
-# Nombres de columna para la interfaz de usuario
 columnas_display = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior", "Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"]
-# Nombres de columna para la base de datos (sin espacios ni guiones)
 columnas_db = ["Racimo_1_Superior", "Racimo_1_Medio", "Racimo_1_Inferior", "Racimo_2_Superior", "Racimo_2_Medio", "Racimo_2_Inferior"]
 mapeo_columnas = dict(zip(columnas_display, columnas_db))
 
@@ -65,24 +63,17 @@ def calcular_tasa_crecimiento(df):
     if df.shape[0] < 2:
         return pd.DataFrame()
 
-    # Calcula el diámetro promedio por planta para cada registro
     df['Diametro_Prom_Planta'] = df[columnas_db].mean(axis=1)
     
     tasas = []
-    # Agrupa por sector para analizar cada uno por separado
     for sector in df['Sector'].unique():
         df_sector = df[df['Sector'] == sector].copy()
-        # Calcula el promedio por fecha
         promedio_por_fecha = df_sector.groupby('Fecha')['Diametro_Prom_Planta'].mean()
         
         if len(promedio_por_fecha) >= 2:
-            # Ordena las fechas y toma las dos más recientes
             ultimas_dos_mediciones = promedio_por_fecha.sort_index().tail(2)
-            
-            # Extrae los valores y fechas
             promedio_ultimo, promedio_penultimo = ultimas_dos_mediciones.values
             ultima_fecha, penultima_fecha = ultimas_dos_mediciones.index
-            
             dias_diferencia = (ultima_fecha - penultima_fecha).days
             
             if dias_diferencia > 0:
@@ -117,6 +108,7 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
         df_para_guardar['Fecha'] = fecha_medicion.strftime("%Y-%m-%d")
         
         df_para_guardar = df_para_guardar.reset_index().rename(columns={'index': 'Planta'})
+        # Renombramos las columnas a su versión para la base de datos
         df_para_guardar = df_para_guardar.rename(columns=mapeo_columnas)
         
         registros_json = df_para_guardar.to_dict('records')
@@ -128,7 +120,7 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
         st.success(f"¡Medición guardada! Hay {len(registros_locales)} registros de plantas pendientes.")
         st.rerun()
 
-# --- Sección de Sincronización ---
+# --- Sección de Sincronización (CORREGIDA)---
 st.divider()
 st.subheader("📡 Sincronización con la Base de Datos")
 registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
@@ -140,7 +132,10 @@ if registros_pendientes:
         if supabase:
             with st.spinner("Sincronizando..."):
                 try:
-                    supabase.table('Diametro_Baya').insert(registros_pendientes).execute()
+                    # --- CAMBIO: Insertar cada registro en un bucle ---
+                    for registro in registros_pendientes:
+                        supabase.table('Diametro_Baya').insert(registro).execute()
+                    
                     localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
                     st.success("¡Sincronización completada!")
                     st.cache_data.clear()
@@ -154,14 +149,13 @@ else:
 
 st.divider()
 
-# --- HISTORIAL Y ANÁLISIS (MODIFICADO) ---
+# --- HISTORIAL Y ANÁLISIS ---
 st.header("📊 Historial y Análisis de Tendencia")
 df_historial = cargar_diametro_supabase()
 
 if df_historial is None or df_historial.empty:
     st.info("Aún no hay datos históricos para mostrar. Por favor, registre y sincronice algunas mediciones.")
 else:
-    # --- NUEVO: WIDGET DE TASA DE CRECIMIENTO ---
     st.subheader("🚀 Tasa de Crecimiento Actual (mm/día)")
     df_tasas = calcular_tasa_crecimiento(df_historial.copy())
     if not df_tasas.empty:
@@ -179,7 +173,6 @@ else:
     
     st.divider()
 
-    # --- MODIFICADO: CURVA Y TABLA DE CRECIMIENTO ---
     st.subheader("📈 Curva y Tabla de Crecimiento")
     
     todos_los_sectores = sorted(df_historial['Sector'].astype(str).unique())
@@ -197,12 +190,10 @@ else:
         df_tendencia = df_melted.groupby(['Fecha', 'Sector'])['Diametro'].mean().reset_index()
         
         if not df_tendencia.empty:
-            # --- NUEVO: TABLA DE CURVA DE CRECIMIENTO ---
             st.write("Tabla de Diámetro Promedio (mm) por Fecha y Sector:")
             df_pivot = df_tendencia.pivot_table(index='Fecha', columns='Sector', values='Diametro').sort_index(ascending=False)
             st.dataframe(df_pivot.style.format("{:.2f}", na_rep="-"), use_container_width=True)
 
-            # Gráfico de tendencia (sin cambios)
             st.write("Gráfico de Tendencia:")
             fig = px.line(
                 df_tendencia, x='Fecha', y='Diametro', color='Sector',

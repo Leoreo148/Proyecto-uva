@@ -63,17 +63,24 @@ def calcular_tasa_crecimiento(df):
     if df.shape[0] < 2:
         return pd.DataFrame()
 
+    # Calcula el diámetro promedio por planta para cada registro
     df['Diametro_Prom_Planta'] = df[columnas_db].mean(axis=1)
     
     tasas = []
+    # Agrupa por sector para analizar cada uno por separado
     for sector in df['Sector'].unique():
         df_sector = df[df['Sector'] == sector].copy()
+        # Calcula el promedio por fecha
         promedio_por_fecha = df_sector.groupby('Fecha')['Diametro_Prom_Planta'].mean()
         
         if len(promedio_por_fecha) >= 2:
+            # Ordena las fechas y toma las dos más recientes
             ultimas_dos_mediciones = promedio_por_fecha.sort_index().tail(2)
+            
+            # Extrae los valores y fechas
             promedio_ultimo, promedio_penultimo = ultimas_dos_mediciones.values
             ultima_fecha, penultima_fecha = ultimas_dos_mediciones.index
+            
             dias_diferencia = (ultima_fecha - penultima_fecha).days
             
             if dias_diferencia > 0:
@@ -147,40 +154,27 @@ else:
 
 st.divider()
 
-# --- HISTORIAL Y ANÁLISIS (CON DEPURACIÓN) ---
+# --- HISTORIAL Y ANÁLISIS ---
 st.header("📊 Historial y Análisis de Tendencia")
 df_historial = cargar_diametro_supabase()
 
 if df_historial is None or df_historial.empty:
     st.info("Aún no hay datos históricos para mostrar. Por favor, registre y sincronice algunas mediciones.")
 else:
-    # --- INICIO DEL CÓDIGO DE DEPURACIÓN ---
-    with st.expander("🕵️‍♂️ Depuración de Columnas"):
-        st.write("**Columnas que el código ESPERA encontrar:**")
-        st.code(columnas_db, language='python')
-        st.write("**Columnas que REALMENTE se recibieron de Supabase:**")
-        st.code(list(df_historial.columns), language='python')
-        st.warning("Compara las dos listas. Los nombres deben coincidir EXACTAMENTE (mayúsculas, minúsculas, guiones bajos). Si hay diferencias, debes corregir los nombres en tu tabla de Supabase.")
-    # --- FIN DEL CÓDIGO DE DEPURACIÓN ---
-
     st.subheader("🚀 Tasa de Crecimiento Actual (mm/día)")
-    # El código intentará ejecutarse. Si falla, la depuración de arriba te dirá por qué.
-    try:
-        df_tasas = calcular_tasa_crecimiento(df_historial.copy())
-        if not df_tasas.empty:
-            st.write("Crecimiento promedio diario calculado entre las dos últimas mediciones de cada sector.")
-            st.dataframe(
-                df_tasas,
-                column_config={"Tasa (mm/día)": st.column_config.NumberColumn(format="%.2f")},
-                use_container_width=True, hide_index=True
-            )
-        else:
-            st.info("Se necesitan al menos dos mediciones en un sector para calcular la tasa de crecimiento.")
-    except KeyError:
-        # El error ya fue explicado en la sección de depuración, así que aquí no mostramos nada.
-        pass
-    except Exception as e:
-        st.error(f"Ocurrió un error inesperado en el cálculo de tasas: {e}")
+    df_tasas = calcular_tasa_crecimiento(df_historial.copy())
+    if not df_tasas.empty:
+        st.write("Crecimiento promedio diario calculado entre las dos últimas mediciones de cada sector.")
+        st.dataframe(
+            df_tasas,
+            column_config={
+                "Tasa (mm/día)": st.column_config.NumberColumn(format="%.2f"),
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.info("Se necesitan al menos dos mediciones en un sector para calcular la tasa de crecimiento.")
     
     st.divider()
 
@@ -192,29 +186,23 @@ else:
         options=todos_los_sectores, default=todos_los_sectores
     )
     if sectores_a_graficar:
-        try:
-            df_filtrado = df_historial[df_historial['Sector'].isin(sectores_a_graficar)]
-            df_melted = df_filtrado.melt(
-                id_vars=['Fecha', 'Sector'], value_vars=columnas_db,
-                var_name='Posicion_Medicion', value_name='Diametro'
-            )
-            df_melted = df_melted[df_melted['Diametro'] > 0]
-            df_tendencia = df_melted.groupby(['Fecha', 'Sector'])['Diametro'].mean().reset_index()
-            
-            if not df_tendencia.empty:
-                st.write("Tabla de Diámetro Promedio (mm) por Fecha y Sector:")
-                df_pivot = df_tendencia.pivot_table(index='Fecha', columns='Sector', values='Diametro').sort_index(ascending=False)
-                st.dataframe(df_pivot.style.format("{:.2f}", na_rep="-"), use_container_width=True)
+        df_filtrado = df_historial[df_historial['Sector'].isin(sectores_a_graficar)]
+        df_melted = df_filtrado.melt(
+            id_vars=['Fecha', 'Sector'], value_vars=columnas_db,
+            var_name='Posicion_Medicion', value_name='Diametro'
+        )
+        df_melted = df_melted[df_melted['Diametro'] > 0]
+        df_tendencia = df_melted.groupby(['Fecha', 'Sector'])['Diametro'].mean().reset_index()
+        
+        if not df_tendencia.empty:
+            st.write("Tabla de Diámetro Promedio (mm) por Fecha y Sector:")
+            df_pivot = df_tendencia.pivot_table(index='Fecha', columns='Sector', values='Diametro').sort_index(ascending=False)
+            st.dataframe(df_pivot.style.format("{:.2f}", na_rep="-"), use_container_width=True)
 
-                st.write("Gráfico de Tendencia:")
-                fig = px.line(
-                    df_tendencia, x='Fecha', y='Diametro', color='Sector',
-                    title='Evolución del Diámetro Promedio de Baya por Sector', markers=True,
-                    labels={'Fecha': 'Fecha de Medición', 'Diametro': 'Diámetro Promedio (mm)'}
-                )
-                st.plotly_chart(fig, use_container_width=True)
-        except KeyError:
-            # Si hay un KeyError aquí también, la depuración de arriba lo explica.
-            pass
-        except Exception as e:
-            st.error(f"Ocurrió un error inesperado al generar los gráficos: {e}")
+            st.write("Gráfico de Tendencia:")
+            fig = px.line(
+                df_tendencia, x='Fecha', y='Diametro', color='Sector',
+                title='Evolución del Diámetro Promedio de Baya por Sector', markers=True,
+                labels={'Fecha': 'Fecha de Medición', 'Diametro': 'Diámetro Promedio (mm)'}
+            )
+            st.plotly_chart(fig, use_container_width=True)

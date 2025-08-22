@@ -124,7 +124,6 @@ st.subheader("📡 Sincronización con la Base de Datos")
 registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
 registros_pendientes = json.loads(registros_pendientes_str) if registros_pendientes_str else []
 
-# --- NUEVO: Botón para limpiar datos locales corruptos ---
 if registros_pendientes:
     if st.button("🧹 Limpiar Almacenamiento Local (Solucionar Errores)"):
         localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
@@ -137,7 +136,6 @@ if registros_pendientes:
         if supabase:
             with st.spinner("Sincronizando..."):
                 try:
-                    # --- CORRECCIÓN: Insertar cada registro en un bucle para mayor robustez ---
                     for registro in registros_pendientes:
                         supabase.table('Diametro_Baya').insert(registro).execute()
                     
@@ -161,16 +159,14 @@ df_historial = cargar_diametro_supabase()
 if df_historial is None or df_historial.empty:
     st.info("Aún no hay datos históricos para mostrar.")
 else:
-    # --- INICIO DEL CÓDIGO DE DEPURACIÓN ---
     with st.expander("🕵️‍♂️ Depuración de Columnas"):
         st.write("**Columnas que el código ESPERA encontrar:**")
         st.code(columnas_db, language='python')
         st.write("**Columnas que REALMENTE se recibieron de Supabase:**")
         st.code(list(df_historial.columns), language='python')
         st.warning("Compara las dos listas. Los nombres deben coincidir EXACTAMENTE (mayúsculas, minúsculas, guiones bajos). Si hay diferencias, debes corregir los nombres en tu tabla de Supabase.")
-    # --- FIN DEL CÓDIGO DE DEPURACIÓN ---
 
-    st.subheader("� Tasa de Crecimiento Actual (mm/día)")
+    st.subheader("🚀 Tasa de Crecimiento Actual (mm/día)")
     try:
         df_tasas = calcular_tasa_crecimiento(df_historial.copy())
         if not df_tasas.empty:
@@ -209,4 +205,3 @@ else:
             st.error("Error de Mapeo de Columnas: No se encontraron todas las columnas de medición necesarias para el gráfico. Revisa el panel de depuración de arriba.")
         except Exception as e:
             st.error(f"Ocurrió un error inesperado al generar los gráficos: {e}")
-�

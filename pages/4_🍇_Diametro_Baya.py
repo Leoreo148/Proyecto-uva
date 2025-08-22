@@ -19,10 +19,9 @@ st.write("Registre el diámetro (mm) y analice la tasa y curva de crecimiento.")
 localS = LocalStorage()
 LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2'
 
-# --- CORRECCIÓN: Usar los nombres de columna exactos de tu base de datos ---
 # Nombres para la tabla de Streamlit (con espacios)
 columnas_display = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior", "Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"]
-# Nombres EXACTOS de las columnas en tu tabla de Supabase (con guiones bajos)
+# Nombres EXACTOS que las columnas DEBEN TENER en tu tabla de Supabase
 columnas_db = ["Racimo_1_Superior", "Racimo_1_Medio", "Racimo_1_Inferior", "Racimo_2_Superior", "Racimo_2_Medio", "Racimo_2_Inferior"]
 # Mapeo para la "traducción"
 mapeo_columnas = dict(zip(columnas_display, columnas_db))
@@ -138,7 +137,10 @@ if registros_pendientes:
         if supabase:
             with st.spinner("Sincronizando..."):
                 try:
-                    supabase.table('Diametro_Baya').insert(registros_pendientes).execute()
+                    # --- CORRECCIÓN: Insertar cada registro en un bucle para mayor robustez ---
+                    for registro in registros_pendientes:
+                        supabase.table('Diametro_Baya').insert(registro).execute()
+                    
                     localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
                     st.success("¡Sincronización completada!")
                     st.cache_data.clear()
@@ -159,13 +161,27 @@ df_historial = cargar_diametro_supabase()
 if df_historial is None or df_historial.empty:
     st.info("Aún no hay datos históricos para mostrar.")
 else:
-    st.subheader("🚀 Tasa de Crecimiento Actual (mm/día)")
-    df_tasas = calcular_tasa_crecimiento(df_historial.copy())
-    if not df_tasas.empty:
-        st.dataframe(df_tasas, use_container_width=True, hide_index=True,
-            column_config={"Tasa (mm/día)": st.column_config.NumberColumn(format="%.2f")})
-    else:
-        st.info("Se necesitan al menos dos mediciones en un sector para calcular la tasa de crecimiento.")
+    # --- INICIO DEL CÓDIGO DE DEPURACIÓN ---
+    with st.expander("🕵️‍♂️ Depuración de Columnas"):
+        st.write("**Columnas que el código ESPERA encontrar:**")
+        st.code(columnas_db, language='python')
+        st.write("**Columnas que REALMENTE se recibieron de Supabase:**")
+        st.code(list(df_historial.columns), language='python')
+        st.warning("Compara las dos listas. Los nombres deben coincidir EXACTAMENTE (mayúsculas, minúsculas, guiones bajos). Si hay diferencias, debes corregir los nombres en tu tabla de Supabase.")
+    # --- FIN DEL CÓDIGO DE DEPURACIÓN ---
+
+    st.subheader("� Tasa de Crecimiento Actual (mm/día)")
+    try:
+        df_tasas = calcular_tasa_crecimiento(df_historial.copy())
+        if not df_tasas.empty:
+            st.dataframe(df_tasas, use_container_width=True, hide_index=True,
+                column_config={"Tasa (mm/día)": st.column_config.NumberColumn(format="%.2f")})
+        else:
+            st.info("Se necesitan al menos dos mediciones en un sector para calcular la tasa de crecimiento.")
+    except KeyError:
+        st.error("Error de Mapeo de Columnas: No se encontraron todas las columnas de medición necesarias. Revisa el panel de depuración de arriba.")
+    except Exception as e:
+        st.error(f"Ocurrió un error inesperado en el cálculo de tasas: {e}")
     
     st.divider()
 
@@ -175,16 +191,22 @@ else:
     sectores_a_graficar = st.multiselect("Sectores a comparar:", options=todos_los_sectores, default=todos_los_sectores)
     
     if sectores_a_graficar:
-        df_filtrado = df_historial[df_historial['Sector'].isin(sectores_a_graficar)]
-        df_melted = df_filtrado.melt(id_vars=['Fecha', 'Sector'], value_vars=columnas_db, var_name='Posicion', value_name='Diametro')
-        df_melted = df_melted[df_melted['Diametro'] > 0]
-        df_tendencia = df_melted.groupby(['Fecha', 'Sector'])['Diametro'].mean().reset_index()
-        
-        if not df_tendencia.empty:
-            st.write("Tabla de Diámetro Promedio (mm):")
-            df_pivot = df_tendencia.pivot_table(index='Fecha', columns='Sector', values='Diametro').sort_index(ascending=False)
-            st.dataframe(df_pivot.style.format("{:.2f}", na_rep="-"), use_container_width=True)
+        try:
+            df_filtrado = df_historial[df_historial['Sector'].isin(sectores_a_graficar)]
+            df_melted = df_filtrado.melt(id_vars=['Fecha', 'Sector'], value_vars=columnas_db, var_name='Posicion', value_name='Diametro')
+            df_melted = df_melted[df_melted['Diametro'] > 0]
+            df_tendencia = df_melted.groupby(['Fecha', 'Sector'])['Diametro'].mean().reset_index()
+            
+            if not df_tendencia.empty:
+                st.write("Tabla de Diámetro Promedio (mm):")
+                df_pivot = df_tendencia.pivot_table(index='Fecha', columns='Sector', values='Diametro').sort_index(ascending=False)
+                st.dataframe(df_pivot.style.format("{:.2f}", na_rep="-"), use_container_width=True)
 
-            st.write("Gráfico de Tendencia:")
-            fig = px.line(df_tendencia, x='Fecha', y='Diametro', color='Sector', title='Evolución del Diámetro Promedio', markers=True)
-            st.plotly_chart(fig, use_container_width=True)
+                st.write("Gráfico de Tendencia:")
+                fig = px.line(df_tendencia, x='Fecha', y='Diametro', color='Sector', title='Evolución del Diámetro Promedio', markers=True)
+                st.plotly_chart(fig, use_container_width=True)
+        except KeyError:
+            st.error("Error de Mapeo de Columnas: No se encontraron todas las columnas de medición necesarias para el gráfico. Revisa el panel de depuración de arriba.")
+        except Exception as e:
+            st.error(f"Ocurrió un error inesperado al generar los gráficos: {e}")
+�

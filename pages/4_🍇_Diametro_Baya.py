@@ -17,12 +17,12 @@ st.write("Registre el diámetro (mm) y visualice los promedios por racimo y plan
 
 # --- Inicialización y Constantes ---
 localS = LocalStorage()
-# Cambiamos la clave para asegurar que no haya conflictos con datos antiguos
-LOCAL_STORAGE_KEY = 'diametro_baya_offline_v3' 
+LOCAL_STORAGE_KEY = 'diametro_baya_offline_v3'
 columnas_racimo1 = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior"]
 columnas_racimo2 = ["Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"]
 columnas_medicion = columnas_racimo1 + columnas_racimo2
-columnas_db = [c.replace(' ', '_').replace('-', '') for c in columnas_medicion]
+# --- CORRECCIÓN: Nombres de columna para la base de datos ---
+columnas_db = [c.replace(' ', '_').replace(' - ', '_') for c in columnas_medicion]
 mapeo_columnas = dict(zip(columnas_medicion, columnas_db))
 
 # --- Conexión a Supabase ---
@@ -58,6 +58,27 @@ def to_excel(df):
         df.to_excel(writer, index=False, sheet_name='Reporte_Diametro')
     return output.getvalue()
 
+def calcular_tasa_crecimiento(df):
+    if df.shape[0] < 2 or not all(c in df.columns for c in columnas_db):
+        return pd.DataFrame()
+
+    df['Diametro_Prom_Planta'] = df[columnas_db].mean(axis=1)
+    tasas = []
+    for sector in df['Sector'].unique():
+        df_sector = df[df['Sector'] == sector].copy()
+        promedio_por_fecha = df_sector.groupby('Fecha')['Diametro_Prom_Planta'].mean()
+        if len(promedio_por_fecha) >= 2:
+            ultimas_dos = promedio_por_fecha.sort_index().tail(2)
+            (p_penultimo, p_ultimo), (f_penultima, f_ultima) = ultimas_dos.values, ultimas_dos.index
+            dias = (f_ultima - f_penultima).days
+            if dias > 0:
+                tasa = (p_ultimo - p_penultimo) / dias
+                tasas.append({
+                    "Sector": sector, "Tasa (mm/día)": tasa, "Desde": f_penultima.strftime('%d/%m/%Y'),
+                    "Hasta": f_ultima.strftime('%d/%m/%Y'), "Días Transcurridos": dias
+                })
+    return pd.DataFrame(tasas)
+
 # --- Interfaz de Registro ---
 with st.expander("➕ Registrar Nueva Medición", expanded=True):
     col1, col2 = st.columns(2)
@@ -69,32 +90,24 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
     
     st.subheader("Tabla de Ingreso de Diámetros (mm)")
     
-    # Lógica para mantener/limpiar el estado del editor
-    if 'df_baya_editor' not in st.session_state:
-        plant_numbers = [f"Planta {i+1}" for i in range(25)]
-        df_plantilla = pd.DataFrame(0.0, index=plant_numbers, columns=columnas_medicion)
-        st.session_state.df_baya_editor = df_plantilla
-
-    df_para_editar = st.session_state.df_baya_editor.copy()
+    # Creamos la plantilla editable en cada ejecución
+    plant_numbers = [f"Planta {i+1}" for i in range(25)]
+    df_plantilla = pd.DataFrame(0.0, index=plant_numbers, columns=columnas_medicion)
     
-    # Calcular promedios para la visualización
-    df_para_editar['PROMEDIO 1'] = df_para_editar[columnas_racimo1].mean(axis=1)
-    df_para_editar['PROMEDIO 2'] = df_para_editar[columnas_racimo2].mean(axis=1)
-    df_para_editar['PROMEDIO FINAL'] = df_para_editar[columnas_medicion].mean(axis=1)
-
-    # Creamos el editor de datos
-    df_editada = st.data_editor(
-        df_para_editar, use_container_width=True, key="editor_baya",
-        column_config={
-            "PROMEDIO 1": st.column_config.NumberColumn("Promedio R1", disabled=True, format="%.2f"),
-            "PROMEDIO 2": st.column_config.NumberColumn("Promedio R2", disabled=True, format="%.2f"),
-            "PROMEDIO FINAL": st.column_config.NumberColumn("Promedio Final", disabled=True, format="%.2f"),
-        }
-    )
+    df_editada = st.data_editor(df_plantilla, use_container_width=True, key="editor_baya")
     
+    # --- LÓGICA DE PROMEDIOS (SIMPLIFICADA) ---
+    st.subheader("Promedios Calculados")
+    df_promedios = df_editada.copy()
+    df_promedios['Promedio Racimo 1'] = df_promedios[columnas_racimo1].mean(axis=1)
+    df_promedios['Promedio Racimo 2'] = df_promedios[columnas_racimo2].mean(axis=1)
+    df_promedios['Promedio Final Planta'] = df_promedios[columnas_medicion].mean(axis=1)
+    
+    # Mostramos los promedios en una tabla separada y deshabilitada para claridad
+    st.dataframe(df_promedios[['Promedio Racimo 1', 'Promedio Racimo 2', 'Promedio Final Planta']].style.format("{:.2f}"), use_container_width=True)
+
     if st.button("💾 Guardar Medición en Dispositivo"):
-        # Usamos los datos editados, pero solo las columnas de medición originales
-        df_para_guardar = df_editada[columnas_medicion].copy()
+        df_para_guardar = df_editada.copy()
         df_para_guardar['Sector'] = sector_seleccionado
         df_para_guardar['Fecha'] = fecha_medicion.strftime("%Y-%m-%d")
         
@@ -107,8 +120,6 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
         registros_locales = json.loads(registros_locales_str) if registros_locales_str else []
         registros_locales.extend(registros_json)
         localS.setItem(LOCAL_STORAGE_KEY, json.dumps(registros_locales))
-        
-        del st.session_state.df_baya_editor # Limpiar la tabla para la próxima medición
         st.success(f"¡Medición guardada! Hay {len(registros_locales)} registros de plantas pendientes.")
         st.rerun()
 
@@ -143,9 +154,6 @@ if registros_pendientes:
             st.error("No se pudo sincronizar. La conexión con Supabase no está disponible.")
 else:
     st.info("✅ Almacenamiento local limpio y listo para registrar nuevas mediciones.")
-
-# --- El resto del código del Historial se mantiene igual ---
-# ... (código existente del historial) ...
 
 st.divider()
 

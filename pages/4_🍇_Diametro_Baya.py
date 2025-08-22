@@ -17,7 +17,8 @@ st.write("Registre el diámetro (mm) y visualice los promedios por racimo y plan
 
 # --- Inicialización y Constantes ---
 localS = LocalStorage()
-LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2'
+# Cambiamos la clave para asegurar que no haya conflictos con datos antiguos
+LOCAL_STORAGE_KEY = 'diametro_baya_offline_v3' 
 columnas_racimo1 = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior"]
 columnas_racimo2 = ["Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"]
 columnas_medicion = columnas_racimo1 + columnas_racimo2
@@ -68,25 +69,22 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
     
     st.subheader("Tabla de Ingreso de Diámetros (mm)")
     
-    # Crear una plantilla en session_state si no existe
+    # Lógica para mantener/limpiar el estado del editor
     if 'df_baya_editor' not in st.session_state:
         plant_numbers = [f"Planta {i+1}" for i in range(25)]
         df_plantilla = pd.DataFrame(0.0, index=plant_numbers, columns=columnas_medicion)
         st.session_state.df_baya_editor = df_plantilla
 
-    # Usamos el DataFrame de session_state
     df_para_editar = st.session_state.df_baya_editor.copy()
     
-    # Añadimos las columnas de promedio antes de mostrar el editor
+    # Calcular promedios para la visualización
     df_para_editar['PROMEDIO 1'] = df_para_editar[columnas_racimo1].mean(axis=1)
     df_para_editar['PROMEDIO 2'] = df_para_editar[columnas_racimo2].mean(axis=1)
     df_para_editar['PROMEDIO FINAL'] = df_para_editar[columnas_medicion].mean(axis=1)
 
-    # --- CORRECCIÓN: Usar un solo data_editor ---
+    # Creamos el editor de datos
     df_editada = st.data_editor(
-        df_para_editar,
-        use_container_width=True, 
-        key="editor_baya",
+        df_para_editar, use_container_width=True, key="editor_baya",
         column_config={
             "PROMEDIO 1": st.column_config.NumberColumn("Promedio R1", disabled=True, format="%.2f"),
             "PROMEDIO 2": st.column_config.NumberColumn("Promedio R2", disabled=True, format="%.2f"),
@@ -94,11 +92,9 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
         }
     )
     
-    # Actualizamos el session_state con los valores editados (sin los promedios)
-    st.session_state.df_baya_editor = df_editada[columnas_medicion]
-
     if st.button("💾 Guardar Medición en Dispositivo"):
-        df_para_guardar = df_editada[columnas_medicion].copy() # Usamos el df con los últimos datos
+        # Usamos los datos editados, pero solo las columnas de medición originales
+        df_para_guardar = df_editada[columnas_medicion].copy()
         df_para_guardar['Sector'] = sector_seleccionado
         df_para_guardar['Fecha'] = fecha_medicion.strftime("%Y-%m-%d")
         
@@ -112,9 +108,7 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
         registros_locales.extend(registros_json)
         localS.setItem(LOCAL_STORAGE_KEY, json.dumps(registros_locales))
         
-        # Limpiar el estado de la sesión para la próxima medición
-        del st.session_state.df_baya_editor
-        
+        del st.session_state.df_baya_editor # Limpiar la tabla para la próxima medición
         st.success(f"¡Medición guardada! Hay {len(registros_locales)} registros de plantas pendientes.")
         st.rerun()
 
@@ -124,10 +118,12 @@ st.subheader("📡 Sincronización con la Base de Datos")
 registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
 registros_pendientes = json.loads(registros_pendientes_str) if registros_pendientes_str else []
 
+# --- NUEVO: Botón para limpiar datos locales corruptos ---
 if registros_pendientes:
-    if st.button("🧹 Limpiar Almacenamiento Local"):
+    st.error("Hay datos guardados en el dispositivo. Si la sincronización falla, límpielos con el siguiente botón.")
+    if st.button("🧹 Limpiar Almacenamiento Local (Solucionar Errores)"):
         localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
-        st.toast("Almacenamiento local limpiado.")
+        st.toast("Almacenamiento local limpiado. Recargando...")
         st.rerun()
 
 if registros_pendientes:
@@ -136,8 +132,7 @@ if registros_pendientes:
         if supabase:
             with st.spinner("Sincronizando..."):
                 try:
-                    for registro in registros_pendientes:
-                        supabase.table('Diametro_Baya').insert(registro).execute()
+                    supabase.table('Diametro_Baya').insert(registros_pendientes).execute()
                     localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
                     st.success("¡Sincronización completada!")
                     st.cache_data.clear()
@@ -147,7 +142,10 @@ if registros_pendientes:
         else:
             st.error("No se pudo sincronizar. La conexión con Supabase no está disponible.")
 else:
-    st.info("✅ Todas las mediciones de diámetro están sincronizadas.")
+    st.info("✅ Almacenamiento local limpio y listo para registrar nuevas mediciones.")
+
+# --- El resto del código del Historial se mantiene igual ---
+# ... (código existente del historial) ...
 
 st.divider()
 

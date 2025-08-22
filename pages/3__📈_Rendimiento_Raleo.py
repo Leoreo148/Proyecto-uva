@@ -13,7 +13,7 @@ st.title("📈 Dashboard de Rendimiento de Raleo")
 st.write("Analiza el rendimiento del personal, calcula los pagos y visualiza el avance por fecha y sector.")
 
 # --- CONSTANTES ---
-# Define la tarifa que se paga por cada racimo estimado.
+# Define la tarifa que se paga por cada racimo real contado.
 TARIFA_POR_RACIMO = 0.07
 
 # --- FUNCIÓN DE CONEXIÓN SEGURA A SUPABASE ---
@@ -45,8 +45,8 @@ def cargar_datos_raleo_supabase():
 
         # Limpieza y procesamiento de datos
         df['Fecha'] = pd.to_datetime(df['Fecha'])
-        # Usamos 'Racimos_Estimados' para el cálculo del pago
-        df['Pago_Calculado_S'] = df['Racimos_Estimados'] * TARIFA_POR_RACIMO
+        # --- MODIFICADO: Usamos 'Racimos_Reales' para el cálculo del pago ---
+        df['Pago_Calculado_S'] = df['Racimos_Reales'] * TARIFA_POR_RACIMO
         return df
     except Exception as e:
         st.error(f"Error al cargar los datos de raleo: {e}")
@@ -91,52 +91,54 @@ if df_filtrado.empty:
 else:
     st.header(f"Mostrando Datos del {fecha_inicio.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}")
 
-    # KPIs
-    total_racimos = df_filtrado['Racimos_Estimados'].sum()
+    # --- MODIFICADO: KPIs con Racimos_Reales ---
+    total_racimos = df_filtrado['Racimos_Reales'].sum()
     pago_total = df_filtrado['Pago_Calculado_S'].sum()
     promedio_diario = total_racimos / df_filtrado['Fecha'].nunique() if df_filtrado['Fecha'].nunique() > 0 else 0
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Total Racimos Estimados", f"{total_racimos:,.0f}")
+    col1.metric("Total Racimos Reales", f"{total_racimos:,.0f}")
     col2.metric("Pago Total Calculado", f"S/ {pago_total:,.2f}")
     col3.metric("Promedio Racimos por Día", f"{promedio_diario:,.1f}")
 
     st.divider()
 
-    # Gráficos
+    # --- MODIFICADO: Gráficos con Racimos_Reales ---
     col_graf1, col_graf2 = st.columns(2)
     with col_graf1:
         st.subheader("🏆 Ranking de Personal")
         df_ranking = df_filtrado.groupby('Nombre_del_Trabajador').agg(
-            Total_Racimos=('Racimos_Estimados', 'sum'),
+            Total_Racimos=('Racimos_Reales', 'sum'),
             Pago_Total=('Pago_Calculado_S', 'sum')
         ).sort_values(by='Total_Racimos', ascending=False).reset_index()
 
         fig_ranking = px.bar(
             df_ranking, x='Total_Racimos', y='Nombre_del_Trabajador', orientation='h',
-            title='Total de Racimos Estimados por Persona', text='Total_Racimos',
-            labels={'Nombre_del_Trabajador': 'Trabajador', 'Total_Racimos': 'Nº de Racimos Estimados'}
+            title='Total de Racimos Reales por Persona', text='Total_Racimos',
+            labels={'Nombre_del_Trabajador': 'Trabajador', 'Total_Racimos': 'Nº de Racimos Reales'}
         )
         fig_ranking.update_layout(yaxis={'categoryorder':'total ascending'})
         st.plotly_chart(fig_ranking, use_container_width=True)
 
     with col_graf2:
         st.subheader("📅 Evolución Diaria del Raleo")
-        df_evolucion = df_filtrado.groupby(df_filtrado['Fecha'].dt.date)['Racimos_Estimados'].sum().reset_index()
+        df_evolucion = df_filtrado.groupby(df_filtrado['Fecha'].dt.date)['Racimos_Reales'].sum().reset_index()
         fig_evolucion = px.line(
-            df_evolucion, x='Fecha', y='Racimos_Estimados',
-            title='Total de Racimos Estimados por Día', markers=True,
-            labels={'Fecha': 'Día', 'Racimos_Estimados': 'Nº de Racimos Estimados'}
+            df_evolucion, x='Fecha', y='Racimos_Reales',
+            title='Total de Racimos Reales por Día', markers=True,
+            labels={'Fecha': 'Día', 'Racimos_Reales': 'Nº de Racimos Reales'}
         )
         st.plotly_chart(fig_evolucion, use_container_width=True)
     
     st.divider()
 
-    # Tabla detallada y botón de descarga
+    # --- MODIFICADO: Tabla detallada con nuevas columnas ---
     st.subheader("📋 Tabla de Datos Detallada")
-    columnas_display = ['Fecha', 'Sector', 'Evaluador', 'Nombre_del_Trabajador', 'Tandas_Completadas', 'Racimos_Estimados', 'Pago_Calculado_S']
+    columnas_display = ['Fecha', 'Sector', 'Evaluador', 'Numero_de_Fila', 'Nombre_del_Trabajador', 'Racimos_Reales', 'Tandas_Equivalentes', 'Pago_Calculado_S']
     df_display = df_filtrado.copy()
     df_display['Pago_Calculado_S'] = df_display['Pago_Calculado_S'].round(2)
+    df_display['Tandas_Equivalentes'] = df_display['Tandas_Equivalentes'].round(1)
+    
     st.dataframe(df_display[columnas_display].sort_values(by="Fecha", ascending=False), use_container_width=True)
     
     excel_data = to_excel(df_filtrado[columnas_display])

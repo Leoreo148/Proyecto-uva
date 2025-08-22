@@ -18,11 +18,9 @@ st.write("Registre el diámetro (mm) y visualice los promedios por racimo y plan
 # --- Inicialización y Constantes ---
 localS = LocalStorage()
 LOCAL_STORAGE_KEY = 'diametro_baya_offline_v2'
-# Nombres de columna para la base de datos y la UI
 columnas_racimo1 = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Inferior"]
 columnas_racimo2 = ["Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"]
 columnas_medicion = columnas_racimo1 + columnas_racimo2
-# Nombres para la base de datos (sin espacios ni guiones)
 columnas_db = [c.replace(' ', '_').replace('-', '') for c in columnas_medicion]
 mapeo_columnas = dict(zip(columnas_medicion, columnas_db))
 
@@ -69,17 +67,26 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
         fecha_medicion = st.date_input("Fecha de Medición", datetime.now())
     
     st.subheader("Tabla de Ingreso de Diámetros (mm)")
-    plant_numbers = [f"Planta {i+1}" for i in range(25)]
     
-    # --- MODIFICADO: Plantilla con columnas de promedio ---
-    columnas_editor = columnas_racimo1 + ["PROMEDIO 1"] + columnas_racimo2 + ["PROMEDIO 2", "PROMEDIO FINAL"]
-    df_plantilla = pd.DataFrame(0.0, index=plant_numbers, columns=columnas_editor)
+    # Crear una plantilla en session_state si no existe
+    if 'df_baya_editor' not in st.session_state:
+        plant_numbers = [f"Planta {i+1}" for i in range(25)]
+        df_plantilla = pd.DataFrame(0.0, index=plant_numbers, columns=columnas_medicion)
+        st.session_state.df_baya_editor = df_plantilla
+
+    # Usamos el DataFrame de session_state
+    df_para_editar = st.session_state.df_baya_editor.copy()
     
+    # Añadimos las columnas de promedio antes de mostrar el editor
+    df_para_editar['PROMEDIO 1'] = df_para_editar[columnas_racimo1].mean(axis=1)
+    df_para_editar['PROMEDIO 2'] = df_para_editar[columnas_racimo2].mean(axis=1)
+    df_para_editar['PROMEDIO FINAL'] = df_para_editar[columnas_medicion].mean(axis=1)
+
+    # --- CORRECCIÓN: Usar un solo data_editor ---
     df_editada = st.data_editor(
-        df_plantilla, 
+        df_para_editar,
         use_container_width=True, 
         key="editor_baya",
-        # Configuración para las columnas de promedio
         column_config={
             "PROMEDIO 1": st.column_config.NumberColumn("Promedio R1", disabled=True, format="%.2f"),
             "PROMEDIO 2": st.column_config.NumberColumn("Promedio R2", disabled=True, format="%.2f"),
@@ -87,17 +94,11 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
         }
     )
     
-    # --- NUEVO: Cálculo de promedios en tiempo real ---
-    df_editada['PROMEDIO 1'] = df_editada[columnas_racimo1].mean(axis=1)
-    df_editada['PROMEDIO 2'] = df_editada[columnas_racimo2].mean(axis=1)
-    df_editada['PROMEDIO FINAL'] = df_editada[columnas_medicion].mean(axis=1)
-    
-    # Mostramos la tabla actualizada con los promedios
-    st.data_editor(df_editada, use_container_width=True, key="editor_baya_display", disabled=True) # Usamos una key diferente para mostrar
-    
+    # Actualizamos el session_state con los valores editados (sin los promedios)
+    st.session_state.df_baya_editor = df_editada[columnas_medicion]
+
     if st.button("💾 Guardar Medición en Dispositivo"):
-        # Guardamos solo las columnas de medición, no los promedios
-        df_para_guardar = df_editada[columnas_medicion].copy()
+        df_para_guardar = df_editada[columnas_medicion].copy() # Usamos el df con los últimos datos
         df_para_guardar['Sector'] = sector_seleccionado
         df_para_guardar['Fecha'] = fecha_medicion.strftime("%Y-%m-%d")
         
@@ -110,6 +111,10 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
         registros_locales = json.loads(registros_locales_str) if registros_locales_str else []
         registros_locales.extend(registros_json)
         localS.setItem(LOCAL_STORAGE_KEY, json.dumps(registros_locales))
+        
+        # Limpiar el estado de la sesión para la próxima medición
+        del st.session_state.df_baya_editor
+        
         st.success(f"¡Medición guardada! Hay {len(registros_locales)} registros de plantas pendientes.")
         st.rerun()
 

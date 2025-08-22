@@ -8,8 +8,8 @@ from supabase import create_client, Client
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Control de Raleo", page_icon="✂️", layout="wide")
-st.title("✂️ Control de Avance de Raleo")
-st.write("Registre el avance del personal por tandas verificadas para un control más preciso.")
+st.title("✂️ Control de Avance de Raleo por Fila")
+st.write("Registre el avance detallado del personal, indicando las tandas completadas en cada fila.")
 
 # --- CONSTANTES ---
 # Define aquí cuántos racimos promedio se consideran por cada tanda completada.
@@ -48,7 +48,7 @@ def to_excel(df):
     return output.getvalue()
 
 # --- INTERFAZ DE REGISTRO ---
-with st.expander("➕ Registrar Nueva Cartilla de Raleo por Tandas", expanded=True):
+with st.expander("➕ Registrar Nueva Cartilla de Raleo por Fila", expanded=True):
     st.subheader("1. Definir la Jornada y Evaluador")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -59,11 +59,11 @@ with st.expander("➕ Registrar Nueva Cartilla de Raleo por Tandas", expanded=Tr
     with col3:
         evaluador = st.text_input("Nombre del Evaluador", placeholder="Ej: Carlos")
 
-    st.subheader("2. Registrar Avance del Personal")
-    st.info(f"Ingrese el número de tandas completadas por cada trabajador. La app calculará los racimos estimados ({RACIMOS_POR_TANDA} por tanda).")
+    st.subheader("2. Registrar Avance del Personal por Fila")
+    st.info(f"Ingrese el nombre del trabajador, la fila en la que trabajó y el número de tandas que completó en esa fila.")
     
     df_plantilla = pd.DataFrame(
-        [{"Nombre del Trabajador": "", "Tandas Completadas": 0} for _ in range(30)]
+        [{"Nombre del Trabajador": "", "Número de Fila": None, "Tandas Completadas": 0} for _ in range(15)]
     )
     
     df_editada = st.data_editor(
@@ -72,7 +72,8 @@ with st.expander("➕ Registrar Nueva Cartilla de Raleo por Tandas", expanded=Tr
         use_container_width=True,
         column_config={
             "Nombre del Trabajador": st.column_config.TextColumn("Nombre del Trabajador", required=True),
-            "Tandas Completadas": st.column_config.NumberColumn("N° de Tandas Completadas", min_value=0, step=1)
+            "Número de Fila": st.column_config.NumberColumn("Número de Fila", required=True, min_value=1, step=1),
+            "Tandas Completadas": st.column_config.NumberColumn("N° de Tandas en Fila", min_value=0, step=1)
         }
     )
 
@@ -80,7 +81,8 @@ with st.expander("➕ Registrar Nueva Cartilla de Raleo por Tandas", expanded=Tr
         if not evaluador:
             st.warning("Por favor, ingrese el nombre del evaluador.")
         else:
-            df_final_jornada = df_editada[df_editada["Nombre del Trabajador"] != ""].copy()
+            df_final_jornada = df_editada.dropna(subset=["Nombre del Trabajador", "Número de Fila"])
+            df_final_jornada = df_final_jornada[df_final_jornada["Nombre del Trabajador"] != ""]
             
             if not df_final_jornada.empty:
                 # Añadir los datos de la jornada a cada registro
@@ -94,18 +96,16 @@ with st.expander("➕ Registrar Nueva Cartilla de Raleo por Tandas", expanded=Tr
                 # Renombrar columnas para que coincidan con Supabase
                 df_final_jornada = df_final_jornada.rename(columns={
                     "Nombre del Trabajador": "Nombre_del_Trabajador",
+                    "Número de Fila": "Numero_de_Fila",
                     "Tandas Completadas": "Tandas_Completadas"
                 })
                 
                 # Seleccionar y reordenar las columnas finales
-                columnas_finales = ['Fecha', 'Sector', 'Evaluador', 'Nombre_del_Trabajador', 'Tandas_Completadas', 'Racimos_Estimados']
+                columnas_finales = ['Fecha', 'Sector', 'Evaluador', 'Numero_de_Fila', 'Nombre_del_Trabajador', 'Tandas_Completadas', 'Racimos_Estimados']
                 df_para_insertar = df_final_jornada[columnas_finales]
 
                 try:
-                    # Convertir el DataFrame a una lista de diccionarios para la inserción
                     registros_para_insertar = df_para_insertar.to_dict(orient='records')
-                    
-                    # Insertar los registros en la tabla de Supabase
                     supabase.table('Control_Raleo').insert(registros_para_insertar).execute()
                     st.success("¡Jornada de raleo guardada exitosamente en Supabase!")
                     st.cache_data.clear()
@@ -134,23 +134,21 @@ if df_historial is not None and not df_historial.empty:
                 (df_historial['Evaluador'] == jornada['Evaluador'])
             ]
             
-            total_tandas = df_jornada_actual['Tandas_Completadas'].sum()
             total_racimos_estimados = df_jornada_actual['Racimos_Estimados'].sum()
             
-            col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 2, 1])
+            col1, col2, col3, col4, col5 = st.columns([2, 1, 2, 2, 1])
             col1.metric("Fecha", jornada['Fecha'].strftime('%d/%m/%Y'))
             col2.metric("Sector", jornada['Sector'])
             col3.metric("Evaluador", jornada['Evaluador'])
             col4.metric("Total Racimos Estimados", f"{total_racimos_estimados}")
 
             with col5:
-                st.write("")
+                st.write("") # Spacer
                 reporte_individual = to_excel(df_jornada_actual)
                 st.download_button(
                     label="📥 Detalle",
                     data=reporte_individual,
                     file_name=f"Reporte_Raleo_{jornada['Sector']}_{jornada['Fecha'].strftime('%Y%m%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"download_raleo_{index}"
                 )
 else:

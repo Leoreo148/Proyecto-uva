@@ -3,13 +3,13 @@ import pandas as pd
 from datetime import datetime
 from io import BytesIO
 
-# --- LIBRERÍAS PARA LA CONEXIÓN A SUPABASE ---
+# --- LIBRERías PARA LA CONEXIÓN A SUPABASE ---
 from supabase import create_client, Client
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Control de Raleo", page_icon="✂️", layout="wide")
-st.title("✂️ Control de Avance de Raleo (Conteo Preciso)")
-st.write("Registre el conteo final de racimos por trabajador y fila. La app calculará las tandas equivalentes.")
+st.title("✂️ Control de Avance de Raleo por Fila")
+st.write("Registre el avance detallado del personal, indicando las tandas completadas en cada fila.")
 
 # --- CONSTANTES ---
 # Sigue siendo útil para el cálculo de las tandas equivalentes
@@ -48,7 +48,7 @@ def to_excel(df):
     return output.getvalue()
 
 # --- INTERFAZ DE REGISTRO ---
-with st.expander("➕ Registrar Nueva Cartilla de Raleo (Conteo Preciso)", expanded=True):
+with st.expander("➕ Registrar Nueva Cartilla de Raleo por Fila", expanded=True):
     st.subheader("1. Definir la Jornada y Evaluador")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -60,7 +60,7 @@ with st.expander("➕ Registrar Nueva Cartilla de Raleo (Conteo Preciso)", expan
         evaluador = st.text_input("Nombre del Evaluador", placeholder="Ej: Carlos")
 
     st.subheader("2. Registrar Avance del Personal por Fila")
-    st.info("Ingrese el conteo final y exacto de racimos que cada trabajador realizó en una fila específica.")
+    st.info(f"Ingrese el conteo final y exacto de racimos que cada trabajador realizó en una fila específica.")
     
     df_plantilla = pd.DataFrame(
         [{"Nombre del Trabajador": "", "Número de Fila": None, "Racimos Reales (Conteo Final)": 0} for _ in range(15)]
@@ -72,8 +72,8 @@ with st.expander("➕ Registrar Nueva Cartilla de Raleo (Conteo Preciso)", expan
         use_container_width=True,
         column_config={
             "Nombre del Trabajador": st.column_config.TextColumn("Nombre del Trabajador", required=True),
-            "Número de Fila": st.column_config.NumberColumn("Número de Fila", required=True, min_value=1, step=1),
-            "Racimos Reales (Conteo Final)": st.column_config.NumberColumn("N° de Racimos Reales", min_value=0, step=1)
+            "Número de Fila": st.column_config.NumberColumn("Número de Fila", required=True, min_value=1, step=1, format="%d"),
+            "Racimos Reales (Conteo Final)": st.column_config.NumberColumn("N° de Racimos Reales", min_value=0, step=1, format="%d")
         }
     )
 
@@ -99,6 +99,10 @@ with st.expander("➕ Registrar Nueva Cartilla de Raleo (Conteo Preciso)", expan
                     "Número de Fila": "Numero_de_Fila",
                     "Racimos Reales (Conteo Final)": "Racimos_Reales"
                 })
+                
+                # --- CORRECCIÓN: Forzar el tipo de dato a entero ---
+                df_final_jornada['Numero_de_Fila'] = df_final_jornada['Numero_de_Fila'].astype(int)
+                df_final_jornada['Racimos_Reales'] = df_final_jornada['Racimos_Reales'].astype(int)
                 
                 # Seleccionar y reordenar las columnas finales
                 columnas_finales = ['Fecha', 'Sector', 'Evaluador', 'Numero_de_Fila', 'Nombre_del_Trabajador', 'Racimos_Reales', 'Tandas_Equivalentes']

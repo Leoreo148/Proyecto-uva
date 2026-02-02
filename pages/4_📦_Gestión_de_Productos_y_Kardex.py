@@ -8,8 +8,8 @@ from supabase import create_client, Client
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión de Productos y Kardex", page_icon="📦", layout="wide")
-st.title("📦 Gestión de Productos y Kardex (Build 7)")
-st.write("Control central de inventario con alertas de stock y trazabilidad de vencimientos.")
+st.title("📦 Panel de Control: Kardex e Inventario")
+st.write("Visualización técnica de stock, alertas de reposición y trazabilidad de vencimientos para el fundo.")
 
 # --- INICIALIZAR SESSION STATE ---
 if 'editing_product_id' not in st.session_state:
@@ -90,7 +90,7 @@ def procesar_kardex_detallado(df_i, df_s):
     resumen_producto = kardex_lotes.groupby('Codigo_Producto').agg({
         'Stock_Lote': 'sum',
         'Valor_Lote': 'sum',
-        'Dias_Venc': 'min' # Nos interesa el lote que vence más pronto
+        'Dias_Venc': 'min' 
     }).reset_index().rename(columns={'Stock_Lote': 'Stock_Actual', 'Valor_Lote': 'Stock_Valorizado', 'Dias_Venc': 'Prox_Vencimiento'})
 
     return resumen_producto
@@ -99,39 +99,11 @@ def procesar_kardex_detallado(df_i, df_s):
 df_productos, df_ingresos, df_salidas = cargar_datos_kardex()
 df_resumen_stock = procesar_kardex_detallado(df_ingresos, df_salidas)
 
-# SECCIÓN 1: AÑADIR NUEVO PRODUCTO
-with st.expander("➕ Añadir Nuevo Producto al Catálogo"):
-    with st.form("nuevo_producto_form", clear_on_submit=True):
-        st.subheader("Detalles del Nuevo Producto")
-        col1, col2 = st.columns(2)
-        with col1:
-            prod_codigo = st.text_input("Código del Producto (ej: F001)")
-            prod_nombre = st.text_input("Nombre del Producto")
-            prod_ing_activo = st.text_input("Ingrediente Activo")
-        with col2:
-            prod_unidad = st.selectbox("Unidad", ["Litro", "Kilo", "Unidad", "Galón", "Bolsa"])
-            prod_stock_min = st.number_input("Stock Mínimo", min_value=0.0, step=1.0, format="%.2f")
-            prod_tipo_accion = st.selectbox("Tipo de Acción", ["Fertilizante", "Fungicida", "Insecticida", "Herbicida", "Bioestimulante", "Otro"])
-
-        if st.form_submit_button("Añadir Producto"):
-            if prod_codigo and prod_nombre:
-                try:
-                    nuevo_producto_data = {
-                        'Codigo': prod_codigo, 'Producto': prod_nombre, 'Ingrediente_Activo': prod_ing_activo,
-                        'Unidad': prod_unidad, 'Tipo_Accion': prod_tipo_accion, 'Stock_Minimo': prod_stock_min
-                    }
-                    supabase.table('Productos').insert(nuevo_producto_data).execute()
-                    st.toast(f"✅ ¡{prod_nombre} añadido!", icon="🎉")
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e: st.error(f"Error: {e}")
-
-# SECCIÓN 2: VISUALIZACIÓN KARDEX
-st.divider()
-st.header("📖 Catálogo de Productos y Stock Actual")
+# SECCIÓN ÚNICA: CATÁLOGO Y STOCK ACTUAL
+st.header("📖 Estado de Insumos en Almacén")
 
 if df_productos.empty:
-    st.info("El catálogo está vacío.")
+    st.info("El catálogo está vacío. Configure sus productos en el módulo de gestión central.")
 else:
     # Unir catálogo con cálculos de stock
     df_vista = pd.merge(df_productos, df_resumen_stock, left_on='Codigo', right_on='Codigo_Producto', how='left').fillna(0)

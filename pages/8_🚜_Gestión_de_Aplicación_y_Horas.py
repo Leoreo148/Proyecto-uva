@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import json
 from datetime import datetime
 
 # --- LIBRERÍAS PARA LA CONEXIÓN A SUPABASE ---
@@ -8,10 +7,10 @@ from supabase import create_client, Client
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión de Aplicación y Horas", page_icon="🚜", layout="wide")
-st.title("🚜 Cartilla de Aplicación y Control de Horas")
-st.write("El operario completa la cartilla unificada para finalizar la aplicación y registrar las horas de maquinaria.")
+st.title("🚜 Cartilla de Aplicación y Control de Horas (Build 7.2)")
+st.write("Registro unificado de labores de campo y uso de maquinaria.")
 
-# --- FUNCIÓN DE CONEXIÓN SEGURA A SUPABASE ---
+# --- FUNCIÓN DE CONEXIÓN SEGURA ---
 @st.cache_resource
 def init_supabase_connection():
     try:
@@ -24,154 +23,131 @@ def init_supabase_connection():
 
 supabase = init_supabase_connection()
 
-# --- NUEVAS FUNCIONES ADAPTADAS PARA SUPABASE ---
+# --- CARGA DE DATOS NORMALIZADA ---
 @st.cache_data(ttl=60)
-def cargar_datos_para_aplicacion():
-    """Carga las órdenes listas para aplicar y los historiales desde Supabase."""
+def cargar_datos_operacion():
     if supabase:
         try:
-            # Cargar órdenes con estado 'Lista para Aplicar'
-            res_ordenes = supabase.table('Ordenes_de_Trabajo').select("*").eq('Status', 'Lista para Aplicar').execute()
-            df_ordenes = pd.DataFrame(res_ordenes.data)
-            
-            # Cargar historial de horas de tractor
-            res_horas = supabase.table('Registro_Horas_Tractor').select("*").order('Fecha', desc=True).limit(50).execute()
-            df_horas = pd.DataFrame(res_horas.data)
-            
-            # Cargar historial de órdenes completadas
-            res_completadas = supabase.table('Ordenes_de_Trabajo').select("*").eq('Status', 'Completada').order('created_at', desc=True).limit(50).execute()
-            df_completadas = pd.DataFrame(res_completadas.data)
+            # 1. Órdenes listas
+            res_o = supabase.table('Ordenes_de_Trabajo').select("*").eq('Status', 'Lista para Aplicar').execute()
+            # 2. Personal Activo
+            res_p = supabase.table('Personal').select("id, nombre_completo").eq('activo', True).execute()
+            # 3. Maquinaria
+            res_m = supabase.table('Maquinaria').select("id, nombre").execute()
+            # 4. Historiales
+            res_h = supabase.table('Registro_Horas_Tractor').select("*").order('created_at', desc=True).limit(20).execute()
+            res_obj = supabase.table('Maestro_Objetivos').select("*").execute()
 
-            return df_ordenes, df_horas, df_completadas
+            return (pd.DataFrame(res_o.data), pd.DataFrame(res_p.data), 
+                    pd.DataFrame(res_m.data), pd.DataFrame(res_h.data),
+                    pd.DataFrame(res_obj.data))
         except Exception as e:
-            st.error(f"Error al cargar datos de Supabase: {e}")
-    return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+            st.error(f"Error en carga de datos: {e}")
+    return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-def to_excel(df):
-    """Convierte un DataFrame a un archivo Excel en memoria para descarga."""
-    from io import BytesIO
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Reporte')
-    return output.getvalue()
-
-# --- CARGA DE DATOS ---
-df_ordenes_pendientes, df_historial_horas, df_historial_apps = cargar_datos_para_aplicacion()
+# --- CARGA INICIAL ---
+df_ord, df_pers, df_maqu, df_hist_h, df_obj = cargar_datos_operacion()
 
 # --- SECCIÓN 1: TAREAS LISTAS PARA APLICAR ---
 st.subheader("✅ Tareas Listas para Aplicar")
 
-if not df_ordenes_pendientes.empty:
-    for index, tarea in df_ordenes_pendientes.iterrows():
-        expander_title = f"**Orden ID:** `{tarea['ID_Orden_Personalizado']}` | **Sector:** {tarea['Sector_Aplicacion']}"
-        with st.expander(expander_title, expanded=True):
-            st.write("**Receta de la Mezcla:**")
-            receta = tarea['Receta_Mezcla_Lotes']
-            st.dataframe(pd.DataFrame(receta), use_container_width=True)
+if df_ord.empty:
+    st.info("No hay aplicaciones con mezcla preparada esperando ser aplicadas.")
+else:
+    # Diccionarios de mapeo para los selectbox
+    dict_personal = {r['nombre_completo']: r['id'] for _, r in df_pers.iterrows()}
+    dict_maquina = {r['nombre']: r['id'] for _, r in df_maqu.iterrows()}
+    dict_nombres_obj = {r['id']: r['nombre'] for _, r in df_obj.iterrows()}
+
+    for _, tarea in df_ord.iterrows():
+        nombre_objetivo = dict_nombres_obj.get(tarea['Objetivo'], "Desconocido")
+        exp_title = f"**Orden:** `{tarea['ID_Orden_Personalizado']}` | **Sector:** {tarea['Sector_Aplicacion']} | **Objetivo:** {nombre_objetivo}"
+        
+        with st.expander(exp_title, expanded=True):
+            st.info(f"🧪 **Receta preparada:** {len(tarea['Receta_Mezcla_Lotes'])} productos en tanque.")
             
-            with st.form(key=f"form_unificado_{tarea['id']}"):
-                st.subheader("Cartilla Unificada de Aplicación y Horas")
-                
-                # --- DATOS DEL CONTROL DE HORAS ---
-                st.markdown("##### Parte Diario de Maquinaria")
-                col_parte1, col_parte2 = st.columns(2)
-                with col_parte1:
-                    operario = st.text_input("Nombre del Operador", value="Antonio Cornejo")
-                    implemento = st.text_input("Implemento Utilizado", "Nebulizadora")
-                with col_parte2:
-                    tractor_utilizado = st.text_input("Tractor Utilizado", "CASE")
-                    labor_realizada = st.text_input("Labor Realizada", value=f"Aplicación {tarea['Objetivo']}")
+            with st.form(key=f"form_tractor_{tarea['id']}"):
+                st.markdown("##### 🚜 Control de Maquinaria")
+                c1, c2 = st.columns(2)
+                with c1:
+                    op_sel = st.selectbox("Operador Responsable", options=list(dict_personal.keys()))
+                    tract_sel = st.selectbox("Tractor / Equipo", options=list(dict_maquina.keys()))
+                    h_ini = st.number_input("Horómetro Inicial", min_value=0.0, format="%.2f")
+                with c2:
+                    implemento = st.text_input("Implemento", value="Nebulizadora Turbo")
+                    labor = st.text_input("Labor Realizada", value=f"Aplicación {nombre_objetivo}")
+                    h_fin = st.number_input("Horómetro Final", min_value=0.0, format="%.2f")
 
-                col_h1, col_h2 = st.columns(2)
-                with col_h1:
-                    h_inicial = st.number_input("Horómetro Inicial", min_value=0.0, format="%.2f", step=0.1)
-                with col_h2:
-                    h_final = st.number_input("Horómetro Final", min_value=0.0, format="%.2f", step=0.1)
+                st.markdown("##### 🍇 Detalles Técnicos de Aplicación")
+                ca1, ca2, ca3 = st.columns(3)
+                with ca1:
+                    t_app = st.selectbox("Tipo App", ["Pulverizado", "Nebulizado", "Drench"])
+                    vol_agua = st.number_input("Volumen Agua/Ha (L)", value=int(tarea.get('Volumen_Agua_Ha', 2200) or 2200))
+                with ca2:
+                    marcha = st.number_input("Marcha", value=int(tarea.get('Marcha', 18) or 18))
+                    presion = st.number_input("Presión (Bar)", value=15.0)
+                with ca3:
+                    boquilla = st.text_input("Color Boquilla", value="Marrón/Negra")
+                    full_maq = st.checkbox("Full Maquinaria", value=True)
 
-                # --- DATOS DE LA CARTILLA DE APLICACIÓN ---
-                st.markdown("##### Detalles de la Aplicación")
-                col_app1, col_app2 = st.columns(2)
-                with col_app1:
-                    tipo_aplicacion = st.selectbox("Tipo de Aplicación", ["Pulverizado (Turbo)", "Nebulizado (Turbo)", "Pistolas/Winch", "Inyectores", "Foliar", "Drench"])
-                    volumen_agua_ha = st.number_input("Volumen de Agua / Ha (L)", min_value=0, value=2200)
-                    volumen_hectarea = st.number_input("Volumen Hectárea", min_value=0.0, value=1.55, format="%.2f")
-                    marcha = st.number_input("Marcha", min_value=0, step=1, value=18)
-                    presion = st.text_input("Presión Bar", value="bares")
-                with col_app2:
-                    full_maquinarias = st.checkbox("Full Maquinarias", value=True)
-                    num_boquillas = st.number_input("N° Boquillas Total", min_value=0, step=1, value=18)
-                    color_boquilla = st.text_input("Color de Boquilla", value="q Mast")
-                    cultivo = st.text_input("Cultivo", value="Vid")
-                
-                observaciones = st.text_area("Observaciones Generales (Clima, Novedades, etc.)", value="Aplicación con turbo y con boquillas intercaladas una negra y una marrón.")
+                obs = st.text_area("Observaciones de Campo", placeholder="Clima, velocidad del viento, etc.")
 
-                submitted = st.form_submit_button("🏁 Finalizar Tarea y Guardar Registros")
-
-                if submitted and supabase:
-                    if h_final <= h_inicial:
-                        st.error("El Horómetro Final debe ser mayor que el Inicial.")
+                if st.form_submit_button("🏁 Finalizar y Registrar"):
+                    if h_fin <= h_ini:
+                        st.error("El horómetro final debe ser mayor al inicial.")
                     else:
                         try:
-                            # 1. Preparar y guardar el registro de horas en Supabase
-                            total_horas = h_final - h_inicial
-                            nuevo_registro_horas = {
-                                'Fecha': tarea['Fecha_Programada'],
-                                'Turno': tarea['Turno'], 'Operador': operario, 'Tractor': tractor_utilizado,
-                                'Implemento': implemento, 'Labor_Realizada': labor_realizada, 
-                                'Sector': tarea['Sector_Aplicacion'],
-                                'Horometro_Inicial': h_inicial, 'Horometro_Final': h_final,
-                                'Total_Horas': total_horas, 'Observaciones': observaciones
+                            # 1. Registro de Horas (Usando IDs)
+                            data_horas = {
+                                "Fecha": tarea['Fecha_Programada'],
+                                "Turno": tarea['Turno'],
+                                "Operador": dict_personal[op_sel], # ID de Personal
+                                "Tractor": dict_maquina[tract_sel], # ID de Maquinaria
+                                "Implemento": implemento,
+                                "Labor_Realizada": labor,
+                                "Sector": tarea['Sector_Aplicacion'],
+                                "Horometro_Inicial": h_ini,
+                                "Horometro_Final": h_fin,
+                                "Total_Horas": h_fin - h_ini,
+                                "Observaciones": obs
                             }
-                            supabase.table('Registro_Horas_Tractor').insert(nuevo_registro_horas).execute()
+                            supabase.table('Registro_Horas_Tractor').insert(data_horas).execute()
 
-                            # 2. Preparar y actualizar la orden de trabajo en Supabase
-                            datos_actualizacion_orden = {
-                                'Status': 'Completada',
-                                'Tractor_Responsable': operario,
-                                'Aplicacion_Completada_Fecha': datetime.now().isoformat(),
-                                'Tipo_Aplicacion': tipo_aplicacion,
-                                'Volumen_Agua_Ha': volumen_agua_ha,
-                                'Volumen_Hectarea': volumen_hectarea,
-                                'Marcha': marcha,
-                                'Presion_Bar': presion,
-                                'Full_Maquinarias': full_maquinarias,
-                                'Num_Boquillas_Total': num_boquillas,
-                                'Color_Boquilla': color_boquilla,
-                                'Cultivo': cultivo,
-                                'Observaciones_Aplicacion': observaciones
+                            # 2. Actualizar Orden a Completada
+                            data_update = {
+                                "Status": "Completada",
+                                "Tractor_Responsable": op_sel, # Mantenemos nombre para visualización rápida
+                                "Aplicacion_Completada_Fecha": datetime.now().isoformat(),
+                                "Tipo_Aplicacion": t_app,
+                                "Volumen_Agua_Ha": vol_agua,
+                                "Marcha": marcha,
+                                "Presion_Bar": str(presion),
+                                "Color_Boquilla": boquilla,
+                                "Full_Maquinarias": full_maq,
+                                "Observaciones_Aplicacion": obs
                             }
-                            supabase.table('Ordenes_de_Trabajo').update(datos_actualizacion_orden).eq('id', tarea['id']).execute()
+                            supabase.table('Ordenes_de_Trabajo').update(data_update).eq('id', tarea['id']).execute()
 
-                            st.success(f"¡Tarea '{tarea['ID_Orden_Personalizado']}' completada y horas registradas!")
+                            st.success(f"¡Tarea {tarea['ID_Orden_Personalizado']} finalizada con éxito!")
                             st.cache_data.clear()
                             st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al guardar los registros en Supabase: {e}")
-else:
-    st.info("No hay aplicaciones con mezcla lista para ser aplicadas.")
+                        except Exception as e: st.error(f"Error: {e}")
 
+# --- SECCIÓN 2: HISTORIALES ---
 st.divider()
+st.header("📚 Historial Reciente")
 
-# --- HISTORIALES Y DESCARGAS ---
-st.header("📚 Historiales")
-
-# Historial de Horas de Tractor
-st.subheader("Historial de Horas de Tractor")
-if not df_historial_horas.empty:
-    st.dataframe(df_historial_horas.sort_values(by="Fecha", ascending=False), use_container_width=True)
-    excel_horas = to_excel(df_historial_horas)
-    st.download_button(
-        label="📥 Descargar Historial de Horas",
-        data=excel_horas,
-        file_name=f"Reporte_Horas_Tractor_{datetime.now().strftime('%Y%m%d')}.xlsx"
+if not df_hist_h.empty:
+    # Unir con Personal y Maquinaria para mostrar nombres en el historial
+    df_h_view = pd.merge(df_hist_h, df_pers, left_on='Operador', right_on='id', how='left')
+    df_h_view = pd.merge(df_h_view, df_maqu, left_on='Tractor', right_on='id', how='left')
+    
+    st.subheader("Últimos Registros de Maquinaria")
+    st.dataframe(
+        df_h_view[['Fecha', 'nombre_completo', 'nombre', 'Labor_Realizada', 'Total_Horas', 'Sector']],
+        column_config={
+            "nombre_completo": "Operador",
+            "nombre": "Tractor",
+            "Total_Horas": st.column_config.NumberColumn("Horas", format="%.2f")
+        }, use_container_width=True
     )
-else:
-    st.info("Aún no se ha registrado ninguna hora de tractor.")
-
-# Historial de Aplicaciones Completadas
-st.subheader("Historial de Aplicaciones Completadas")
-if not df_historial_apps.empty:
-    columnas_a_mostrar = ['ID_Orden_Personalizado', 'Sector_Aplicacion', 'Tractor_Responsable', 'Aplicacion_Completada_Fecha']
-    st.dataframe(df_historial_apps[columnas_a_mostrar].sort_values(by="Aplicacion_Completada_Fecha", ascending=False), use_container_width=True)
-else:
-    st.info("Aún no se ha completado ninguna aplicación.")

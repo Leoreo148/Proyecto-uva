@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-from io import BytesIO
+from datetime import datetime, date
 import numpy as np
 
 # --- LIBRERÍAS PARA LA CONEXIÓN A SUPABASE ---
@@ -9,8 +8,8 @@ from supabase import create_client, Client
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión de Productos y Kardex", page_icon="📦", layout="wide")
-st.title("📦 Gestión de Productos y Kardex")
-st.write("Catálogo de productos y stock, conectado a una base de datos permanente con Supabase.")
+st.title("📦 Gestión de Productos y Kardex (Build 7)")
+st.write("Control central de inventario con alertas de stock y trazabilidad de vencimientos.")
 
 # --- INICIALIZAR SESSION STATE ---
 if 'editing_product_id' not in st.session_state:
@@ -18,7 +17,7 @@ if 'editing_product_id' not in st.session_state:
 if 'deleting_product_id' not in st.session_state:
     st.session_state.deleting_product_id = None
 
-# --- FUNCIÓN DE CONEXIÓN SEGURA A SUPABASE ---
+# --- FUNCIÓN DE CONEXIÓN ---
 @st.cache_resource
 def init_supabase_connection():
     try:
@@ -31,55 +30,74 @@ def init_supabase_connection():
 
 supabase = init_supabase_connection()
 
-# --- FUNCIONES PARA CARGAR DATOS ---
+# --- CARGA DE DATOS ---
 @st.cache_data(ttl=60)
-def cargar_datos_supabase():
+def cargar_datos_kardex():
     if supabase:
         try:
-            response_productos = supabase.table('Productos').select("*").order('Producto').execute()
-            df_productos = pd.DataFrame(response_productos.data)
-            response_ingresos = supabase.table('Ingresos').select("*").execute()
-            df_ingresos = pd.DataFrame(response_ingresos.data)
-            response_salidas = supabase.table('Salidas').select("*").execute()
-            df_salidas = pd.DataFrame(response_salidas.data)
-            return df_productos, df_ingresos, df_salidas
+            # Traer catálogo maestro
+            res_p = supabase.table('Productos').select("*").order('Producto').execute()
+            df_p = pd.DataFrame(res_p.data)
+            
+            # Traer ingresos y salidas usando solo códigos para el cálculo
+            res_i = supabase.table('Ingresos').select("Codigo_Producto, Codigo_Lote, Cantidad, Precio_Unitario, Fecha_Vencimiento").execute()
+            df_i = pd.DataFrame(res_i.data)
+            
+            res_s = supabase.table('Salidas').select("Codigo_Producto, Codigo_Lote, Cantidad").execute()
+            df_s = pd.DataFrame(res_s.data)
+            
+            return df_p, df_i, df_s
         except Exception as e:
-            st.error(f"Error al leer los datos de Supabase: {e}")
+            st.error(f"Error en carga de datos: {e}")
     return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-# --- FUNCIONES DE LÓGICA DE NEGOCIO ---
-def calcular_stock_por_lote(df_ingresos, df_salidas):
-    if df_ingresos.empty:
-        return pd.DataFrame(columns=['Codigo_Producto', 'Stock_Actual', 'Stock_Valorizado']), pd.DataFrame()
-    
-    df_ingresos['Cantidad'] = pd.to_numeric(df_ingresos['Cantidad'], errors='coerce').fillna(0)
-    df_ingresos['Precio_Unitario'] = pd.to_numeric(df_ingresos['Precio_Unitario'], errors='coerce').fillna(0)
-    if not df_salidas.empty:
-        df_salidas['Cantidad'] = pd.to_numeric(df_salidas['Cantidad'], errors='coerce').fillna(0)
+# --- LÓGICA DE CÁLCULO DE STOCK Y VENCIMIENTOS ---
+def procesar_kardex_detallado(df_i, df_s):
+    if df_i.empty:
+        return pd.DataFrame(columns=['Codigo_Producto', 'Stock_Actual', 'Stock_Valorizado', 'Prox_Vencimiento'])
 
-    ingresos_por_lote = df_ingresos.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Ingresada'})
+    # Asegurar tipos numéricos
+    for df in [df_i, df_s]:
+        if not df.empty:
+            df['Cantidad'] = pd.to_numeric(df['Cantidad'], errors='coerce').fillna(0)
     
-    if not df_salidas.empty and 'Codigo_Lote' in df_salidas.columns:
-        salidas_por_lote = df_salidas.groupby('Codigo_Lote')['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cantidad_Consumida'})
-        stock_lotes = pd.merge(ingresos_por_lote, salidas_por_lote, on='Codigo_Lote', how='left').fillna(0)
-        stock_lotes['Stock_Restante'] = stock_lotes['Cantidad_Ingresada'] - stock_lotes['Cantidad_Consumida']
-    else:
-        stock_lotes = ingresos_por_lote
-        stock_lotes['Stock_Restante'] = stock_lotes['Cantidad_Ingresada']
-        
-    lote_info = df_ingresos.drop_duplicates(subset=['Codigo_Lote'])[['Codigo_Lote', 'Codigo_Producto', 'Producto', 'Precio_Unitario', 'Fecha_Vencimiento']]
-    stock_lotes_detallado = pd.merge(stock_lotes, lote_info, on='Codigo_Lote', how='left')
-    stock_lotes_detallado['Valor_Lote'] = stock_lotes_detallado['Stock_Restante'] * stock_lotes_detallado['Precio_Unitario']
-    
-    agg_funcs = {'Stock_Restante': 'sum', 'Valor_Lote': 'sum'}
-    total_stock_producto = stock_lotes_detallado.groupby('Codigo_Producto').agg(agg_funcs).reset_index().rename(columns={'Stock_Restante': 'Stock_Actual', 'Valor_Lote': 'Stock_Valorizado'})
-    
-    return total_stock_producto, stock_lotes_detallado
+    # 1. Agrupar Ingresos y Salidas por Lote
+    ingresos_lote = df_i.groupby(['Codigo_Producto', 'Codigo_Lote']).agg({
+        'Cantidad': 'sum',
+        'Precio_Unitario': 'first',
+        'Fecha_Vencimiento': 'first'
+    }).reset_index().rename(columns={'Cantidad': 'Cant_Ing'})
 
-# --- CARGA INICIAL DE DATOS ---
-df_productos, df_ingresos, df_salidas = cargar_datos_supabase()
+    salidas_lote = df_s.groupby(['Codigo_Producto', 'Codigo_Lote'])['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cant_Sal'})
 
-# --- INTERFAZ DE USUARIO ---
+    # 2. Calcular Stock Restante por Lote
+    kardex_lotes = pd.merge(ingresos_lote, salidas_lote, on=['Codigo_Producto', 'Codigo_Lote'], how='left').fillna(0)
+    kardex_lotes['Stock_Lote'] = kardex_lotes['Cant_Ing'] - kardex_lotes['Cant_Sal']
+    kardex_lotes['Valor_Lote'] = kardex_lotes['Stock_Lote'] * kardex_lotes['Precio_Unitario']
+
+    # 3. Calcular Días para Vencimiento
+    hoy = date.today()
+    def dias_venc(fecha_str):
+        if not fecha_str: return 999
+        try:
+            venc = datetime.strptime(fecha_str, '%Y-%m-%d').date()
+            return (venc - hoy).days
+        except: return 999
+
+    kardex_lotes['Dias_Venc'] = kardex_lotes['Fecha_Vencimiento'].apply(dias_venc)
+
+    # 4. Resumen por Producto
+    resumen_producto = kardex_lotes.groupby('Codigo_Producto').agg({
+        'Stock_Lote': 'sum',
+        'Valor_Lote': 'sum',
+        'Dias_Venc': 'min' # Nos interesa el lote que vence más pronto
+    }).reset_index().rename(columns={'Stock_Lote': 'Stock_Actual', 'Valor_Lote': 'Stock_Valorizado', 'Dias_Venc': 'Prox_Vencimiento'})
+
+    return resumen_producto
+
+# --- CARGA INICIAL ---
+df_productos, df_ingresos, df_salidas = cargar_datos_kardex()
+df_resumen_stock = procesar_kardex_detallado(df_ingresos, df_salidas)
 
 # SECCIÓN 1: AÑADIR NUEVO PRODUCTO
 with st.expander("➕ Añadir Nuevo Producto al Catálogo"):
@@ -90,124 +108,111 @@ with st.expander("➕ Añadir Nuevo Producto al Catálogo"):
             prod_codigo = st.text_input("Código del Producto (ej: F001)")
             prod_nombre = st.text_input("Nombre del Producto")
             prod_ing_activo = st.text_input("Ingrediente Activo")
-            prod_stock_min = st.number_input("Stock Mínimo", min_value=0.0, step=1.0, format="%.2f")
         with col2:
             prod_unidad = st.selectbox("Unidad", ["Litro", "Kilo", "Unidad", "Galón", "Bolsa"])
-            prod_proveedor = st.text_input("Proveedor Principal")
+            prod_stock_min = st.number_input("Stock Mínimo", min_value=0.0, step=1.0, format="%.2f")
             prod_tipo_accion = st.selectbox("Tipo de Acción", ["Fertilizante", "Fungicida", "Insecticida", "Herbicida", "Bioestimulante", "Otro"])
 
-        if st.form_submit_button("Añadir Producto a Supabase"):
-            if supabase and all([prod_codigo, prod_nombre]):
+        if st.form_submit_button("Añadir Producto"):
+            if prod_codigo and prod_nombre:
                 try:
                     nuevo_producto_data = {
                         'Codigo': prod_codigo, 'Producto': prod_nombre, 'Ingrediente_Activo': prod_ing_activo,
-                        'Unidad': prod_unidad, 'Proveedor': prod_proveedor, 'Tipo_Accion': prod_tipo_accion,
-                        'Stock_Minimo': prod_stock_min
+                        'Unidad': prod_unidad, 'Tipo_Accion': prod_tipo_accion, 'Stock_Minimo': prod_stock_min
                     }
                     supabase.table('Productos').insert(nuevo_producto_data).execute()
-                    # --- CAMBIO A st.toast ---
-                    st.toast(f"✅ ¡Producto '{prod_nombre}' añadido!", icon="🎉")
+                    st.toast(f"✅ ¡{prod_nombre} añadido!", icon="🎉")
                     st.cache_data.clear()
                     st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
-            else:
-                st.warning("Código y Nombre son obligatorios.")
+                except Exception as e: st.error(f"Error: {e}")
 
-# SECCIÓN 2: CATÁLOGO DE PRODUCTOS Y GESTIÓN
+# SECCIÓN 2: VISUALIZACIÓN KARDEX
 st.divider()
 st.header("📖 Catálogo de Productos y Stock Actual")
 
 if df_productos.empty:
-    st.warning("El catálogo de productos está vacío.")
+    st.info("El catálogo está vacío.")
 else:
-    df_total_stock, _ = calcular_stock_por_lote(df_ingresos, df_salidas)
-    df_vista_kardex = pd.merge(df_productos, df_total_stock, left_on='Codigo', right_on='Codigo_Producto', how='left').fillna(0)
+    # Unir catálogo con cálculos de stock
+    df_vista = pd.merge(df_productos, df_resumen_stock, left_on='Codigo', right_on='Codigo_Producto', how='left').fillna(0)
 
-    # --- DIÁLOGO DE EDICIÓN ---
-    if st.session_state.editing_product_id:
-        producto_a_editar = df_productos[df_productos['id'] == st.session_state.editing_product_id].iloc[0]
-        
-        @st.dialog("✏️ Editar Producto")
-        def edit_dialog():
-            with st.form("edit_form_dialog"):
-                st.write(f"**Editando:** {producto_a_editar['Producto']} (Código: {producto_a_editar['Codigo']})")
-                unidades = ["Litro", "Kilo", "Unidad", "Galón", "Bolsa"]
-                tipos_accion = ["Fertilizante", "Fungicida", "Insecticida", "Herbicida", "Bioestimulante", "Otro"]
-                
-                new_nombre = st.text_input("Nombre del Producto", value=producto_a_editar['Producto'])
-                new_ing_activo = st.text_input("Ingrediente Activo", value=producto_a_editar.get('Ingrediente_Activo', ''))
-                new_stock_min = st.number_input("Stock Mínimo", min_value=0.0, format="%.2f", value=float(producto_a_editar.get('Stock_Minimo', 0.0)))
-                
-                current_unidad = str(producto_a_editar.get('Unidad', '')).strip()
-                try: unidad_index = unidades.index(current_unidad)
-                except ValueError: unidad_index = 0
-                new_unidad = st.selectbox("Unidad", unidades, index=unidad_index)
-
-                new_proveedor = st.text_input("Proveedor", value=producto_a_editar.get('Proveedor', ''))
-
-                current_tipo = str(producto_a_editar.get('Tipo_Accion', '')).strip()
-                try: tipo_index = tipos_accion.index(current_tipo)
-                except ValueError: tipo_index = 0
-                new_tipo_accion = st.selectbox("Tipo de Acción", tipos_accion, index=tipo_index)
-                
-                col1, col2 = st.columns(2)
-                if col1.form_submit_button("💾 Guardar Cambios"):
-                    update_data = {
-                        'Producto': new_nombre, 'Ingrediente_Activo': new_ing_activo,
-                        'Stock_Minimo': new_stock_min, 'Unidad': new_unidad,
-                        'Proveedor': new_proveedor, 'Tipo_Accion': new_tipo_accion
-                    }
-                    supabase.table('Productos').update(update_data).eq('id', st.session_state.editing_product_id).execute()
-                    st.toast("✅ Producto actualizado.", icon="👍")
-                    st.session_state.editing_product_id = None
-                    st.cache_data.clear()
-                    st.rerun()
-                if col2.form_submit_button("❌ Cancelar"):
-                    st.session_state.editing_product_id = None
-                    st.rerun()
-        edit_dialog()
-
-    # --- DIÁLOGO DE ELIMINACIÓN ---
-    if st.session_state.deleting_product_id:
-        producto_a_eliminar = df_productos[df_productos['id'] == st.session_state.deleting_product_id].iloc[0]
-        @st.dialog("🗑️ Confirmar Eliminación")
-        def delete_dialog():
-            st.warning(f"¿Estás seguro de que quieres eliminar el producto **'{producto_a_eliminar['Producto']}'**?")
-            st.write("Esta acción no se puede deshacer.")
-            col1, col2 = st.columns(2)
-            if col1.button("Sí, Eliminar Permanentemente"):
-                supabase.table('Productos').delete().eq('id', st.session_state.deleting_product_id).execute()
-                st.toast("🗑️ Producto eliminado.", icon="✅")
-                st.session_state.deleting_product_id = None
-                st.cache_data.clear()
-                st.rerun()
-            if col2.button("No, Cancelar"):
-                st.session_state.deleting_product_id = None
-                st.rerun()
-        delete_dialog()
-
-    # --- MOSTRAR LA TABLA CON BOTONES ---
-    header_cols = st.columns([2, 4, 2, 2, 1, 2, 1, 1])
-    headers = ['Código', 'Producto', 'Stock Actual', 'Stock Mínimo', 'Unidad', 'Valorizado', 'Editar', 'Borrar']
-    for col, header in zip(header_cols, headers):
-        col.markdown(f"**{header}**")
-
+    # Cabecera de tabla
+    h_cols = st.columns([1.5, 3, 1.5, 1.5, 1.5, 1.5, 0.8, 0.8])
+    headers = ["Código", "Producto", "Stock Actual", "Mínimo", "Vencimiento", "Valorizado", "Edit", "Borrar"]
+    for col, h in zip(h_cols, headers): col.markdown(f"**{h}**")
     st.markdown("---")
 
-    for index, row in df_vista_kardex.iterrows():
-        row_cols = st.columns([2, 4, 2, 2, 1, 2, 1, 1])
-        row_cols[0].text(row.get('Codigo', ''))
-        row_cols[1].text(row.get('Producto', ''))
-        row_cols[2].text(f"{row.get('Stock_Actual', 0):.2f}")
-        row_cols[3].text(f"{row.get('Stock_Minimo', 0):.2f}")
-        row_cols[4].text(row.get('Unidad', ''))
-        row_cols[5].text(f"S/ {row.get('Stock_Valorizado', 0):,.2f}")
+    for _, row in df_vista.iterrows():
+        # Lógica de Alertas
+        is_low_stock = row['Stock_Actual'] < row['Stock_Minimo']
+        
+        # Formato de Vencimiento
+        venc = row['Prox_Vencimiento']
+        if venc == 999: venc_text = "N/A"
+        elif venc < 0: venc_text = "❌ VENCIDO"
+        elif venc <= 15: venc_text = f"⚠️ {int(venc)} días"
+        else: venc_text = f"{int(venc)} días"
 
-        if row_cols[6].button("✏️", key=f"edit_{row['id']}", use_container_width=True):
-            st.session_state.editing_product_id = row['id']
-            st.rerun()
+        with st.container():
+            r_cols = st.columns([1.5, 3, 1.5, 1.5, 1.5, 1.5, 0.8, 0.8])
+            r_cols[0].text(row['Codigo'])
+            
+            # Nombre con Alerta Visual
+            prod_label = f"⚠️ {row['Producto']}" if is_low_stock else row['Producto']
+            r_cols[1].text(prod_label)
+            
+            # Stock Actual (Rojo si es bajo)
+            if is_low_stock: r_cols[2].markdown(f":red[{row['Stock_Actual']:.2f}]")
+            else: r_cols[2].text(f"{row['Stock_Actual']:.2f}")
+            
+            r_cols[3].text(f"{row['Stock_Minimo']:.2f}")
+            r_cols[4].text(venc_text)
+            r_cols[5].text(f"S/ {row['Stock_Valorizado']:,.2f}")
 
-        if row_cols[7].button("🗑️", key=f"delete_{row['id']}", use_container_width=True):
-            st.session_state.deleting_product_id = row['id']
+            # Botones de Acción
+            if r_cols[6].button("✏️", key=f"ed_{row['id']}"):
+                st.session_state.editing_product_id = row['id']
+                st.rerun()
+            if r_cols[7].button("🗑️", key=f"del_{row['id']}"):
+                st.session_state.deleting_product_id = row['id']
+                st.rerun()
+        st.divider()
+
+# --- DIÁLOGOS DE EDICIÓN Y ELIMINACIÓN ---
+if st.session_state.editing_product_id:
+    producto_a_editar = df_productos[df_productos['id'] == st.session_state.editing_product_id].iloc[0]
+    
+    @st.dialog("✏️ Editar Producto")
+    def edit_dialog():
+        with st.form("edit_form_dialog"):
+            st.write(f"**Editando:** {producto_a_editar['Producto']}")
+            new_nombre = st.text_input("Nombre", value=producto_a_editar['Producto'])
+            new_ing = st.text_input("Ingrediente Activo", value=producto_a_editar.get('Ingrediente_Activo', ''))
+            new_min = st.number_input("Stock Mínimo", value=float(producto_a_editar.get('Stock_Minimo', 0.0)))
+            
+            c1, c2 = st.columns(2)
+            if c1.form_submit_button("💾 Guardar"):
+                upd = {'Producto': new_nombre, 'Ingrediente_Activo': new_ing, 'Stock_Minimo': new_min}
+                supabase.table('Productos').update(upd).eq('id', st.session_state.editing_product_id).execute()
+                st.session_state.editing_product_id = None
+                st.cache_data.clear()
+                st.rerun()
+            if c2.form_submit_button("❌ Cancelar"):
+                st.session_state.editing_product_id = None
+                st.rerun()
+    edit_dialog()
+
+if st.session_state.deleting_product_id:
+    @st.dialog("🗑️ Confirmar Eliminación")
+    def delete_dialog():
+        st.warning("Esta acción es irreversible.")
+        c1, c2 = st.columns(2)
+        if c1.button("Sí, Eliminar"):
+            supabase.table('Productos').delete().eq('id', st.session_state.deleting_product_id).execute()
+            st.session_state.deleting_product_id = None
+            st.cache_data.clear()
             st.rerun()
+        if c2.button("No, Cancelar"):
+            st.session_state.deleting_product_id = None
+            st.rerun()
+    delete_dialog()

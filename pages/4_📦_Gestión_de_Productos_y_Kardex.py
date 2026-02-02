@@ -8,8 +8,8 @@ from supabase import create_client, Client
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión de Productos y Kardex", page_icon="📦", layout="wide")
-st.title("📦 Panel de Control: Kardex e Inventario")
-st.write("Visualización técnica de stock con filtros de ordenamiento dinámico.")
+st.title("📦 Panel de Control: Kardex e Inventario (Build 7.4)")
+st.write("Visualización técnica de stock, alertas de reposición y trazabilidad de vencimientos.")
 
 # --- INICIALIZAR SESSION STATE ---
 if 'editing_product_id' not in st.session_state:
@@ -71,52 +71,59 @@ def procesar_kardex_detallado(df_i, df_s):
 df_productos, df_ingresos, df_salidas = cargar_datos_kardex()
 df_resumen_stock = procesar_kardex_detallado(df_ingresos, df_salidas)
 
-# SECCIÓN DE FILTROS Y ORDENAMIENTO
-st.header("📖 Inventario Maestro")
+# --- SECCIÓN DE FILTROS Y BÚSQUEDA ---
+st.header("📖 Estado de Insumos en Almacén")
+
 if not df_productos.empty:
     df_vista = pd.merge(df_productos, df_resumen_stock, left_on='Codigo', right_on='Codigo_Producto', how='left').fillna(0)
+    
+    # Barra de herramientas (Buscador y Ordenamiento)
+    col_search, col_sort, col_order = st.columns([2, 1, 1])
+    
+    with col_search:
+        query = st.text_input("🔍 Buscar por nombre o código", placeholder="Ej: Urea o F001")
+    
+    with col_sort:
+        sort_by = st.selectbox("Ordenar por", options=["Producto", "Stock_Actual", "Stock_Valorizado", "Prox_Vencimiento"])
+    
+    with col_order:
+        order = st.selectbox("Dirección", options=["Ascendente", "Descendente"])
 
-    # BARRA DE ORDENAMIENTO (NUEVA)
-    with st.container(border=True):
-        st.write("🔍 **Opciones de Ordenamiento**")
-        col_sort1, col_sort2 = st.columns([2, 2])
-        with col_sort1:
-            criterio = st.selectbox("Ordenar por:", ["Producto (A-Z)", "Stock Actual", "Valorizado (S/)", "Próximo Vencimiento", "Código"])
-        with col_sort2:
-            sentido = st.radio("Sentido:", ["De Menor a Mayor", "De Mayor a Menor"], horizontal=True)
-        
-        # Lógica de ordenamiento
-        asc = True if sentido == "De Menor a Mayor" else False
-        map_criterios = {
-            "Producto (A-Z)": "Producto",
-            "Stock Actual": "Stock_Actual",
-            "Valorizado (S/)": "Stock_Valorizado",
-            "Próximo Vencimiento": "Prox_Vencimiento",
-            "Código": "Codigo"
-        }
-        df_vista = df_vista.sort_values(by=map_criterios[criterio], ascending=asc)
+    # Aplicar Filtro de Búsqueda
+    if query:
+        df_vista = df_vista[
+            (df_vista['Producto'].str.contains(query, case=False)) | 
+            (df_vista['Codigo'].str.contains(query, case=False))
+        ]
 
-    # --- TABLA VISUAL ---
+    # Aplicar Ordenamiento
+    is_asc = True if order == "Ascendente" else False
+    df_vista = df_vista.sort_values(by=sort_by, ascending=is_asc)
+
+    # --- RENDERIZADO DE LA TABLA ---
     st.markdown("---")
     h_cols = st.columns([1.5, 3, 1.5, 1.5, 1.5, 1.5, 0.8, 0.8])
-    for col, h in zip(h_cols, ["Código", "Producto", "Stock Actual", "Mínimo", "Vencimiento", "Valorizado", "Edit", "Borrar"]):
-        col.markdown(f"**{h}**")
+    headers = ["Código", "Producto", "Stock Actual", "Mínimo", "Vencimiento", "Valorizado", "Edit", "Borrar"]
+    for col, h in zip(h_cols, headers): col.markdown(f"**{h}**")
     st.markdown("---")
 
     for _, row in df_vista.iterrows():
-        is_low = row['Stock_Actual'] < row['Stock_Minimo']
-        v = row['Prox_Vencimiento']
-        v_txt = "N/A" if v == 999 else ("❌ VENCIDO" if v < 0 else (f"⚠️ {int(v)} d" if v <= 15 else f"{int(v)} d"))
-        
+        is_low_stock = row['Stock_Actual'] < row['Stock_Minimo']
+        venc = row['Prox_Vencimiento']
+        venc_text = "N/A" if venc == 999 else ("❌ VENCIDO" if venc < 0 else (f"⚠️ {int(venc)} d" if venc <= 15 else f"{int(venc)} d"))
+
         with st.container():
             r_cols = st.columns([1.5, 3, 1.5, 1.5, 1.5, 1.5, 0.8, 0.8])
             r_cols[0].text(row['Codigo'])
-            r_cols[1].text(f"⚠️ {row['Producto']}" if is_low else row['Producto'])
-            if is_low: r_cols[2].markdown(f":red[{row['Stock_Actual']:.2f}]")
+            r_cols[1].text(f"⚠️ {row['Producto']}" if is_low_stock else row['Producto'])
+            
+            if is_low_stock: r_cols[2].markdown(f":red[{row['Stock_Actual']:.2f}]")
             else: r_cols[2].text(f"{row['Stock_Actual']:.2f}")
+            
             r_cols[3].text(f"{row['Stock_Minimo']:.2f}")
-            r_cols[4].text(v_txt)
+            r_cols[4].text(venc_text)
             r_cols[5].text(f"S/ {row['Stock_Valorizado']:,.2f}")
+
             if r_cols[6].button("✏️", key=f"ed_{row['id']}"):
                 st.session_state.editing_product_id = row['id']
                 st.rerun()
@@ -124,6 +131,8 @@ if not df_productos.empty:
                 st.session_state.deleting_product_id = row['id']
                 st.rerun()
         st.divider()
+else:
+    st.info("El catálogo está vacío.")
 
 # --- DIÁLOGOS DE EDICIÓN Y ELIMINACIÓN (Se mantienen igual para no romper la lógica) ---
 if st.session_state.editing_product_id:

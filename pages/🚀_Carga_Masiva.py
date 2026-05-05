@@ -1,9 +1,10 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from supabase import create_client
 
 st.set_page_config(page_title="Carga Masiva Pro", page_icon="🚀", layout="wide")
-st.title("🚀 Migración Maestra de Datos (Build 9.4)")
+st.title("🚀 Migración Maestra de Datos (Build 9.5 - Fix JSON)")
 
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
@@ -80,9 +81,6 @@ if uploaded_file:
     df_ready = df_raw.rename(columns=mapping)
     df_ready = df_ready.loc[:, ~df_ready.columns.duplicated()]
     
-    # -------------------------------------------------------------
-    # EL FIX ESTÁ AQUÍ: Evitamos añadir duplicados a las columnas finales
-    # -------------------------------------------------------------
     columnas_finales = []
     for v in mapping.values():
         if v in df_ready.columns and v not in columnas_finales:
@@ -101,15 +99,25 @@ if uploaded_file:
             df_migracion['Fecha_Recepcion'] = pd.to_datetime(df_migracion['Fecha_Recepcion'], errors='coerce').dt.strftime('%Y-%m-%d')
             df_migracion = df_migracion.dropna(subset=['Fecha_Recepcion'])
 
+        # --- FIX: ESCUDO ANTI-NaN PARA JSON ---
+        # Convertimos todo a tipo objeto para que Pandas acepte 'None' en lugar de forzar 'NaN'
+        df_migracion = df_migracion.astype(object)
+        # Reemplazamos los vacíos matemáticos por un nulo que Supabase entienda
+        df_migracion = df_migracion.where(pd.notnull(df_migracion), None)
+
         st.success(f"✅ ¡Todo listo! {len(df_migracion)} registros preparados para la tabla '{target_table}'.")
         st.dataframe(df_migracion.head(10))
 
         if st.button(f"🚀 Iniciar Subida a {target_table}"):
             data_dict = df_migracion.to_dict(orient='records')
             progress = st.progress(0)
-            for i in range(0, len(data_dict), 100):
-                batch = data_dict[i:i+100]
-                supabase.table(target_table).insert(batch).execute()
-                progress.progress(min((i + 100) / len(data_dict), 1.0))
-            st.balloons()
-            st.success(f"¡{target_table} actualizado correctamente!")
+            
+            try:
+                for i in range(0, len(data_dict), 100):
+                    batch = data_dict[i:i+100]
+                    supabase.table(target_table).insert(batch).execute()
+                    progress.progress(min((i + 100) / len(data_dict), 1.0))
+                st.balloons()
+                st.success(f"¡{target_table} actualizado correctamente!")
+            except Exception as e:
+                st.error(f"Error al subir los datos: {e}")

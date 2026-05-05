@@ -1,159 +1,162 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from supabase import create_client
 
-# --- LIBRERÍAS PARA LA CONEXIÓN A SUPABASE ---
-from supabase import create_client, Client
-
-# --- CONFIGURACIÓN DE LA PÁGINA ---
+# --- CONFIGURACIÓN ---
 st.set_page_config(page_title="Gestión de Mezclas", page_icon="⚗️", layout="wide")
-st.title("⚗️ Gestión de Mezclas y Pre-Mezclas (Build 7.1)")
+st.title("⚗️ Gestión de Mezclas y Pre-Mezclas (Build 8.0)")
 
-# --- FUNCIÓN DE CONEXIÓN ---
+# --- CONEXIÓN ---
 @st.cache_resource
-def init_supabase_connection():
-    try:
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
-        return create_client(url, key)
-    except Exception as e:
-        st.error(f"Error al conectar con Supabase: {e}")
-        return None
+def init_supabase():
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
-supabase = init_supabase_connection()
+supabase = init_supabase()
 
-# --- CARGA DE DATOS ---
+# --- CARGA DE DATOS (Optimizada) ---
 @st.cache_data(ttl=60)
 def cargar_datos_mezclas():
-    if supabase:
-        try:
-            res_p = supabase.table('Productos').select("Codigo, Producto").execute()
-            res_i = supabase.table('Ingresos').select("Codigo_Producto, Codigo_Lote, Cantidad, Fecha_Vencimiento").execute()
-            res_s = supabase.table('Salidas').select("Codigo_Producto, Codigo_Lote, Cantidad").execute()
-            res_o = supabase.table('Ordenes_de_Trabajo').select("*").order('created_at', desc=True).execute()
-            res_obj = supabase.table('Maestro_Objetivos').select("*").execute()
-            
-            return (pd.DataFrame(res_p.data), pd.DataFrame(res_i.data), 
-                    pd.DataFrame(res_s.data), pd.DataFrame(res_o.data), 
-                    pd.DataFrame(res_obj.data))
-        except Exception as e:
-            st.error(f"Error al cargar datos: {e}")
-    return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    # Traemos los ingresos con su ID para la trazabilidad real
+    res_i = supabase.table('Ingresos').select("id, Codigo_Producto, Codigo_Lote, Cantidad_Ingresada, Fecha_Vencimiento, Productos(Producto)").execute()
+    # Traemos las salidas para calcular el stock real disponible
+    res_s = supabase.table('Salidas').select("Ingreso_ID, Cantidad_Usada").execute()
+    # Órdenes y Objetivos
+    res_o = supabase.table('Ordenes_de_Trabajo').select("*").order('created_at', desc=True).execute()
+    res_obj = supabase.table('Maestro_Objetivos').select("*").execute()
+    
+    return pd.DataFrame(res_i.data), pd.DataFrame(res_s.data), pd.DataFrame(res_o.data), pd.DataFrame(res_obj.data)
 
-def calcular_stock_lotes(df_i, df_s, df_p):
+def calcular_disponibilidad(df_i, df_s):
     if df_i.empty: return pd.DataFrame()
     
-    df_i['Cantidad'] = pd.to_numeric(df_i['Cantidad'], errors='coerce').fillna(0)
-    df_s['Cantidad'] = pd.to_numeric(df_s['Cantidad'], errors='coerce').fillna(0)
+    # Normalizar datos de la relación con Productos
+    df_i['Producto_Nombre'] = df_i['Productos'].apply(lambda x: x['Producto'] if x else "N/A")
     
-    ing = df_i.groupby(['Codigo_Producto', 'Codigo_Lote']).agg({'Cantidad': 'sum', 'Fecha_Vencimiento': 'first'}).reset_index()
-    sal = df_s.groupby(['Codigo_Producto', 'Codigo_Lote'])['Cantidad'].sum().reset_index().rename(columns={'Cantidad': 'Cant_Sal'})
+    # Calcular saldos por Ingreso_ID
+    if not df_s.empty:
+        usado = df_s.groupby('Ingreso_ID')['Cantidad_Usada'].sum().reset_index()
+        df_final = pd.merge(df_i, usado, left_on='id', right_on='Ingreso_ID', how='left').fillna(0)
+        df_final['Stock_Real'] = df_final['Cantidad_Ingresada'] - df_final['Cantidad_Usada']
+    else:
+        df_final = df_i.copy()
+        df_final['Stock_Real'] = df_final['Cantidad_Ingresada']
     
-    df_stock = pd.merge(ing, sal, on=['Codigo_Producto', 'Codigo_Lote'], how='left').fillna(0)
-    df_stock['Stock_Restante'] = df_stock['Cantidad'] - df_stock['Cant_Sal']
-    
-    return pd.merge(df_stock, df_p, left_on='Codigo_Producto', right_on='Codigo', how='left')
+    return df_final[df_final['Stock_Real'] > 0]
 
 # --- PROCESAMIENTO ---
-df_prod, df_ing, df_sal, df_ord, df_maestro_obj = cargar_datos_mezclas()
-df_disponible = calcular_stock_lotes(df_ing, df_sal, df_prod)
+df_i, df_s, df_ord, df_maestro_obj = cargar_datos_mezclas()
+df_disponible = calcular_disponibilidad(df_i, df_s)
 
-# --- SECCIÓN 1: INGENIERO ---
-with st.expander("👨‍🔬 Programar Nueva Receta", expanded=True):
-    # Diagnóstico de bloqueos
+# --- SECCIÓN 1: INGENIERO (PROGRAMACIÓN) ---
+st.subheader("👨‍🔬 Programación de Receta Técnica")
+with st.expander("Crear nueva Orden de Trabajo", expanded=df_ord.empty):
     if df_maestro_obj.empty:
-        st.error("❌ La tabla 'Maestro_Objetivos' está vacía. Añada objetivos en Supabase.")
-    elif df_disponible.empty or not (df_disponible['Stock_Restante'] > 0).any():
-        st.error("❌ No hay productos con stock disponible en 'Ingresos'.")
+        st.warning("Debe configurar el Maestro de Objetivos en Supabase primero.")
     else:
-        # Lógica de programación (Se mantiene igual, ahora más segura)
-        df_fefo = df_disponible[df_disponible['Stock_Restante'] > 0].sort_values('Fecha_Vencimiento')
-        opciones_lotes = {f"{r['Producto']} ({r['Codigo_Lote']}) | Stock: {r['Stock_Restante']:.2f}": r for _, r in df_fefo.iterrows()}
-        dict_obj = {r['nombre']: r['id'] for _, r in df_maestro_obj.iterrows()}
+        # Preparamos las opciones para el selector
+        opciones_lotes = {
+            f"{r['Producto_Nombre']} (Lote: {r['Codigo_Lote']}) | Saldo: {r['Stock_Real']}": r 
+            for _, r in df_disponible.iterrows()
+        }
 
-        with st.form("form_receta"):
-            c1, c2, c3 = st.columns(3)
-            f_prog = c1.date_input("Fecha Programada")
-            sector = c2.text_input("Sector")
-            turno = c3.selectbox("Turno", ["Día", "Noche"])
-            obj_sel = st.selectbox("Objetivo", options=list(dict_obj.keys()))
+        with st.form("form_ot", clear_on_submit=True):
+            col1, col2, col3 = st.columns(3)
+            f_prog = col1.date_input("Fecha de Aplicación")
+            sector = col2.text_input("Sector / Lote de Campo")
+            turno = col3.selectbox("Turno", ["Mañana", "Tarde", "Noche"])
             
+            obj_nombres = df_maestro_obj['Nombre_Objetivo'].tolist()
+            obj_sel = st.selectbox("Objetivo del Tratamiento", options=obj_nombres)
+            obj_id = int(df_maestro_obj[df_maestro_obj['Nombre_Objetivo'] == obj_sel].iloc[0]['id'])
+
+            # Editor de Receta
+            st.write("**Composición de la Mezcla:**")
             receta_input = st.data_editor(
-                pd.DataFrame([{"Lote": list(opciones_lotes.keys())[0], "Cantidad": 0.0}]),
+                pd.DataFrame([{"Lote": list(opciones_lotes.keys())[0] if opciones_lotes else "", "Cantidad": 0.0}]),
                 num_rows="dynamic",
                 column_config={
-                    "Lote": st.column_config.SelectboxColumn("Lote", options=list(opciones_lotes.keys()), required=True),
-                    "Cantidad": st.column_config.NumberColumn("Kg/L", format="%.4f")
-                }
+                    "Lote": st.column_config.SelectboxColumn("Lote en Almacén", options=list(opciones_lotes.keys()), required=True),
+                    "Cantidad": st.column_config.NumberColumn("Dosis Total (L/Kg)", format="%.3f")
+                },
+                key="editor_mezcla"
             )
 
-            if st.form_submit_button("✅ Guardar Orden"):
+            if st.form_submit_button("🚀 Generar Orden de Trabajo"):
                 receta_final = []
                 for _, row in receta_input.iterrows():
-                    lote_data = opciones_lotes[row['Lote']]
+                    lote_info = opciones_lotes[row['Lote']]
                     receta_final.append({
-                        "Codigo_Lote": lote_data['Codigo_Lote'],
-                        "Codigo_Producto": lote_data['Codigo_Producto'],
-                        "Producto": lote_data['Producto'],
-                        "Cantidad": row['Cantidad']
+                        "ingreso_id": int(lote_info['id']),
+                        "producto": lote_info['Producto_Nombre'],
+                        "lote": lote_info['Codigo_Lote'],
+                        "cantidad": row['Cantidad']
                     })
                 
-                nueva_orden = {
+                nueva_ot = {
                     "ID_Orden_Personalizado": f"OT-{datetime.now().strftime('%y%m%d%H%M')}",
                     "Status": "Pendiente de Mezcla",
-                    "Fecha_Programada": f_prog.strftime('%Y-%m-%d'),
+                    "Fecha_Programada": str(f_prog),
                     "Sector_Aplicacion": sector,
-                    "Objetivo": dict_obj[obj_sel],
+                    "Objetivo": obj_id,
                     "Turno": turno,
                     "Receta_Mezcla_Lotes": receta_final
                 }
-                supabase.table('Ordenes_de_Trabajo').insert(nueva_orden).execute()
+                supabase.table('Ordenes_de_Trabajo').insert(nueva_ot).execute()
+                st.success("Orden enviada a Almacén/Mezcla.")
                 st.cache_data.clear()
                 st.rerun()
 
-# --- SECCIÓN 2: ENCARGADO (CONFIRMACIÓN) ---
+# --- SECCIÓN 2: MEZCLA Y SALIDA AUTOMÁTICA ---
 st.divider()
-st.subheader("📋 Recetas por Preparar")
+st.subheader("🧪 Preparación y Despacho de Mezclas")
 
-ordenes_pendientes = df_ord[df_ord['Status'] == 'Pendiente de Mezcla'] if not df_ord.empty else pd.DataFrame()
+pendientes = df_ord[df_ord['Status'] == 'Pendiente de Mezcla'] if not df_ord.empty else pd.DataFrame()
 
-if ordenes_pendientes.empty:
-    st.info("No hay órdenes pendientes de preparación.")
+if pendientes.empty:
+    st.info("No hay mezclas pendientes de preparación.")
 else:
-    # Unir con maestro objetivos para mostrar el nombre en lugar del ID
-    df_pendientes_view = pd.merge(ordenes_pendientes, df_maestro_obj, left_on='Objetivo', right_on='id', how='left')
-    
-    for _, tarea in df_pendientes_view.iterrows():
+    for _, ot in pendientes.iterrows():
         with st.container(border=True):
-            col_info, col_btn = st.columns([8, 2])
-            with col_info:
-                st.markdown(f"**Orden:** `{tarea['ID_Orden_Personalizado']}` | **Sector:** {tarea['Sector_Aplicacion']} | **Objetivo:** {tarea['nombre']}")
-                df_det = pd.DataFrame(tarea['Receta_Mezcla_Lotes'])
-                st.table(df_det[['Producto', 'Codigo_Lote', 'Cantidad']])
+            c1, c2 = st.columns([7, 3])
+            with c1:
+                st.write(f"### 📄 {ot['ID_Orden_Personalizado']}")
+                st.caption(f"Sector: {ot['Sector_Aplicacion']} | Turno: {ot['Turno']}")
+                # Mostrar tabla detallada de la receta
+                df_det = pd.DataFrame(ot['Receta_Mezcla_Lotes'])
+                st.dataframe(df_det[['producto', 'lote', 'cantidad']], use_container_width=True)
             
-            with col_btn:
-                st.write("")
-                if st.button("✅ Confirmar Mezcla", key=f"conf_{tarea['id_x']}"):
-                    try:
-                        # 1. Registrar Salidas de Almacén
-                        salidas_data = []
-                        for item in tarea['Receta_Mezcla_Lotes']:
-                            salidas_data.append({
-                                "Fecha": datetime.now().strftime('%Y-%m-%d'),
-                                "Lote_Sector": tarea['Sector_Aplicacion'],
-                                "Turno": tarea['Turno'],
-                                "Codigo_Producto": item['Codigo_Producto'],
-                                "Codigo_Lote": item['Codigo_Lote'],
-                                "Cantidad": item['Cantidad'],
-                                "Objetivo_Tratamiento": tarea['Objetivo'] # ID del maestro
-                            })
-                        
-                        supabase.table('Salidas').insert(salidas_data).execute()
-                        
-                        # 2. Actualizar estado de la Orden
-                        supabase.table('Ordenes_de_Trabajo').update({"Status": "Lista para Aplicar"}).eq('id', tarea['id_x']).execute()
-                        
-                        st.toast("Mezcla confirmada e inventario actualizado.")
-                        st.cache_data.clear()
-                        st.rerun()
-                    except Exception as e: st.error(f"Error en confirmación: {e}")
+            with c2:
+                st.write("###")
+                responsable = st.text_input("Quién prepara?", key=f"resp_{ot['id']}")
+                
+                if st.button("✅ Confirmar Mezcla y Salida", key=f"btn_{ot['id']}", type="primary"):
+                    if not responsable:
+                        st.warning("Debe asignar un responsable.")
+                    else:
+                        try:
+                            # 1. GENERAR SALIDAS AUTOMÁTICAS (HISTORIAL)
+                            batch_salidas = []
+                            for item in ot['Receta_Mezcla_Lotes']:
+                                batch_salidas.append({
+                                    "Fecha_Aplicacion": ot['Fecha_Programada'],
+                                    "Ingreso_ID": item['ingreso_id'],
+                                    "Cantidad_Usada": item['cantidad'],
+                                    "Sector_Destino": ot['Sector_Aplicacion'],
+                                    "Objetivo_Tratamiento": ot['Objetivo'],
+                                    "Turno": ot['Turno'],
+                                    "Responsable": responsable
+                                })
+                            
+                            # Insertar todas las salidas de un solo golpe
+                            supabase.table('Salidas').insert(batch_salidas).execute()
+                            
+                            # 2. ACTUALIZAR ESTADO DE LA OT
+                            supabase.table('Ordenes_de_Trabajo').update({"Status": "Lista para Aplicar"}).eq('id', ot['id']).execute()
+                            
+                            st.toast(f"Inventario actualizado para la {ot['ID_Orden_Personalizado']}")
+                            st.cache_data.clear()
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"Error al procesar: {e}")

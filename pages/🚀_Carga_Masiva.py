@@ -4,59 +4,63 @@ from supabase import create_client
 import re
 
 st.set_page_config(page_title="Carga Masiva Pro", page_icon="🚀", layout="wide")
-st.title("🚀 Migración Maestra de Datos")
+st.title("🚀 Migración Maestra de Datos (Build 9.1)")
 
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
-def desduplicar_columnas(columnas):
+def limpiar_nombres_columnas(columnas):
+    """Limpia espacios, saltos de línea y añade sufijos a duplicados."""
     nueva_lista = []
     conteos = {}
     for col in columnas:
-        col_str = str(col).strip().upper()
-        if col_str in conteos:
-            conteos[col_str] += 1
-            nueva_lista.append(f"{col_str}_{conteos[col_str]}")
+        c = str(col).strip().upper().replace('\n', ' ')
+        if c in conteos:
+            conteos[c] += 1
+            nueva_lista.append(f"{c}_{conteos[c]}")
         else:
-            conteos[col_str] = 0
-            nueva_lista.append(col_str)
+            conteos[c] = 0
+            nueva_lista.append(c)
     return nueva_lista
 
-def detectar_y_limpiar(file):
-    # Intentamos leer el Excel
+def detectar_cabecera_real(file):
+    """Escanea el Excel buscando la fila donde empiezan los datos."""
     df = pd.read_excel(file, header=None)
     for i in range(len(df)):
         fila = df.iloc[i].astype(str).str.upper().tolist()
-        # Buscamos indicios de cabecera (Palabras que aparecen en tus hojas)
-        if any(k in str(s) for k in ["CODIGO", "PRODUCTO", "COD. PROD"] for s in fila):
+        # Buscamos palabras que SÍ están en tus archivos (CODIGO, PRODUCTOS, COD ING)
+        if any(k in s for k in ["CODIGO", "PRODUCTOS", "COD. PROD", "COD ING"] for s in fila):
             new_df = df.iloc[i+1:].copy()
-            titulos = [str(c).strip().replace('\n', ' ') for c in df.iloc[i].values]
-            new_df.columns = desduplicar_columnas(titulos)
+            new_df.columns = limpiar_nombres_columnas(df.iloc[i].values)
             return new_df.reset_index(drop=True)
     return df
 
-# --- INTERFAZ DE SELECCIÓN ---
-tipo_carga = st.radio("¿Qué datos vas a subir hoy?", 
+# --- INTERFAZ ---
+st.info("💡 **Orden de carga:** 1° Catálogo de Productos ➔ 2° Historial de Ingresos.")
+tipo_carga = st.radio("Selecciona qué vas a subir:", 
                       ["Catálogo de Productos (Maestro)", "Historial de Ingresos (Compras)"])
 
 uploaded_file = st.file_uploader(f"Sube el Excel de {tipo_carga}", type=['xlsx'])
 
 if uploaded_file:
-    df_raw = detectar_y_limpiar(uploaded_file)
-    st.write("📋 Columnas detectadas:", list(df_raw.columns))
+    with st.spinner("Leyendo archivo..."):
+        df_raw = detectar_cabecera_real(uploaded_file)
+    
+    st.write("📋 Columnas encontradas en tu Excel:", [c for c in df_raw.columns if "UNNAMED" not in c and "NAN" not in c])
 
     if tipo_carga == "Catálogo de Productos (Maestro)":
-        # Mapeo para la tabla 'Productos' (Basado en tu hoja Cod_Producto)
+        # Mapeo exacto para tu hoja 'Cod_Producto'
         mapping = {
             'CODIGO': 'Codigo',
-            'PRODUCTOS': 'Producto',
+            'PRODUCTOS': 'Producto', # Tu Excel usa plural
+            'PRODUCTO': 'Producto',
             'UM': 'Unidad',
             'SUBGRUPO': 'Tipo_Accion',
             'ING. ACTIVO': 'Ingrediente_Activo'
         }
         target_table = "Productos"
-        subset_keys = ['Codigo', 'Producto']
+        keys_obligatorias = ['Codigo', 'Producto']
     else:
-        # Mapeo para la tabla 'Ingresos' (Basado en tu hoja Ingreso)
+        # Mapeo exacto para tu hoja 'Ingreso'
         mapping = {
             'COD. PROD.': 'Codigo_Producto',
             'COD. PROD': 'Codigo_Producto',
@@ -64,31 +68,39 @@ if uploaded_file:
             'LOTE': 'Codigo_Lote',
             'CANT.ING.': 'Cantidad_Ingresada',
             'PREC. UNI S/.': 'Precio_Unitario_PEN',
-            'F.DE ING.': 'Fecha_Recepcion'
+            'F.DE ING.': 'Fecha_Recepcion',
+            'PROVEEDOR': 'Proveedor',
+            'FACTURA': 'Factura'
         }
         target_table = "Ingresos"
-        subset_keys = ['Codigo_Producto', 'Codigo_Lote']
+        keys_obligatorias = ['Codigo_Producto', 'Codigo_Lote']
 
+    # Aplicar Mapeo
     df_ready = df_raw.rename(columns=mapping)
     df_ready = df_ready.loc[:, ~df_ready.columns.duplicated()]
     
-    # Filtrar solo columnas que existen en el mapping y en el DF
-    cols_finales = [v for v in mapping.values() if v in df_ready.columns]
+    # Filtrar solo columnas válidas para Supabase
+    columnas_finales = [v for v in mapping.values() if v in df_ready.columns]
     
-    if not all(k in df_ready.columns for k in subset_keys):
-        st.error(f"Faltan columnas críticas para {tipo_carga}. Revisa los nombres en el Excel.")
+    # VALIDACIÓN FINAL
+    columnas_presentes = df_ready.columns.tolist()
+    faltantes = [k for k in keys_obligatorias if k not in columnas_presentes]
+
+    if faltantes:
+        st.error(f"❌ Error: No encontré las columnas necesarias: {faltantes}")
+        st.write("Asegúrate de que en tu Excel los títulos estén escritos exactamente como: CODIGO, PRODUCTOS, etc.")
     else:
-        df_migracion = df_ready[cols_finales].dropna(subset=subset_keys).copy()
+        df_migracion = df_ready[columnas_finales].dropna(subset=keys_obligatorias).copy()
         
-        # Limpieza de fechas si es Ingresos
+        # Limpieza de fechas para Ingresos
         if 'Fecha_Recepcion' in df_migracion.columns:
             df_migracion['Fecha_Recepcion'] = pd.to_datetime(df_migracion['Fecha_Recepcion'], errors='coerce').dt.strftime('%Y-%m-%d')
             df_migracion = df_migracion.dropna(subset=['Fecha_Recepcion'])
 
-        st.success(f"✅ {len(df_migracion)} registros listos para la tabla '{target_table}'.")
+        st.success(f"✅ ¡Todo listo! {len(df_migracion)} registros preparados para la tabla '{target_table}'.")
         st.dataframe(df_migracion.head(10))
 
-        if st.button(f"🚀 Subir a {target_table}"):
+        if st.button(f"🚀 Iniciar Subida a {target_table}"):
             data_dict = df_migracion.to_dict(orient='records')
             progress = st.progress(0)
             for i in range(0, len(data_dict), 100):
@@ -96,4 +108,4 @@ if uploaded_file:
                 supabase.table(target_table).insert(batch).execute()
                 progress.progress(min((i + 100) / len(data_dict), 1.0))
             st.balloons()
-            st.success(f"¡{tipo_carga} cargado con éxito!")
+            st.success(f"¡{target_table} actualizado! Ya puedes ir al Inventario.")

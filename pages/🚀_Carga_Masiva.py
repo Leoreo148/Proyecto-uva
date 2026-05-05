@@ -4,7 +4,7 @@ import numpy as np
 from supabase import create_client
 
 st.set_page_config(page_title="Carga Masiva Pro", page_icon="🚀", layout="wide")
-st.title("🚀 Migración Maestra de Datos (Build 9.5 - Fix JSON)")
+st.title("🚀 Migración Maestra de Datos (Build 9.6 - Fix Duplicados)")
 
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
@@ -95,17 +95,20 @@ if uploaded_file:
     else:
         df_migracion = df_ready[columnas_finales].dropna(subset=keys_obligatorias).copy()
         
+        # --- FIX 1: ELIMINAR DUPLICADOS EN EL EXCEL ---
+        if target_table == "Productos":
+            # Si hay dos filas con el código 'A1', nos quedamos con la primera y borramos el resto
+            df_migracion = df_migracion.drop_duplicates(subset=['Codigo'], keep='first')
+        
         if 'Fecha_Recepcion' in df_migracion.columns:
             df_migracion['Fecha_Recepcion'] = pd.to_datetime(df_migracion['Fecha_Recepcion'], errors='coerce').dt.strftime('%Y-%m-%d')
             df_migracion = df_migracion.dropna(subset=['Fecha_Recepcion'])
 
-        # --- FIX: ESCUDO ANTI-NaN PARA JSON ---
-        # Convertimos todo a tipo objeto para que Pandas acepte 'None' en lugar de forzar 'NaN'
+        # Escudo Anti-NaN
         df_migracion = df_migracion.astype(object)
-        # Reemplazamos los vacíos matemáticos por un nulo que Supabase entienda
         df_migracion = df_migracion.where(pd.notnull(df_migracion), None)
 
-        st.success(f"✅ ¡Todo listo! {len(df_migracion)} registros preparados para la tabla '{target_table}'.")
+        st.success(f"✅ ¡Todo listo! {len(df_migracion)} registros únicos preparados para la tabla '{target_table}'.")
         st.dataframe(df_migracion.head(10))
 
         if st.button(f"🚀 Iniciar Subida a {target_table}"):
@@ -115,9 +118,10 @@ if uploaded_file:
             try:
                 for i in range(0, len(data_dict), 100):
                     batch = data_dict[i:i+100]
-                    supabase.table(target_table).insert(batch).execute()
+                    # --- FIX 2: UPSERT EN LUGAR DE INSERT ---
+                    supabase.table(target_table).upsert(batch).execute()
                     progress.progress(min((i + 100) / len(data_dict), 1.0))
                 st.balloons()
-                st.success(f"¡{target_table} actualizado correctamente!")
+                st.success(f"¡{target_table} actualizado correctamente y sin duplicados!")
             except Exception as e:
                 st.error(f"Error al subir los datos: {e}")

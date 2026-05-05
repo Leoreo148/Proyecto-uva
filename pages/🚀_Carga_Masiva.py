@@ -3,7 +3,7 @@ import pandas as pd
 from supabase import create_client
 
 st.set_page_config(page_title="Carga Masiva Pro", page_icon="🚀", layout="wide")
-st.title("🚀 Migración Maestra de Datos (Build 9.3)")
+st.title("🚀 Migración Maestra de Datos (Build 9.4)")
 
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
@@ -21,12 +21,8 @@ def limpiar_nombres_columnas(columnas):
     return nueva_lista
 
 def detectar_cabecera_real(df):
-    """Escanea el Excel limpiando los Nulos (NaN) para evitar el TypeError."""
     for i in range(len(df)):
-        # FORZAMOS a que cada celda sea texto. Si está vacía (NaN), se vuelve "NAN" en texto.
         fila_segura = [str(x).upper() for x in df.iloc[i].values]
-        
-        # Buscamos de forma segura en las celdas de texto
         if any(palabra in celda for celda in fila_segura for palabra in ["CODIGO", "PRODUCTOS", "COD. PROD", "COD ING"]):
             new_df = df.iloc[i+1:].copy()
             new_df.columns = limpiar_nombres_columnas(df.iloc[i].values)
@@ -41,11 +37,9 @@ tipo_carga = st.radio("Selecciona qué vas a subir a la base de datos:",
 uploaded_file = st.file_uploader("Sube tu archivo Excel COMPLETO", type=['xlsx'])
 
 if uploaded_file:
-    # 1. LEER LAS HOJAS DEL EXCEL
     xls = pd.ExcelFile(uploaded_file)
     nombres_hojas = xls.sheet_names
     
-    # 2. SELECTOR DE HOJA
     st.markdown("### 📂 Selecciona la pestaña correcta del Excel:")
     hoja_seleccionada = st.selectbox("Elige la hoja que contiene los datos que indicaste arriba:", nombres_hojas)
     
@@ -57,7 +51,6 @@ if uploaded_file:
     
     st.write("📋 Columnas encontradas en esta pestaña:", [c for c in df_raw.columns if "UNNAMED" not in c and "NAN" not in c])
 
-    # --- LÓGICA DE MAPEO ---
     if tipo_carga == "Catálogo de Productos (Maestro)":
         mapping = {
             'CODIGO': 'Codigo',
@@ -84,18 +77,23 @@ if uploaded_file:
         target_table = "Ingresos"
         keys_obligatorias = ['Codigo_Producto', 'Codigo_Lote']
 
-    # Aplicar Mapeo
     df_ready = df_raw.rename(columns=mapping)
     df_ready = df_ready.loc[:, ~df_ready.columns.duplicated()]
-    columnas_finales = [v for v in mapping.values() if v in df_ready.columns]
     
-    # VALIDACIÓN FINAL
+    # -------------------------------------------------------------
+    # EL FIX ESTÁ AQUÍ: Evitamos añadir duplicados a las columnas finales
+    # -------------------------------------------------------------
+    columnas_finales = []
+    for v in mapping.values():
+        if v in df_ready.columns and v not in columnas_finales:
+            columnas_finales.append(v)
+    
     columnas_presentes = df_ready.columns.tolist()
     faltantes = [k for k in keys_obligatorias if k not in columnas_presentes]
 
     if faltantes:
         st.error(f"❌ Error: No encontré las columnas necesarias: {faltantes}")
-        st.write(f"Asegúrate de haber seleccionado la hoja correcta (Ej: 'Cod_Producto' para el catálogo o 'Ingreso' para las compras).")
+        st.write(f"Asegúrate de haber seleccionado la hoja correcta.")
     else:
         df_migracion = df_ready[columnas_finales].dropna(subset=keys_obligatorias).copy()
         

@@ -1,4 +1,4 @@
-streamlit
+streamlit>=1.30.0
 pandas
 scikit-learn
 joblib
@@ -7,4 +7,7 @@ streamlit-local-storage
 openpyxl
 XlsxWriter
 supabase
-streamlit>=1.30.0
+pydantic
+streamlit-searchbox
+st-aggrid
+streamlit-extras

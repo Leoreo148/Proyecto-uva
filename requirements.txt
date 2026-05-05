@@ -1,3 +1,4 @@
+rich==14.10.1
 streamlit>=1.30.0
 pandas
 scikit-learn
@@ -9,6 +10,5 @@ XlsxWriter
 supabase
 pydantic
 streamlit-searchbox
-st-aggrid
+streamlit-aggrid
 streamlit-extras
-rich>=10.11.0,<15.0.0

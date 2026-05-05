@@ -9,5 +9,5 @@ XlsxWriter
 supabase
 pydantic
 streamlit-searchbox
-streamlit-aggrid
+st-aggrid
 streamlit-extras

@@ -1,4 +1,4 @@
-rich==14.10.1
+rich==14.3.4
 streamlit>=1.30.0
 pandas
 scikit-learn

@@ -1,163 +1,218 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
+from typing import Optional, List
+from pydantic import BaseModel, ValidationError, field_validator
 
-# --- LIBRERÍAS PARA LA CONEXIÓN A SUPABASE ---
+# --- LIBRERÍAS PRO ---
 from supabase import create_client, Client
+from streamlit_searchbox import st_searchbox
+from st_aggrid import AgGrid, GridOptionsBuilder, ColumnsAutoSizeMode
+from streamlit_extras.stylable_container import stylable_container
+from streamlit_extras.mandatory_fill import mandatory_fill
 
-# --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Registrar Ingreso por Lote", page_icon="📥", layout="wide")
-st.title("📥 Registro de Ingresos (Mercadería)")
-st.write("Gestione la entrada de lotes específicos vinculados a su catálogo maestro.")
+# --- CONFIGURACIÓN ---
+st.set_page_config(page_title="Agroq - Gestión de Ingresos", page_icon="🚜", layout="wide")
 
-# --- INICIALIZAR SESSION STATE ---
-if 'editing_ingreso_id' not in st.session_state:
-    st.session_state.editing_ingreso_id = None
-if 'deleting_ingreso_id' not in st.session_state:
-    st.session_state.deleting_ingreso_id = None
+# --- MODELO DE VALIDACIÓN (PYDANTIC) ---
+class IngresoSchema(BaseModel):
+    """Validador estricto para evitar basura en la base de datos."""
+    Codigo_Producto: str
+    Codigo_Lote: str
+    Fecha_Recepcion: date
+    Cantidad_Ingresada: float
+    Precio_Unitario_PEN: float = 0.0
+    Precio_Unitario_USD: float = 0.0
+    Proveedor: Optional[str] = None
+    Factura: Optional[str] = None
+    Guia_Remision: Optional[str] = None
+    Cod_Operacion_Pago: Optional[str] = None
 
-# --- FUNCIÓN DE CONEXIÓN SEGURA ---
+    @field_validator('Cantidad_Ingresada', 'Precio_Unitario_PEN')
+    def must_be_positive(cls, v):
+        if v < 0: raise ValueError('Debe ser un valor positivo')
+        return v
+
+# --- CONEXIÓN SUPABASE ---
 @st.cache_resource
-def init_supabase_connection():
-    try:
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
-        return create_client(url, key)
-    except Exception as e:
-        st.error(f"Error al conectar con Supabase: {e}")
-        return None
+def init_supabase():
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
-supabase = init_supabase_connection()
+supabase = init_supabase()
 
-# --- CARGA DE DATOS OPTIMIZADA ---
+# --- FUNCIONES DE DATOS ---
 @st.cache_data(ttl=60)
-def cargar_datos_para_ingreso():
-    """Carga productos y el historial de ingresos, vinculando nombres por código."""
-    if supabase:
-        try:
-            # Traer catálogo maestro
-            res_p = supabase.table('Productos').select("Codigo, Producto").order('Producto').execute()
-            df_p = pd.DataFrame(res_p.data)
-            
-            # Traer ingresos
-            res_i = supabase.table('Ingresos').select("*").order('created_at', desc=True).execute()
-            df_i = pd.DataFrame(res_i.data)
-            
-            # Unir tablas para mostrar el nombre del producto
-            if not df_i.empty and not df_p.empty:
-                df_final = pd.merge(df_i, df_p, left_on='Codigo_Producto', right_on='Codigo', how='left')
-                return df_p, df_final
-            return df_p, df_i
-        except Exception as e:
-            st.error(f"Error al cargar datos: {e}")
-    return pd.DataFrame(), pd.DataFrame()
+def get_products():
+    res = supabase.table('Productos').select("Codigo, Producto").execute()
+    return pd.DataFrame(res.data)
 
-df_productos, df_historial_ingresos = cargar_datos_para_ingreso()
+def get_history():
+    # Traemos ingresos y cruzamos con productos para ver el nombre
+    res = supabase.table('Ingresos').select("*, Productos(Producto)").order('created_at', desc=True).execute()
+    if not res.data: return pd.DataFrame()
+    df = pd.json_normalize(res.data)
+    # Limpiamos nombres de columnas del join
+    df.columns = [c.replace('Productos.', '') for c in df.columns]
+    return df
 
-# --- SECCIÓN 1: REGISTRO DE NUEVO LOTE ---
-with st.expander("📝 Registrar Nuevo Lote de Ingreso", expanded=True):
-    if df_productos.empty:
-        st.warning("⚠️ El catálogo está vacío. Por favor, registre productos en el módulo de gestión.")
-    else:
-        with st.form("nuevo_ingreso_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            
-            # Mapeo: "Producto (Código)" -> Código
-            dict_productos = {f"{row['Producto']} ({row['Codigo']})": row['Codigo'] for _, row in df_productos.iterrows()}
-            
-            with col1:
-                prod_sel = st.selectbox("Seleccione Producto", options=list(dict_productos.keys()))
-                codigo_lote = st.text_input("Código de Lote (Ej: L-001/2026)")
-                cantidad = st.number_input("Cantidad Recibida", min_value=0.0, step=0.1)
-                proveedor = st.text_input("Nombre del Proveedor")
-            
-            with col2:
-                precio_uni = st.number_input("Precio Unitario (S/)", min_value=0.0, step=0.01)
-                factura = st.text_input("N° de Factura / Guía")
-                f_ingreso = st.date_input("Fecha de Recepción", value=datetime.now())
-                f_vencimiento = st.date_input("Fecha de Vencimiento", value=None)
+# --- LÓGICA DE CARGA MASIVA (EXCEL/CSV) ---
+def process_bulk_upload(file):
+    try:
+        # Detectar si es CSV o Excel
+        if file.name.endswith('.csv'):
+            df_raw = pd.read_csv(file)
+        else:
+            df_raw = pd.read_excel(file)
+        
+        # Limpieza básica de columnas "Unnamed" y espacios
+        df_raw = df_raw.loc[:, ~df_raw.columns.str.contains('^Unnamed')]
+        df_raw.columns = df_raw.columns.str.strip()
 
-            if st.form_submit_button("📥 Confirmar Ingreso"):
-                if not codigo_lote:
-                    st.error("Debe asignar un código de lote.")
+        # Mapeo inteligente (ajusta según los nombres de tus columnas de Excel)
+        # Aquí buscamos coincidencias con lo que vimos en tus archivos
+        mapping = {
+            'COD. PROD': 'Codigo_Producto',
+            'LOTE': 'Codigo_Lote',
+            'CANT.ING.': 'Cantidad_Ingresada',
+            'PREC. UNI S/.': 'Precio_Unitario_PEN',
+            'PREC. UNI $.': 'Precio_Unitario_USD',
+            'F.DE ING.': 'Fecha_Recepcion',
+            'PROVEEDOR': 'Proveedor',
+            'FACTURA': 'Factura',
+            'GUIA REMISIÓN': 'Guia_Remision',
+            'DEPOSITO (BCP_COD)': 'Cod_Operacion_Pago'
+        }
+        
+        df_mapped = df_raw.rename(columns=mapping)
+        
+        registros_validados = []
+        errores = []
+
+        for i, row in df_mapped.iterrows():
+            try:
+                # Convertir fechas de Excel a objeto date
+                if isinstance(row.get('Fecha_Recepcion'), str):
+                    f_rec = datetime.strptime(row['Fecha_Recepcion'], '%Y-%m-%d').date()
                 else:
-                    nuevo_registro = {
-                        "Codigo_Producto": dict_productos[prod_sel],
-                        "Codigo_Lote": codigo_lote,
-                        "Cantidad": cantidad,
-                        "Precio_Unitario": precio_uni,
-                        "Proveedor": proveedor,
-                        "Factura": factura,
-                        "Fecha": f_ingreso.strftime('%Y-%m-%d'),
-                        "Fecha_Vencimiento": f_vencimiento.strftime('%Y-%m-%d') if f_vencimiento else None
-                    }
-                    try:
-                        supabase.table('Ingresos').insert(nuevo_registro).execute()
-                        st.toast(f"✅ Lote {codigo_lote} registrado.")
-                        st.cache_data.clear()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error en la base de datos: {e}")
+                    f_rec = row.get('Fecha_Recepcion')
 
-# --- SECCIÓN 2: DIÁLOGOS DE EDICIÓN Y ELIMINACIÓN ---
+                obj = IngresoSchema(
+                    Codigo_Producto=str(row.get('Codigo_Producto')),
+                    Codigo_Lote=str(row.get('Codigo_Lote')),
+                    Fecha_Recepcion=f_rec,
+                    Cantidad_Ingresada=float(row.get('Cantidad_Ingresada', 0)),
+                    Precio_Unitario_PEN=float(row.get('Precio_Unitario_PEN', 0)),
+                    Precio_Unitario_USD=float(row.get('Precio_Unitario_USD', 0)),
+                    Proveedor=str(row.get('Proveedor', '')),
+                    Factura=str(row.get('Factura', '')),
+                    Guia_Remision=str(row.get('Guia_Remision', '')),
+                    Cod_Operacion_Pago=str(row.get('Cod_Operacion_Pago', ''))
+                )
+                registros_validados.append(obj.model_dump(mode='json'))
+            except Exception as e:
+                errores.append(f"Fila {i+2}: {e}")
 
-if st.session_state.editing_ingreso_id:
-    datos_fila = df_historial_ingresos[df_historial_ingresos['id'] == st.session_state.editing_ingreso_id].iloc[0]
+        return registros_validados, errores
+    except Exception as e:
+        st.error(f"Error procesando archivo: {e}")
+        return [], [str(e)]
+
+# --- INTERFAZ ---
+st.title("📥 Gestión de Ingresos y Lotes")
+
+tabs = st.tabs(["Individual", "Carga Masiva (Excel)", "Historial y Kardex"])
+
+# --- TAB 1: REGISTRO INDIVIDUAL ---
+with tabs[0]:
+    df_p = get_products()
     
-    @st.dialog("✏️ Editar Registro")
-    def edit_dialog():
-        with st.form("edit_form"):
-            st.write(f"Editando: **{datos_fila['Codigo_Lote']}**")
-            c1, c2 = st.columns(2)
-            new_cant = c1.number_input("Cantidad", value=float(datos_fila['Cantidad']))
-            new_pre = c2.number_input("Precio", value=float(datos_fila['Precio_Unitario']))
-            new_prov = c1.text_input("Proveedor", value=str(datos_fila['Proveedor']))
-            new_fact = c2.text_input("Factura", value=str(datos_fila['Factura']))
+    with st.form("form_registro"):
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # SEARCHBOX: Buscador inteligente de productos
+            def search_products(searchterm: str):
+                if not searchterm: return []
+                filtered = df_p[df_p['Producto'].str.contains(searchterm, case=False) | 
+                                df_p['Codigo'].str.contains(searchterm, case=False)]
+                return [(f"{row['Producto']} ({row['Codigo']})", row['Codigo']) for _, row in filtered.iterrows()]
+
+            cod_prod = st_searchbox(search_products, key="prod_search", label="Buscar Producto")
+            lote = st.text_input("Código de Lote", placeholder="Ej: L2026-001")
+            fecha = st.date_input("Fecha Recepción", value=datetime.now().date())
             
-            if st.form_submit_button("💾 Actualizar"):
-                upd = {"Cantidad": new_cant, "Precio_Unitario": new_pre, "Proveedor": new_prov, "Factura": new_fact}
-                supabase.table('Ingresos').update(upd).eq('id', datos_fila['id']).execute()
-                st.session_state.editing_ingreso_id = None
+        with col2:
+            cant = st.number_input("Cantidad", min_value=0.0, step=0.1)
+            p_pen = st.number_input("Precio Unitario (S/)", min_value=0.0)
+            p_usd = st.number_input("Precio Unitario ($)", min_value=0.0)
+            
+        with col3:
+            prov = st.text_input("Proveedor")
+            fact = st.text_input("N° Factura")
+            guia = st.text_input("Guía de Remisión")
+
+        with stylable_container("green_button", css_styles="button {background-color: #28a745; color: white;}"):
+            submit = st.form_submit_button("Guardar Registro")
+
+        if submit:
+            if not cod_prod or not lote:
+                st.error("Producto y Lote son obligatorios.")
+            else:
+                try:
+                    nuevo = IngresoSchema(
+                        Codigo_Producto=cod_prod, Codigo_Lote=lote, Fecha_Recepcion=fecha,
+                        Cantidad_Ingresada=cant, Precio_Unitario_PEN=p_pen, Precio_Unitario_USD=p_usd,
+                        Proveedor=prov, Factura=fact, Guia_Remision=guia
+                    )
+                    supabase.table('Ingresos').insert(nuevo.model_dump(mode='json')).execute()
+                    st.success("¡Lote registrado exitosamente!")
+                    st.cache_data.clear()
+                except ValidationError as e:
+                    st.error(f"Error de validación: {e}")
+
+# --- TAB 2: CARGA MASIVA ---
+with tabs[1]:
+    st.subheader("Subida masiva desde Excel/CSV")
+    uploaded_file = st.file_uploader("Arrastra tu archivo aquí", type=['xlsx', 'csv'])
+    
+    if uploaded_file:
+        data, errs = process_bulk_upload(uploaded_file)
+        if errs:
+            with st.expander("⚠️ Errores encontrados"):
+                for e in errs: st.write(e)
+        
+        st.write(f"Registros listos para subir: {len(data)}")
+        if st.button("🚀 Confirmar Subida a Supabase"):
+            with st.status("Subiendo datos...", expanded=True) as status:
+                # Subir en bloques de 100 para no saturar
+                for i in range(0, len(data), 100):
+                    batch = data[i:i+100]
+                    supabase.table('Ingresos').insert(batch).execute()
+                status.update(label="¡Carga masiva completada!", state="complete")
                 st.cache_data.clear()
-                st.rerun()
-    edit_dialog()
 
-if st.session_state.deleting_ingreso_id:
-    @st.dialog("🗑️ Confirmar Eliminación")
-    def delete_dialog():
-        st.warning("¿Está seguro? Esta acción afectará el stock actual en el Kardex.")
-        if st.button("Sí, Eliminar"):
-            supabase.table('Ingresos').delete().eq('id', st.session_state.deleting_ingreso_id).execute()
-            st.session_state.deleting_ingreso_id = None
-            st.cache_data.clear()
-            st.rerun()
-        if st.button("Cancelar"):
-            st.session_state.deleting_ingreso_id = None
-            st.rerun()
-    delete_dialog()
-
-# --- SECCIÓN 3: HISTORIAL ---
-st.divider()
-st.header("📚 Historial de Movimientos")
-
-if not df_historial_ingresos.empty:
-    for _, row in df_historial_ingresos.head(15).iterrows():
-        with st.container(border=True):
-            col_d, col_m, col_a = st.columns([6, 3, 2])
-            with col_d:
-                st.subheader(row.get('Producto', 'Producto no identificado'))
-                st.caption(f"Lote: {row['Codigo_Lote']} | Código: {row['Codigo_Producto']}")
-            with col_m:
-                st.metric("Ingreso", f"{row['Cantidad']:.2f}")
-                st.write(f"Precio: S/ {row['Precio_Unitario']:.2f}")
-            with col_a:
-                st.write(f"📅 {pd.to_datetime(row['Fecha']).strftime('%d/%m/%Y')}")
-                b1, b2 = st.columns(2)
-                if b1.button("✏️", key=f"edit_{row['id']}"):
-                    st.session_state.editing_ingreso_id = row['id']
-                    st.rerun()
-                if b2.button("🗑️", key=f"del_{row['id']}"):
-                    st.session_state.deleting_ingreso_id = row['id']
-                    st.rerun()
-else:
-    st.info("No se han registrado ingresos de mercadería.")
+# --- TAB 3: HISTORIAL (AG-GRID) ---
+with tabs[2]:
+    df_hist = get_history()
+    if not df_hist.empty:
+        st.write("Usa los filtros de cada columna para buscar lotes específicos.")
+        
+        gb = GridOptionsBuilder.from_dataframe(df_hist[[
+            'Fecha_Recepcion', 'Producto', 'Codigo_Lote', 'Cantidad_Ingresada', 
+            'Precio_Unitario_PEN', 'Proveedor', 'Factura'
+        ]])
+        gb.configure_pagination(paginationAutoPageSize=True)
+        gb.configure_side_bar() # Filtros laterales
+        gb.configure_default_column(groupable=True, value=True, enableRowGroup=True, aggFunc='sum', editable=False)
+        
+        grid_options = gb.build()
+        
+        AgGrid(
+            df_hist,
+            gridOptions=grid_options,
+            columns_auto_size_mode=ColumnsAutoSizeMode.FIT_CONTENTS,
+            theme='balham', # Tema profesional
+            height=500
+        )
+    else:
+        st.info("No hay datos en el historial.")

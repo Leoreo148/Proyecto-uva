@@ -52,13 +52,30 @@ def get_products():
     return pd.DataFrame(res.data)
 
 def get_history():
-    # Usamos !Codigo_Producto para decirle exactamente qué relación usar
-    res = supabase.table('Ingresos').select("*, Productos!Ingresos_Codigo_Producto_fkey(Producto)").order('created_at', desc=True).execute()
-    if not res.data: return pd.DataFrame()
-    df = pd.json_normalize(res.data)
-    # Limpiamos nombres (esto quita el prefijo del join)
-    df.columns = [c.replace('Productos!Ingresos_Codigo_Producto_fkey.', '').replace('Productos.', '') for c in df.columns]
-    return df
+    try:
+        # 1. Traemos los datos de Ingresos y Productos por separado
+        res_i = supabase.table('Ingresos').select("*").order('created_at', desc=True).execute()
+        res_p = supabase.table('Productos').select("Codigo, Producto").execute()
+        
+        df_i = pd.DataFrame(res_i.data)
+        df_p = pd.DataFrame(res_p.data)
+        
+        if df_i.empty: 
+            return pd.DataFrame()
+        if df_p.empty: 
+            return df_i # Si no hay catálogo, al menos mostramos los códigos
+        
+        # 2. Unión manual en memoria (Python es rapidísimo haciendo esto)
+        df_final = pd.merge(df_i, df_p, left_on='Codigo_Producto', right_on='Codigo', how='left')
+        
+        # 3. Limpieza de columnas duplicadas
+        if 'Codigo_y' in df_final.columns:
+            df_final = df_final.drop(columns=['Codigo_y']).rename(columns={'Codigo_x': 'Codigo'})
+            
+        return df_final
+    except Exception as e:
+        st.error(f"Error cargando historial: {e}")
+        return pd.DataFrame()
 
 # --- LÓGICA DE CARGA MASIVA (EXCEL/CSV) ---
 def process_bulk_upload(file):

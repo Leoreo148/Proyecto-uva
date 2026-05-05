@@ -1,15 +1,13 @@
 import streamlit as st
 import pandas as pd
 from supabase import create_client
-import re
 
 st.set_page_config(page_title="Carga Masiva Pro", page_icon="🚀", layout="wide")
-st.title("🚀 Migración Maestra de Datos (Build 9.1)")
+st.title("🚀 Migración Maestra de Datos (Build 9.2 - Lector Multioja)")
 
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 def limpiar_nombres_columnas(columnas):
-    """Limpia espacios, saltos de línea y añade sufijos a duplicados."""
     nueva_lista = []
     conteos = {}
     for col in columnas:
@@ -22,12 +20,10 @@ def limpiar_nombres_columnas(columnas):
             nueva_lista.append(c)
     return nueva_lista
 
-def detectar_cabecera_real(file):
-    """Escanea el Excel buscando la fila donde empiezan los datos."""
-    df = pd.read_excel(file, header=None)
+def detectar_cabecera_real(df):
+    """Ahora recibe un DataFrame directamente en lugar del archivo."""
     for i in range(len(df)):
         fila = df.iloc[i].astype(str).str.upper().tolist()
-        # Buscamos palabras que SÍ están en tus archivos (CODIGO, PRODUCTOS, COD ING)
         if any(k in s for k in ["CODIGO", "PRODUCTOS", "COD. PROD", "COD ING"] for s in fila):
             new_df = df.iloc[i+1:].copy()
             new_df.columns = limpiar_nombres_columnas(df.iloc[i].values)
@@ -36,22 +32,34 @@ def detectar_cabecera_real(file):
 
 # --- INTERFAZ ---
 st.info("💡 **Orden de carga:** 1° Catálogo de Productos ➔ 2° Historial de Ingresos.")
-tipo_carga = st.radio("Selecciona qué vas a subir:", 
+tipo_carga = st.radio("Selecciona qué vas a subir a la base de datos:", 
                       ["Catálogo de Productos (Maestro)", "Historial de Ingresos (Compras)"])
 
-uploaded_file = st.file_uploader(f"Sube el Excel de {tipo_carga}", type=['xlsx'])
+uploaded_file = st.file_uploader(f"Sube tu archivo Excel COMPLETO", type=['xlsx'])
 
 if uploaded_file:
-    with st.spinner("Leyendo archivo..."):
-        df_raw = detectar_cabecera_real(uploaded_file)
+    # 1. LEER LAS HOJAS DEL EXCEL
+    xls = pd.ExcelFile(uploaded_file)
+    nombres_hojas = xls.sheet_names
     
-    st.write("📋 Columnas encontradas en tu Excel:", [c for c in df_raw.columns if "UNNAMED" not in c and "NAN" not in c])
+    # 2. SELECTOR DE HOJA
+    st.markdown("### 📂 Selecciona la pestaña correcta del Excel:")
+    hoja_seleccionada = st.selectbox("Elige la hoja que contiene los datos que indicaste arriba:", nombres_hojas)
+    
+    st.divider()
 
+    with st.spinner(f"Analizando la hoja '{hoja_seleccionada}'..."):
+        # Leer solo la hoja seleccionada
+        df_base = pd.read_excel(xls, sheet_name=hoja_seleccionada, header=None)
+        df_raw = detectar_cabecera_real(df_base)
+    
+    st.write("📋 Columnas encontradas en esta pestaña:", [c for c in df_raw.columns if "UNNAMED" not in c and "NAN" not in c])
+
+    # --- LÓGICA DE MAPEO ---
     if tipo_carga == "Catálogo de Productos (Maestro)":
-        # Mapeo exacto para tu hoja 'Cod_Producto'
         mapping = {
             'CODIGO': 'Codigo',
-            'PRODUCTOS': 'Producto', # Tu Excel usa plural
+            'PRODUCTOS': 'Producto',
             'PRODUCTO': 'Producto',
             'UM': 'Unidad',
             'SUBGRUPO': 'Tipo_Accion',
@@ -60,7 +68,6 @@ if uploaded_file:
         target_table = "Productos"
         keys_obligatorias = ['Codigo', 'Producto']
     else:
-        # Mapeo exacto para tu hoja 'Ingreso'
         mapping = {
             'COD. PROD.': 'Codigo_Producto',
             'COD. PROD': 'Codigo_Producto',
@@ -78,8 +85,6 @@ if uploaded_file:
     # Aplicar Mapeo
     df_ready = df_raw.rename(columns=mapping)
     df_ready = df_ready.loc[:, ~df_ready.columns.duplicated()]
-    
-    # Filtrar solo columnas válidas para Supabase
     columnas_finales = [v for v in mapping.values() if v in df_ready.columns]
     
     # VALIDACIÓN FINAL
@@ -88,11 +93,10 @@ if uploaded_file:
 
     if faltantes:
         st.error(f"❌ Error: No encontré las columnas necesarias: {faltantes}")
-        st.write("Asegúrate de que en tu Excel los títulos estén escritos exactamente como: CODIGO, PRODUCTOS, etc.")
+        st.write(f"Asegúrate de haber seleccionado la hoja correcta (Ej: 'Cod_Producto' para el catálogo o 'Ingreso' para las compras).")
     else:
         df_migracion = df_ready[columnas_finales].dropna(subset=keys_obligatorias).copy()
         
-        # Limpieza de fechas para Ingresos
         if 'Fecha_Recepcion' in df_migracion.columns:
             df_migracion['Fecha_Recepcion'] = pd.to_datetime(df_migracion['Fecha_Recepcion'], errors='coerce').dt.strftime('%Y-%m-%d')
             df_migracion = df_migracion.dropna(subset=['Fecha_Recepcion'])
@@ -108,4 +112,4 @@ if uploaded_file:
                 supabase.table(target_table).insert(batch).execute()
                 progress.progress(min((i + 100) / len(data_dict), 1.0))
             st.balloons()
-            st.success(f"¡{target_table} actualizado! Ya puedes ir al Inventario.")
+            st.success(f"¡{target_table} actualizado correctamente!")

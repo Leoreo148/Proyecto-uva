@@ -3,7 +3,7 @@ import pandas as pd
 from supabase import create_client
 
 st.set_page_config(page_title="Carga Masiva Pro", page_icon="🚀", layout="wide")
-st.title("🚀 Migración Maestra de Datos (Build 9.2 - Lector Multioja)")
+st.title("🚀 Migración Maestra de Datos (Build 9.3)")
 
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
@@ -21,10 +21,13 @@ def limpiar_nombres_columnas(columnas):
     return nueva_lista
 
 def detectar_cabecera_real(df):
-    """Ahora recibe un DataFrame directamente en lugar del archivo."""
+    """Escanea el Excel limpiando los Nulos (NaN) para evitar el TypeError."""
     for i in range(len(df)):
-        fila = df.iloc[i].astype(str).str.upper().tolist()
-        if any(k in s for k in ["CODIGO", "PRODUCTOS", "COD. PROD", "COD ING"] for s in fila):
+        # FORZAMOS a que cada celda sea texto. Si está vacía (NaN), se vuelve "NAN" en texto.
+        fila_segura = [str(x).upper() for x in df.iloc[i].values]
+        
+        # Buscamos de forma segura en las celdas de texto
+        if any(palabra in celda for celda in fila_segura for palabra in ["CODIGO", "PRODUCTOS", "COD. PROD", "COD ING"]):
             new_df = df.iloc[i+1:].copy()
             new_df.columns = limpiar_nombres_columnas(df.iloc[i].values)
             return new_df.reset_index(drop=True)
@@ -35,7 +38,7 @@ st.info("💡 **Orden de carga:** 1° Catálogo de Productos ➔ 2° Historial d
 tipo_carga = st.radio("Selecciona qué vas a subir a la base de datos:", 
                       ["Catálogo de Productos (Maestro)", "Historial de Ingresos (Compras)"])
 
-uploaded_file = st.file_uploader(f"Sube tu archivo Excel COMPLETO", type=['xlsx'])
+uploaded_file = st.file_uploader("Sube tu archivo Excel COMPLETO", type=['xlsx'])
 
 if uploaded_file:
     # 1. LEER LAS HOJAS DEL EXCEL
@@ -49,7 +52,6 @@ if uploaded_file:
     st.divider()
 
     with st.spinner(f"Analizando la hoja '{hoja_seleccionada}'..."):
-        # Leer solo la hoja seleccionada
         df_base = pd.read_excel(xls, sheet_name=hoja_seleccionada, header=None)
         df_raw = detectar_cabecera_real(df_base)
     

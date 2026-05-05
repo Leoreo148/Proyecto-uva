@@ -52,12 +52,12 @@ def get_products():
     return pd.DataFrame(res.data)
 
 def get_history():
-    # Traemos ingresos y cruzamos con productos para ver el nombre
-    res = supabase.table('Ingresos').select("*, Productos(Producto)").order('created_at', desc=True).execute()
+    # Usamos !Codigo_Producto para decirle exactamente qué relación usar
+    res = supabase.table('Ingresos').select("*, Productos!Ingresos_Codigo_Producto_fkey(Producto)").order('created_at', desc=True).execute()
     if not res.data: return pd.DataFrame()
     df = pd.json_normalize(res.data)
-    # Limpiamos nombres de columnas del join
-    df.columns = [c.replace('Productos.', '') for c in df.columns]
+    # Limpiamos nombres (esto quita el prefijo del join)
+    df.columns = [c.replace('Productos!Ingresos_Codigo_Producto_fkey.', '').replace('Productos.', '') for c in df.columns]
     return df
 
 # --- LÓGICA DE CARGA MASIVA (EXCEL/CSV) ---

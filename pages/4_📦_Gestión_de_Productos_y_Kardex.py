@@ -37,33 +37,57 @@ def init_supabase():
 supabase = init_supabase()
 
 # --- 3. FUNCIONES DE DATOS ---
+# --- 3. FUNCIONES DE DATOS (AJUSTADAS) ---
 @st.cache_data(ttl=60)
 def cargar_todo():
     if not supabase: 
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     
-    # Lectura de tablas
+    # IMPORTANTE: Seleccionamos 'id' en Ingresos para poder restarle las salidas
     p = supabase.table('Productos').select("*").order('Producto').execute()
-    i = supabase.table('Ingresos').select("Codigo_Producto, Codigo_Lote, Cantidad_Ingresada, Precio_Unitario_PEN, Fecha_Vencimiento").execute()
+    i = supabase.table('Ingresos').select("id, Codigo_Producto, Codigo_Lote, Cantidad_Ingresada, Precio_Unitario_PEN, Fecha_Vencimiento").execute()
     s = supabase.table('Salidas').select("Ingreso_ID, Cantidad_Usada").execute()
     
     return pd.DataFrame(p.data), pd.DataFrame(i.data), pd.DataFrame(s.data)
 
 def generar_kardex(df_p, df_i, df_s):
+    # Si no hay productos, no hay nada que mostrar
     if df_p.empty: 
+        st.warning("⚠️ El catálogo de Productos está vacío.")
         return pd.DataFrame()
     
-    # Cálculo simple de stock
-    resumen_lotes = df_i.copy()
-    resumen_lotes['Stock_Lote'] = resumen_lotes['Cantidad_Ingresada']
-    
-    resumen_prod = resumen_lotes.groupby('Codigo_Producto').agg({
-        'Stock_Lote': 'sum',
-        'Precio_Unitario_PEN': 'mean',
-        'Fecha_Vencimiento': 'min'
+    # Si no hay ingresos, el stock es cero para todos
+    if df_i.empty:
+        df_p['Stock_Lote'] = 0.0
+        df_p['Valorizado_PEN'] = 0.0
+        return df_p
+
+    # 1. CALCULAR SALIDAS POR INGRESO_ID
+    if not df_s.empty:
+        # Sumamos cuánto se ha usado de cada ID de la tabla Ingresos
+        resumen_salidas = df_s.groupby('Ingreso_ID')['Cantidad_Usada'].sum().reset_index()
+        # Unimos con los ingresos
+        df_balance = pd.merge(df_i, resumen_salidas, left_on='id', right_on='Ingreso_ID', how='left').fillna(0)
+        # MATEMÁTICA: Ingreso - Salida
+        df_balance['Stock_Disponible'] = df_balance['Cantidad_Ingresada'] - df_balance['Cantidad_Usada']
+    else:
+        df_balance = df_i.copy()
+        df_balance['Stock_Disponible'] = df_balance['Cantidad_Ingresada']
+
+    # 2. AGRUPAR POR PRODUCTO (Para el resumen general)
+    resumen_prod = df_balance.groupby('Codigo_Producto').agg({
+        'Stock_Disponible': 'sum',
+        'Precio_Unitario_PEN': 'mean', # Promediamos el precio de los lotes
+        'Fecha_Vencimiento': 'min'     # El vencimiento más próximo
     }).reset_index()
-    
+
+    # 3. MERGE FINAL CON MAESTRO DE PRODUCTOS
     df_final = pd.merge(df_p, resumen_prod, left_on='Codigo', right_on='Codigo_Producto', how='left').fillna(0)
+    
+    # Renombrar para que coincida con tu AgGrid
+    df_final = df_final.rename(columns={'Stock_Disponible': 'Stock_Lote'})
+    
+    # Cálculos adicionales
     df_final['Valorizado_PEN'] = df_final['Stock_Lote'] * df_final['Precio_Unitario_PEN']
     
     hoy = pd.Timestamp(date.today())

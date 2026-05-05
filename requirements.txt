@@ -1,12 +1,6 @@
-rich==14.3.4
+rich<15.0.0
 streamlit>=1.30.0
 pandas
-scikit-learn
-joblib
-plotly
-streamlit-local-storage
-openpyxl
-XlsxWriter
 supabase
 pydantic
 streamlit-searchbox

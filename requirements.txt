@@ -11,3 +11,4 @@ pydantic
 streamlit-searchbox
 st-aggrid
 streamlit-extras
+rich>=10.11.0,<15.0.0

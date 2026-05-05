@@ -1,10 +1,9 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 from supabase import create_client
 
 st.set_page_config(page_title="Carga Masiva Pro", page_icon="🚀", layout="wide")
-st.title("🚀 Migración Maestra de Datos (Build 9.6 - Fix Duplicados)")
+st.title("🚀 Migración Maestra de Datos (Build 9.7 - Anti-Fallas)")
 
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
@@ -42,15 +41,13 @@ if uploaded_file:
     nombres_hojas = xls.sheet_names
     
     st.markdown("### 📂 Selecciona la pestaña correcta del Excel:")
-    hoja_seleccionada = st.selectbox("Elige la hoja que contiene los datos que indicaste arriba:", nombres_hojas)
+    hoja_seleccionada = st.selectbox("Elige la hoja:", nombres_hojas)
     
     st.divider()
 
     with st.spinner(f"Analizando la hoja '{hoja_seleccionada}'..."):
         df_base = pd.read_excel(xls, sheet_name=hoja_seleccionada, header=None)
         df_raw = detectar_cabecera_real(df_base)
-    
-    st.write("📋 Columnas encontradas en esta pestaña:", [c for c in df_raw.columns if "UNNAMED" not in c and "NAN" not in c])
 
     if tipo_carga == "Catálogo de Productos (Maestro)":
         mapping = {
@@ -91,13 +88,15 @@ if uploaded_file:
 
     if faltantes:
         st.error(f"❌ Error: No encontré las columnas necesarias: {faltantes}")
-        st.write(f"Asegúrate de haber seleccionado la hoja correcta.")
     else:
         df_migracion = df_ready[columnas_finales].dropna(subset=keys_obligatorias).copy()
         
-        # --- FIX 1: ELIMINAR DUPLICADOS EN EL EXCEL ---
+        # --- FIX EXTREMO PARA DUPLICADOS Y ESPACIOS ---
         if target_table == "Productos":
-            # Si hay dos filas con el código 'A1', nos quedamos con la primera y borramos el resto
+            # 1. Quitar espacios en blanco invisibles al inicio o final de Código y Producto
+            df_migracion['Codigo'] = df_migracion['Codigo'].astype(str).str.strip().str.upper()
+            df_migracion['Producto'] = df_migracion['Producto'].astype(str).str.strip()
+            # 2. Borrar duplicados exactos ahora que no hay espacios trampa
             df_migracion = df_migracion.drop_duplicates(subset=['Codigo'], keep='first')
         
         if 'Fecha_Recepcion' in df_migracion.columns:
@@ -108,20 +107,29 @@ if uploaded_file:
         df_migracion = df_migracion.astype(object)
         df_migracion = df_migracion.where(pd.notnull(df_migracion), None)
 
-        st.success(f"✅ ¡Todo listo! {len(df_migracion)} registros únicos preparados para la tabla '{target_table}'.")
-        st.dataframe(df_migracion.head(10))
+        st.success(f"✅ ¡Estructura lista! {len(df_migracion)} registros limpios y únicos.")
+        st.dataframe(df_migracion.head(5))
 
         if st.button(f"🚀 Iniciar Subida a {target_table}"):
             data_dict = df_migracion.to_dict(orient='records')
             progress = st.progress(0)
+            status_text = st.empty()
             
             try:
                 for i in range(0, len(data_dict), 100):
                     batch = data_dict[i:i+100]
-                    # --- FIX 2: UPSERT EN LUGAR DE INSERT ---
-                    supabase.table(target_table).upsert(batch).execute()
-                    progress.progress(min((i + 100) / len(data_dict), 1.0))
+                    
+                    if target_table == "Productos":
+                        # FIX 2: Agregamos on_conflict='Codigo' para decirle a Supabase qué hacer si se cruza con uno repetido
+                        supabase.table(target_table).upsert(batch, on_conflict='Codigo').execute()
+                    else:
+                        supabase.table(target_table).insert(batch).execute()
+                        
+                    avance = min((i + 100) / len(data_dict), 1.0)
+                    progress.progress(avance)
+                    status_text.text(f"Subiendo... {int(avance * 100)}%")
+                    
                 st.balloons()
-                st.success(f"¡{target_table} actualizado correctamente y sin duplicados!")
+                st.success(f"¡ÉXITO! {target_table} actualizado correctamente. Ve al inventario a revisar.")
             except Exception as e:
-                st.error(f"Error al subir los datos: {e}")
+                st.error(f"Error específico de la base de datos: {e}")

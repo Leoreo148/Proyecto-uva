@@ -4,45 +4,43 @@ from datetime import date
 from supabase import create_client
 
 st.set_page_config(page_title="Carga Masiva Pro", page_icon="🚀", layout="wide")
-st.title("🚀 Migración de Datos Históricos")
+st.title("🚀 Migración de Datos Históricos (Versión Ultra-Compatible)")
 
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
-# --- FUNCIÓN PARA ELIMINAR DUPLICADOS MANUALMENTE ---
-def desduplicar_columnas(columnas):
+def desduplicar_lista(lista_sucia):
     nueva_lista = []
     conteos = {}
-    for col in columnas:
-        col_str = str(col).strip().upper()
-        if col_str in conteos:
-            conteos[col_str] += 1
-            nueva_lista.append(f"{col_str}.{conteos[col_str]}")
+    for item in lista_sucia:
+        val = str(item).strip().upper()
+        if val in conteos:
+            conteos[val] += 1
+            nueva_lista.append(f"{val}_{conteos[val]}")
         else:
-            conteos[col_str] = 0
-            nueva_lista.append(col_str)
+            conteos[val] = 0
+            nueva_lista.append(val)
     return nueva_lista
 
 def detectar_y_limpiar(file):
     df = pd.read_excel(file, header=None)
     for i in range(len(df)):
         fila = df.iloc[i].astype(str).str.upper().tolist()
-        # Buscamos la fila que contiene los encabezados reales
+        # Buscamos indicios de cabecera real
         if any("COD" in str(s) for s in fila) and any("PROD" in str(s) for s in fila):
             new_df = df.iloc[i+1:].copy()
-            titulos_sucios = [str(c).strip().replace('\n', ' ') for c in df.iloc[i].values]
-            # Aplicamos la desduplicación manual
-            new_df.columns = desduplicar_columnas(titulos_sucios)
-            return new_df
-    return df
+            # Limpieza profunda de nombres
+            titulos = [str(c).strip().replace('\n', ' ') for c in df.iloc[i].values]
+            new_df.columns = desduplicar_lista(titulos)
+            return new_df.reset_index(drop=True)
+    return df.reset_index(drop=True)
 
 uploaded_file = st.file_uploader("Sube el archivo Excel", type=['xlsx'])
 
 if uploaded_file:
     df_raw = detectar_y_limpiar(uploaded_file)
-    
-    st.write("📋 Columnas procesadas:", list(df_raw.columns))
+    st.write("📋 Columnas encontradas en el archivo:", list(df_raw.columns))
 
-    # MAPPING ACTUALIZADO (Ajustado a los nombres que salieron en tu error)
+    # MAPPING AMPLIADO (Basado en los fragmentos de Ingreso y Salida)
     mapping = {
         'F.DE ING.': 'Fecha_Recepcion',
         'FECHA': 'Fecha_Recepcion', 
@@ -51,44 +49,56 @@ if uploaded_file:
         'COD ING': 'Codigo_Lote',
         'LOTE': 'Codigo_Lote',
         'CANT.ING.': 'Cantidad_Ingresada',
+        'CANT.': 'Cantidad_Ingresada',
         'PREC. UNI S/.': 'Precio_Unitario_PEN',
         'PROVEEDOR': 'Proveedor',
-        'FACTURA': 'Factura'
+        'FACTURA': 'Factura',
+        'GUIA REMISIÓN': 'Guia_Remision',
+        'DEPOSITO (BCP_COD)': 'Cod_Operacion_Pago'
     }
 
-    df_ready = df_raw.rename(columns=mapping)
+    # 1. Renombrar columnas
+    df_mapped = df_raw.rename(columns=mapping)
 
-    # Si después del mapeo quedaron dos columnas llamadas 'Fecha_Recepcion', nos quedamos con la primera
-    df_ready = df_ready.loc[:, ~df_ready.columns.duplicated()]
+    # 2. SELECCIÓN ÚNICA: Evitar duplicados de nombres destino
+    # Si mapeamos 'FECHA' y 'F.DE ING.' a 'Fecha_Recepcion', solo nos quedamos con una.
+    columnas_finales = []
+    vistos = set()
+    
+    # Priorizamos las columnas que están en nuestro mapping
+    for col in df_mapped.columns:
+        if col in mapping.values() and col not in vistos:
+            columnas_finales.append(col)
+            vistos.add(col)
 
-    if 'Codigo_Producto' not in df_ready.columns or 'Codigo_Lote' not in df_ready.columns:
-        st.error("No se encontraron 'Codigo_Producto' o 'Codigo_Lote'. Revisa los títulos del Excel.")
+    if 'Codigo_Producto' not in vistos or 'Codigo_Lote' not in vistos:
+        st.error("❌ No se encontraron las columnas críticas (Producto o Lote).")
     else:
-        # Filtramos solo lo que nos sirve
-        cols_finales = [v for v in mapping.values() if v in df_ready.columns]
-        df_migracion = df_ready[cols_finales].copy()
-
-        # Limpieza de nulos
+        # Creamos el dataframe final con columnas únicas y reseteamos el índice
+        df_migracion = df_mapped[columnas_finales].copy().reset_index(drop=True)
+        
+        # Limpieza de nulos en datos obligatorios
         df_migracion = df_migracion.dropna(subset=['Codigo_Producto', 'Codigo_Lote'])
         
-        # Conversión de fecha segura (ahora sin errores de duplicados)
-        df_migracion['Fecha_Recepcion'] = pd.to_datetime(df_migracion['Fecha_Recepcion'], errors='coerce').dt.strftime('%Y-%m-%d')
-        df_migracion = df_migracion.dropna(subset=['Fecha_Recepcion'])
-
-        st.success(f"✅ Estructura validada. {len(df_migracion)} filas listas.")
-        st.dataframe(df_migracion.head(10))
-
-        if st.button("🚀 Iniciar Subida"):
-            data_dict = df_migracion.to_dict(orient='records')
-            progress = st.progress(0)
-            status = st.empty()
+        # 3. Conversión de fecha (con índice limpio y sin columnas duplicadas)
+        try:
+            df_migracion['Fecha_Recepcion'] = pd.to_datetime(df_migracion['Fecha_Recepcion'], errors='coerce').dt.strftime('%Y-%m-%d')
+            df_migracion = df_migracion.dropna(subset=['Fecha_Recepcion'])
             
-            for i in range(0, len(data_dict), 100):
-                batch = data_dict[i:i+100]
-                supabase.table('Ingresos').insert(batch).execute()
-                p = min((i + 100) / len(data_dict), 1.0)
-                progress.progress(p)
-                status.text(f"Progreso: {int(p*100)}%")
-            
-            st.balloons()
-            st.success("¡Migración exitosa!")
+            st.success(f"✅ ¡Estructura lista! {len(df_migracion)} filas validadas.")
+            st.dataframe(df_migracion.head(10))
+
+            if st.button("🚀 Iniciar Subida"):
+                data_dict = df_migracion.to_dict(orient='records')
+                progress = st.progress(0)
+                
+                for i in range(0, len(data_dict), 100):
+                    batch = data_dict[i:i+100]
+                    supabase.table('Ingresos').insert(batch).execute()
+                    progress.progress(min((i + 100) / len(data_dict), 1.0))
+                
+                st.balloons()
+                st.success("Migración completada exitosamente.")
+        except Exception as e:
+            st.error(f"Error al procesar fechas: {e}")
+            st.info("Esto sucede si hay datos corruptos en la columna de fecha.")

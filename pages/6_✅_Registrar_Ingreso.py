@@ -9,7 +9,12 @@ from supabase import create_client, Client
 from streamlit_searchbox import st_searchbox
 from st_aggrid import AgGrid, GridOptionsBuilder, ColumnsAutoSizeMode
 from streamlit_extras.stylable_container import stylable_container
-from streamlit_extras.mandatory_fill import mandatory_fill
+try:
+    from streamlit_extras.mandatory_fill import mandatory_fill
+except ImportError:
+    # Si falla, creamos una función "falsa" que no haga nada para que la app no explote
+    def mandatory_fill(func):
+        return func
 
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="Agroq - Gestión de Ingresos", page_icon="🚜", layout="wide")

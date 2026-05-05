@@ -36,36 +36,56 @@ supabase = init_supabase()
 @st.cache_data(ttl=60)
 def get_products():
     res = supabase.table('Productos').select("Codigo, Producto").execute()
-    return pd.DataFrame(res.data)
+    df = pd.DataFrame(res.data)
+    # Si está vacío, le forzamos las columnas para que el resto del código no explote
+    if df.empty:
+        return pd.DataFrame(columns=['Codigo', 'Producto'])
+    return df
 
 def get_history():
     try:
         res_i = supabase.table('Ingresos').select("*").order('created_at', desc=True).execute()
         res_p = supabase.table('Productos').select("Codigo, Producto").execute()
-        df_i, df_p = pd.DataFrame(res_i.data), pd.DataFrame(res_p.data)
-        if df_i.empty: return pd.DataFrame()
+        
+        df_i = pd.DataFrame(res_i.data)
+        df_p = pd.DataFrame(res_p.data)
+        
+        if df_i.empty: 
+            return pd.DataFrame()
+            
+        # ESCUDO #1: Si no hay productos o falta la columna 'Codigo', devolvemos solo ingresos
+        if df_p.empty or 'Codigo' not in df_p.columns:
+            df_i['Producto'] = "N/A" # Columna temporal para que AgGrid no falle
+            return df_i
+            
         return pd.merge(df_i, df_p, left_on='Codigo_Producto', right_on='Codigo', how='left')
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error en historial: {e}")
         return pd.DataFrame()
 
 # --- INTERFAZ ---
 st.title("📥 Registro Diario de Ingresos")
 
-# FORMULARIO MANUAL
 df_p = get_products()
+
+# FORMULARIO MANUAL
 with st.form("form_registro"):
     c1, c2, c3 = st.columns(3)
     with c1:
+        # ESCUDO #2: Validación en el buscador
         def search_products(searchterm: str):
-            if not searchterm: return []
-            filtered = df_p[df_p['Producto'].str.contains(searchterm, case=False) | 
-                            df_p['Codigo'].str.contains(searchterm, case=False)]
+            if not searchterm or df_p.empty or 'Codigo' not in df_p.columns:
+                return []
+            filtered = df_p[
+                df_p['Producto'].str.contains(searchterm, case=False, na=False) | 
+                df_p['Codigo'].str.contains(searchterm, case=False, na=False)
+            ]
             return [(f"{row['Producto']} ({row['Codigo']})", row['Codigo']) for _, row in filtered.iterrows()]
         
         cod_prod = st_searchbox(search_products, key="prod_search", label="Buscar Producto")
         lote = st.text_input("Código de Lote")
         fecha = st.date_input("Fecha Recepción", value=date.today())
+    # ... (resto de col2 y col3 se mantienen igual)
     with c2:
         cant = st.number_input("Cantidad", min_value=0.0)
         p_pen = st.number_input("Precio Unitario (S/)", min_value=0.0)
@@ -90,8 +110,15 @@ with st.form("form_registro"):
 st.divider()
 st.subheader("📋 Historial Reciente")
 df_hist = get_history()
+
 if not df_hist.empty:
-    gb = GridOptionsBuilder.from_dataframe(df_hist[['Fecha_Recepcion', 'Producto', 'Codigo_Lote', 'Cantidad_Ingresada', 'Precio_Unitario_PEN', 'Proveedor']])
+    # ESCUDO #3: Verificar que las columnas existan antes de configurar AgGrid
+    cols_visibles = ['Fecha_Recepcion', 'Producto', 'Codigo_Lote', 'Cantidad_Ingresada', 'Precio_Unitario_PEN', 'Proveedor']
+    cols_reales = [c for c in cols_visibles if c in df_hist.columns]
+    
+    gb = GridOptionsBuilder.from_dataframe(df_hist[cols_reales])
     gb.configure_pagination(paginationPageSize=10)
     gb.configure_default_column(filterable=True, sortable=True)
     AgGrid(df_hist, gridOptions=gb.build(), theme='balham', height=400)
+else:
+    st.info("No hay ingresos registrados aún.")

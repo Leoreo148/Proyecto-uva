@@ -9,42 +9,53 @@ from st_aggrid import AgGrid, GridOptionsBuilder, ColumnsAutoSizeMode, GridUpdat
 from streamlit_extras.metric_cards import style_metric_cards
 from streamlit_extras.stylable_container import stylable_container
 
-# --- CONFIGURACIÓN ---
+# --- 1. CONFIGURACIÓN E INICIALIZACIÓN ---
 st.set_page_config(page_title="Kardex & Inventario Pro", page_icon="📦", layout="wide")
 
-# 🔥 FIX #1: INICIALIZAR SESSION STATE (Esto es lo que faltaba)
+# Inicialización crítica del Session State para evitar el AttributeError
 if 'editing_product_id' not in st.session_state:
     st.session_state.editing_product_id = None
 if 'deleting_product_id' not in st.session_state:
     st.session_state.deleting_product_id = None
 
-# Estilo personalizado para las métricas
-style_metric_cards(background_color="#f0f2f6", border_left_color="#28a745")
+# Estilo de métricas
+try:
+    style_metric_cards(background_color="#f0f2f6", border_left_color="#28a745")
+except:
+    pass
 
-st.title("📦 Panel de Control: Kardex e Inventario (Build 8.1)")
-st.write("Visualización técnica con alertas de seguridad biológica y trazabilidad financiera.")
+st.title("📦 Panel de Control: Kardex e Inventario (Build 8.2)")
+st.write("Visualización técnica con alertas de seguridad biológica.")
 
-# --- CONEXIÓN ---
+# --- 2. CONEXIÓN A SUPABASE ---
 @st.cache_resource
 def init_supabase():
-    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
 supabase = init_supabase()
 
-# --- CARGA DE DATOS OPTIMIZADA ---
+# --- 3. FUNCIONES DE DATOS ---
 @st.cache_data(ttl=60)
 def cargar_todo():
-    if not supabase: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    if not supabase: 
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    
+    # Lectura de tablas
     p = supabase.table('Productos').select("*").order('Producto').execute()
     i = supabase.table('Ingresos').select("Codigo_Producto, Codigo_Lote, Cantidad_Ingresada, Precio_Unitario_PEN, Fecha_Vencimiento").execute()
     s = supabase.table('Salidas').select("Ingreso_ID, Cantidad_Usada").execute()
+    
     return pd.DataFrame(p.data), pd.DataFrame(i.data), pd.DataFrame(s.data)
 
-# --- MOTOR DEL KARDEX ---
-def generar_kardex_maestro(df_p, df_i, df_s):
-    if df_p.empty: return pd.DataFrame()
+def generar_kardex(df_p, df_i, df_s):
+    if df_p.empty: 
+        return pd.DataFrame()
+    
+    # Cálculo simple de stock
     resumen_lotes = df_i.copy()
-    resumen_lotes['Stock_Lote'] = resumen_lotes['Cantidad_Ingresada'] 
+    resumen_lotes['Stock_Lote'] = resumen_lotes['Cantidad_Ingresada']
     
     resumen_prod = resumen_lotes.groupby('Codigo_Producto').agg({
         'Stock_Lote': 'sum',
@@ -58,13 +69,14 @@ def generar_kardex_maestro(df_p, df_i, df_s):
     hoy = pd.Timestamp(date.today())
     df_final['Venc_Date'] = pd.to_datetime(df_final['Fecha_Vencimiento'], errors='coerce')
     df_final['Dias_para_Vencer'] = (df_final['Venc_Date'] - hoy).dt.days.fillna(999)
+    
     return df_final
 
-# --- PROCESAMIENTO ---
+# --- 4. PROCESAMIENTO ---
 df_p, df_i, df_s = cargar_todo()
-df_kardex = generar_kardex_maestro(df_p, df_i, df_s)
+df_kardex = generar_kardex(df_p, df_i, df_s)
 
-# --- HEADER: MÉTRICAS ---
+# --- 5. INTERFAZ: MÉTRICAS ---
 if not df_kardex.empty:
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Valor Total Almacén", f"S/ {df_kardex['Valorizado_PEN'].sum():,.2f}")
@@ -72,20 +84,19 @@ if not df_kardex.empty:
     m3.metric("Próximos a Vencer", len(df_kardex[df_kardex['Dias_para_Vencer'] < 30]))
     m4.metric("Productos en Catálogo", len(df_p))
 
-# --- CUERPO: TABLA INTERACTIVA ---
+# --- 6. TABLA INTERACTIVA (AG-GRID) ---
 st.subheader("📊 Inventario en Tiempo Real")
 
 if not df_kardex.empty:
-    gb = GridOptionsBuilder.from_dataframe(df_kardex[[
-        'Codigo', 'Producto', 'Tipo_Accion', 'Stock_Lote', 'Stock_Minimo', 
-        'Unidad', 'Periodo_Carencia_Dias', 'Dias_para_Vencer', 'Valorizado_PEN'
-    ]])
+    # Columnas que queremos mostrar
+    cols_mostrar = ['Codigo', 'Producto', 'Tipo_Accion', 'Stock_Lote', 'Stock_Minimo', 'Unidad', 'Periodo_Carencia_Dias', 'Dias_para_Vencer', 'Valorizado_PEN']
     
-    gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
+    gb = GridOptionsBuilder.from_dataframe(df_kardex[cols_mostrar])
+    gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=12)
     gb.configure_side_bar()
     gb.configure_selection('single', use_checkbox=True)
     
-    # Colores de alerta
+    # Formateo y Colores (JavaScript)
     cellsytle_jcode = """
     function(params) {
         if (params.data.Stock_Lote < params.data.Stock_Minimo) {
@@ -106,72 +117,86 @@ if not df_kardex.empty:
         update_mode=GridUpdateMode.SELECTION_CHANGED,
         columns_auto_size_mode=ColumnsAutoSizeMode.FIT_CONTENTS,
         theme='balham', 
-        height=500
+        height=450
     )
 
+    # --- 7. ACCIONES ---
     selected = grid_response['selected_rows']
     
     if selected is not None and not selected.empty:
-        prod_data = selected.iloc[0]
+        # En AgGrid nuevo, selected es un DataFrame o una lista. Manejamos ambos:
+        if isinstance(selected, pd.DataFrame):
+            sel_row = selected.iloc[0]
+        else:
+            sel_row = selected[0]
+
         st.divider()
         c1, c2, c3 = st.columns([2, 2, 4])
         
-        with c1:
-            if st.button("✏️ Editar Producto"):
-                # Buscamos el ID real en df_p usando el código seleccionado
-                id_real = df_p[df_p['Codigo'] == prod_data['Codigo']].iloc[0]['id']
-                st.session_state.editing_product_id = id_real
+        if c1.button("✏️ Editar Producto"):
+            # Buscar ID real por Código
+            match = df_p[df_p['Codigo'] == sel_row['Codigo']]
+            if not match.empty:
+                st.session_state.editing_product_id = int(match.iloc[0]['id'])
                 st.rerun()
-        with c2:
-            if st.button("🗑️ Eliminar Producto", type="primary"):
-                id_real = df_p[df_p['Codigo'] == prod_data['Codigo']].iloc[0]['id']
-                st.session_state.deleting_product_id = id_real
+
+        if c2.button("🗑️ Eliminar Producto", type="primary"):
+            match = df_p[df_p['Codigo'] == sel_row['Codigo']]
+            if not match.empty:
+                st.session_state.deleting_product_id = int(match.iloc[0]['id'])
                 st.rerun()
-        with col_info := c3:
-            with stylable_container("info_box", css_styles="div { background-color: #e8f4fd; padding: 10px; border-radius: 5px;}"):
-                st.markdown(f"**🔬 Nota Técnica:** {prod_data['Producto']} tiene un periodo de carencia de **{prod_data['Periodo_Carencia_Dias']} días**.")
 
-# --- DIÁLOGOS DE GESTIÓN (LIMPIOS) ---
+        with c3:
+            with stylable_container("info", css_styles="div { background-color: #e8f4fd; padding: 10px; border-radius: 5px;}"):
+                st.write(f"**🔬 Info Técnica:** {sel_row['Producto']} | Carencia: {sel_row['Periodo_Carencia_Dias']} días.")
 
-# Diálogo de Edición
+# --- 8. DIÁLOGOS DE GESTIÓN ---
+
+# Edición
 if st.session_state.editing_product_id:
-    p_edit = df_p[df_p['id'] == st.session_state.editing_product_id].iloc[0]
+    # Obtener datos del producto a editar
+    prod_to_edit = df_p[df_p['id'] == st.session_state.editing_product_id].iloc[0]
     
-    @st.dialog("✏️ Actualizar Maestro de Producto")
-    def edit_pro():
-        with st.form("edit_p"):
-            st.write(f"Editando: **{p_edit['Producto']}**")
+    @st.dialog("✏️ Editar Maestro")
+    def show_edit_dialog(p):
+        with st.form("form_ed"):
+            st.write(f"Editando: **{p['Producto']}**")
             col_a, col_b = st.columns(2)
-            nombre = col_a.text_input("Nombre Comercial", value=p_edit['Producto'])
-            minimo = col_b.number_input("Stock Mínimo", value=float(p_edit['Stock_Minimo']))
-            carencia = col_a.number_input("Días de Carencia", value=int(p_edit.get('Periodo_Carencia_Dias', 0)))
-            tipo = col_b.selectbox("Tipo de Acción", ["Insecticida", "Fungicida", "Herbicida", "Fertilizante", "Regulador"], index=0)
-            incomp = st.text_area("Incompatibilidades", value=p_edit.get('Incompatible_Con', ''))
+            n_nombre = col_a.text_input("Nombre", value=p['Producto'])
+            n_min = col_b.number_input("Mínimo", value=float(p['Stock_Minimo']))
+            n_car = col_a.number_input("Carencia", value=int(p.get('Periodo_Carencia_Dias', 0)))
+            n_tipo = col_b.selectbox("Tipo", ["Insecticida", "Fungicida", "Herbicida", "Fertilizante", "Regulador"])
+            n_inc = st.text_area("Incompatibilidades", value=p.get('Incompatible_Con', ''))
             
-            c_save, c_cancel = st.columns(2)
-            if c_save.form_submit_button("Guardar"):
-                upd = {"Producto": nombre, "Stock_Minimo": minimo, "Periodo_Carencia_Dias": carencia, "Tipo_Accion": tipo, "Incompatible_Con": incomp}
-                supabase.table('Productos').update(upd).eq('id', p_edit['id']).execute()
+            if st.form_submit_button("Guardar"):
+                data_upd = {
+                    "Producto": n_nombre, 
+                    "Stock_Minimo": n_min, 
+                    "Periodo_Carencia_Dias": n_car, 
+                    "Tipo_Accion": n_tipo, 
+                    "Incompatible_Con": n_inc
+                }
+                supabase.table('Productos').update(data_upd).eq('id', p['id']).execute()
                 st.session_state.editing_product_id = None
                 st.cache_data.clear()
                 st.rerun()
-            if c_cancel.form_submit_button("Cancelar"):
+            if st.button("Cerrar"):
                 st.session_state.editing_product_id = None
                 st.rerun()
-    edit_pro()
+                
+    show_edit_dialog(prod_to_edit)
 
-# Diálogo de Eliminación
+# Eliminación
 if st.session_state.deleting_product_id:
-    @st.dialog("🗑️ Confirmar Eliminación")
-    def delete_dialog():
-        st.warning("¿Estás seguro? Esta acción borrará el producto del catálogo.")
-        c_yes, c_no = st.columns(2)
-        if c_yes.button("Sí, Eliminar"):
+    @st.dialog("🗑️ Confirmar")
+    def show_del_dialog():
+        st.error("¿Seguro que deseas eliminar este producto?")
+        if st.button("SÍ, ELIMINAR"):
             supabase.table('Productos').delete().eq('id', st.session_state.deleting_product_id).execute()
             st.session_state.deleting_product_id = None
             st.cache_data.clear()
             st.rerun()
-        if c_no.button("No, Cancelar"):
+        if st.button("Cancelar"):
             st.session_state.deleting_product_id = None
             st.rerun()
-    delete_dialog()
+    show_del_dialog()

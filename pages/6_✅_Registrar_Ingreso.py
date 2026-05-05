@@ -80,63 +80,65 @@ def get_history():
 # --- LÓGICA DE CARGA MASIVA (EXCEL/CSV) ---
 def process_bulk_upload(file):
     try:
-        # Detectar si es CSV o Excel
+        # (Carga del archivo igual que antes...)
         if file.name.endswith('.csv'):
             df_raw = pd.read_csv(file)
         else:
             df_raw = pd.read_excel(file)
         
-        # Limpieza básica de columnas "Unnamed" y espacios
         df_raw = df_raw.loc[:, ~df_raw.columns.str.contains('^Unnamed')]
         df_raw.columns = df_raw.columns.str.strip()
 
-        # Mapeo inteligente (ajusta según los nombres de tus columnas de Excel)
-        # Aquí buscamos coincidencias con lo que vimos en tus archivos
         mapping = {
             'COD. PROD': 'Codigo_Producto',
             'LOTE': 'Codigo_Lote',
             'CANT.ING.': 'Cantidad_Ingresada',
             'PREC. UNI S/.': 'Precio_Unitario_PEN',
-            'PREC. UNI $.': 'Precio_Unitario_USD',
             'F.DE ING.': 'Fecha_Recepcion',
             'PROVEEDOR': 'Proveedor',
-            'FACTURA': 'Factura',
-            'GUIA REMISIÓN': 'Guia_Remision',
-            'DEPOSITO (BCP_COD)': 'Cod_Operacion_Pago'
+            'FACTURA': 'Factura'
         }
         
         df_mapped = df_raw.rename(columns=mapping)
-        
         registros_validados = []
         errores = []
 
         for i, row in df_mapped.iterrows():
             try:
-                # Convertir fechas de Excel a objeto date
-                if isinstance(row.get('Fecha_Recepcion'), str):
-                    f_rec = datetime.strptime(row['Fecha_Recepcion'], '%Y-%m-%d').date()
-                else:
-                    f_rec = row.get('Fecha_Recepcion')
+                # --- CONTROL DE FILAS VACÍAS ---
+                # Si los campos clave son nulos, saltamos la fila (evita errores en filas 4000+)
+                if pd.isna(row.get('Codigo_Producto')) and pd.isna(row.get('Codigo_Lote')):
+                    continue
 
+                # --- VALIDACIÓN DE FECHA ---
+                val_fecha = row.get('Fecha_Recepcion')
+                
+                if pd.isna(val_fecha) or val_fecha is None:
+                    errores.append(f"Fila {i+2}: Fecha faltante. Se usará la fecha de hoy.")
+                    f_rec = date.today() # O puedes usar 'continue' si prefieres no subirla
+                elif hasattr(val_fecha, 'date'):
+                    f_rec = val_fecha.date()
+                else:
+                    f_rec = pd.to_datetime(val_fecha).date()
+
+                # --- CREACIÓN DEL OBJETO ---
                 obj = IngresoSchema(
-                    Codigo_Producto=str(row.get('Codigo_Producto')),
-                    Codigo_Lote=str(row.get('Codigo_Lote')),
+                    Codigo_Producto=str(row.get('Codigo_Producto', '')).strip(),
+                    Codigo_Lote=str(row.get('Codigo_Lote', '')).strip(),
                     Fecha_Recepcion=f_rec,
                     Cantidad_Ingresada=float(row.get('Cantidad_Ingresada', 0)),
                     Precio_Unitario_PEN=float(row.get('Precio_Unitario_PEN', 0)),
-                    Precio_Unitario_USD=float(row.get('Precio_Unitario_USD', 0)),
                     Proveedor=str(row.get('Proveedor', '')),
-                    Factura=str(row.get('Factura', '')),
-                    Guia_Remision=str(row.get('Guia_Remision', '')),
-                    Cod_Operacion_Pago=str(row.get('Cod_Operacion_Pago', ''))
+                    Factura=str(row.get('Factura', ''))
                 )
                 registros_validados.append(obj.model_dump(mode='json'))
+
             except Exception as e:
-                errores.append(f"Fila {i+2}: {e}")
+                errores.append(f"Fila {i+2}: {str(e)}")
 
         return registros_validados, errores
     except Exception as e:
-        st.error(f"Error procesando archivo: {e}")
+        st.error(f"Error crítico en el archivo: {e}")
         return [], [str(e)]
 
 # --- INTERFAZ ---

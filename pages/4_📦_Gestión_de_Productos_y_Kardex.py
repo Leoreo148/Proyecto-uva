@@ -5,7 +5,7 @@ import numpy as np
 from supabase import create_client, Client
 
 # --- LIBRERÍAS PRO ---
-from st_aggrid import AgGrid, GridOptionsBuilder, ColumnsAutoSizeMode, GridUpdateMode
+from st_aggrid import AgGrid, GridOptionsBuilder, ColumnsAutoSizeMode, GridUpdateMode, JsCode
 from streamlit_extras.metric_cards import style_metric_cards
 from streamlit_extras.stylable_container import stylable_container
 
@@ -110,10 +110,10 @@ if not df_kardex.empty:
     m4.metric("Productos en Catálogo", len(df_p))
 
 # --- 6. TABLA INTERACTIVA (AG-GRID) ---
+# --- 6. TABLA INTERACTIVA (AG-GRID) ---
 st.subheader("📊 Inventario en Tiempo Real")
 
 if not df_kardex.empty:
-    # Columnas que queremos mostrar
     cols_mostrar = ['Codigo', 'Producto', 'Tipo_Accion', 'Stock_Lote', 'Stock_Minimo', 'Unidad', 'Periodo_Carencia_Dias', 'Dias_para_Vencer', 'Valorizado_PEN']
     
     gb = GridOptionsBuilder.from_dataframe(df_kardex[cols_mostrar])
@@ -121,8 +121,8 @@ if not df_kardex.empty:
     gb.configure_side_bar()
     gb.configure_selection('single', use_checkbox=True)
     
-    # Formateo y Colores (JavaScript)
-    cellsytle_jcode = """
+    # FIX: Envolver el texto en JsCode()
+    cellsytle_jcode = JsCode("""
     function(params) {
         if (params.data.Stock_Lote < params.data.Stock_Minimo) {
             return { 'color': 'white', 'backgroundColor': '#e74c3c' };
@@ -132,7 +132,7 @@ if not df_kardex.empty:
         }
         return null;
     }
-    """
+    """)
     gb.configure_column("Stock_Lote", cellStyle=cellsytle_jcode)
     grid_options = gb.build()
     
@@ -141,6 +141,7 @@ if not df_kardex.empty:
         gridOptions=grid_options,
         update_mode=GridUpdateMode.SELECTION_CHANGED,
         columns_auto_size_mode=ColumnsAutoSizeMode.FIT_CONTENTS,
+        allow_unsafe_jscode=True, # FIX: Autorizar la inyección de JavaScript
         theme='balham', 
         height=450
     )

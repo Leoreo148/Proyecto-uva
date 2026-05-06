@@ -52,13 +52,16 @@ def cargar_todo():
 def generar_kardex(df_p, df_i, df_s):
     if df_p.empty: return pd.DataFrame()
     
+    # Limpieza básica
     df_p['Stock_Minimo'] = df_p.get('Stock_Minimo', 0.0).fillna(0.0)
     
     if df_i.empty:
         df_final = df_p.copy()
         df_final[['Stock_Lote', 'Valorizado_PEN']] = 0.0
+        df_final['Dias_para_Vencer'] = 999
         return df_final
 
+    # Cálculo de saldos
     if not df_s.empty:
         gastado = df_s.groupby('Ingreso_ID')['Cantidad_Usada'].sum().reset_index()
         df_balance = pd.merge(df_i, gastado, left_on='id', right_on='Ingreso_ID', how='left').fillna({'Cantidad_Usada': 0})
@@ -67,12 +70,24 @@ def generar_kardex(df_p, df_i, df_s):
         df_balance = df_i.copy()
         df_balance['Stock_Lote'] = df_balance['Cantidad_Ingresada']
 
+    # Merge con catálogo
     df_final = pd.merge(df_balance, df_p, left_on='Codigo_Producto', right_on='Codigo', how='right').fillna(0)
     df_final['Valorizado_PEN'] = df_final['Stock_Lote'] * df_final['Precio_Unitario_PEN']
     
+    # --- PROCESAMIENTO DE FECHAS SEGURO ---
     hoy = pd.Timestamp(date.today())
+    
+    # 1. Convertimos a fecha, los errores se vuelven NaT (Not a Time)
     df_final['Venc_Date'] = pd.to_datetime(df_final['Fecha_Vencimiento'], errors='coerce')
-    df_final['Dias_para_Vencer'] = (df_final['Venc_Date'] - hoy).dt.days.fillna(999)
+    
+    # 2. Calculamos los días
+    df_final['Dias_para_Vencer'] = (df_final['Venc_Date'] - hoy).dt.days
+    
+    # 3. FILTRO ANTI-BUG: 
+    # Si la fecha es nula (NaT) O si es una fecha "fantasma" muy antigua (anterior al año 2000)
+    # le asignamos 999 para que no arruine las métricas.
+    df_final.loc[df_final['Venc_Date'].isnull(), 'Dias_para_Vencer'] = 999
+    df_final.loc[df_final['Venc_Date'].dt.year < 2000, 'Dias_para_Vencer'] = 999
     
     return df_final
 

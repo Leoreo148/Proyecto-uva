@@ -37,6 +37,9 @@ def init_supabase():
 
 supabase = init_supabase()
 
+# Un aviso pequeño y profesional
+st.info("💡 **Guía de Unidades:** Usa **001** para productos líquidos (Lt) y **002** para sólidos/polvos (Kg).")
+
 # --- 3. CARGA DE DATOS AUDITADA ---
 @st.cache_data(ttl=60)
 def cargar_todo():

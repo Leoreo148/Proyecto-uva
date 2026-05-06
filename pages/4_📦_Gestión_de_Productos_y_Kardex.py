@@ -13,13 +13,16 @@ from streamlit_extras.stylable_container import stylable_container
 # --- 1. CONFIGURACIÓN E IDENTIDAD VISUAL ---
 st.set_page_config(page_title="Kardex & Inventario Maestro", page_icon="📦", layout="wide")
 
-# CSS para mejorar el contraste y el look en móvil
+# CSS para mejorar el look (Menos blanco, más profesional)
 st.markdown("""
     <style>
     .stApp { background-color: #f8f9fa; }
-    .main-header { color: #1e3d33; font-weight: bold; }
-    /* Ajuste para que las tablas no se vean blancas puras */
-    .ag-theme-balham { --ag-header-background-color: #1e3d33; --ag-header-foreground-color: #ffffff; }
+    div[data-testid="stMetric"] {
+        background-color: #ffffff;
+        border: 1px solid #e0e0e0;
+        padding: 15px;
+        border-radius: 10px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -28,28 +31,20 @@ if 'editing_product_id' not in st.session_state:
 if 'deleting_product_id' not in st.session_state:
     st.session_state.deleting_product_id = None
 
-try:
-    style_metric_cards(background_color="#ffffff", border_left_color="#1e3d33")
-except:
-    pass
-
-with stylable_container(key="title_box", css_styles="""{ background-color: #1e3d33; color: white; padding: 1rem; border-radius: 0.5rem; margin-bottom: 2rem; }"""):
-    st.title("📦 Inventario Lote a Lote (Build 9.0)")
-    st.write("Control total de existencias, trazabilidad de facturas y alertas FEFO.")
-
-# --- 2. CONEXIÓN Y CARGA DE DATOS AUDITADA ---
+# --- 2. CONEXIÓN ---
 @st.cache_resource
 def init_supabase():
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 supabase = init_supabase()
 
+# --- 3. CARGA DE DATOS AUDITADA ---
 @st.cache_data(ttl=60)
 def cargar_todo():
     if not supabase: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     
     p = supabase.table('Productos').select("*").order('Producto').execute()
-    # AUDITORÍA: Añadimos Factura, Guia_Remision, Observaciones y Fecha_Recepcion
+    # AUDITORÍA: Jalamos exactamente lo que hay en tu Excel
     i = supabase.table('Ingresos').select("id, Codigo_Producto, Codigo_Lote, Cantidad_Ingresada, Precio_Unitario_PEN, Fecha_Vencimiento, Proveedor, Factura, Guia_Remision, Observaciones, Fecha_Recepcion").execute()
     s = supabase.table('Salidas').select("Ingreso_ID, Cantidad_Usada").execute()
     
@@ -58,16 +53,15 @@ def cargar_todo():
 def generar_kardex(df_p, df_i, df_s):
     if df_p.empty: return pd.DataFrame()
     
-    # Limpieza de Catálogo
-    for col in ['Stock_Minimo', 'Periodo_Carencia_Dias']:
-        df_p[col] = df_p.get(col, 0.0).fillna(0.0)
+    # Limpieza de datos
+    df_p['Stock_Minimo'] = df_p.get('Stock_Minimo', 0.0).fillna(0.0)
     
-    # Merge con Ingresos y Salidas
     if df_i.empty:
         df_final = df_p.copy()
         df_final[['Stock_Lote', 'Valorizado_PEN']] = 0.0
         return df_final
 
+    # Cálculo de saldos
     if not df_s.empty:
         gastado = df_s.groupby('Ingreso_ID')['Cantidad_Usada'].sum().reset_index()
         df_balance = pd.merge(df_i, gastado, left_on='id', right_on='Ingreso_ID', how='left').fillna({'Cantidad_Usada': 0})
@@ -76,6 +70,7 @@ def generar_kardex(df_p, df_i, df_s):
         df_balance = df_i.copy()
         df_balance['Stock_Lote'] = df_balance['Cantidad_Ingresada']
 
+    # Merge Final
     df_final = pd.merge(df_balance, df_p, left_on='Codigo_Producto', right_on='Codigo', how='right').fillna(0)
     df_final['Valorizado_PEN'] = df_final['Stock_Lote'] * df_final['Precio_Unitario_PEN']
     
@@ -85,25 +80,27 @@ def generar_kardex(df_p, df_i, df_s):
     
     return df_final
 
-# --- 3. PROCESAMIENTO ---
+# --- 4. PROCESAMIENTO ---
 df_p, df_i, df_s = cargar_todo()
-df_kardex = generar_kardex(df_p, df_i, df_s)
+df_kardex_crudo = generar_kardex(df_p, df_i, df_s)
+df_kardex = df_kardex_crudo.copy()
 
-# --- 4. PANEL DE FILTROS Y VISIBILIDAD (MEJORADO) ---
-with st.expander("⚙️ Configuración de Filtros y Vista", expanded=True):
+# --- 5. PANEL DE CONTROL (FILTROS Y VISIBILIDAD) ---
+with stylable_container(key="green_box", css_styles="{ background-color: #1e3d33; color: white; padding: 1.5rem; border-radius: 1rem; }"):
+    st.subheader("📦 Control de Inventario e Inteligencia de Datos")
+    
     c1, c2, c3 = st.columns([2, 2, 2])
-    
     with c1:
-        busqueda = st.text_input("🔍 Buscar (Producto/Lote/Factura/IA):")
+        busqueda = st.text_input("🔍 Buscador Universal:", placeholder="Lote, Factura, Producto...")
     with c2:
-        tipos = ["Todos"] + sorted(list(df_kardex['Tipo_Accion'].unique()))
-        filtro_tipo = st.selectbox("Categoría:", tipos)
-    
+        # FIX ERROR: Manejamos los valores nulos antes de ordenar
+        tipos_raw = df_kardex['Tipo_Accion'].unique()
+        tipos_limpios = sorted([str(t) for t in tipos_raw if t and str(t) != '0' and str(t) != 'nan'])
+        filtro_tipo = st.selectbox("Filtrar por Categoría:", ["Todos"] + tipos_limpios)
     with c3:
-        # Aquí definimos las columnas que el ingeniero puede encender/apagar
-        cols_opcionales = ['Proveedor', 'Factura', 'Guia_Remision', 'Fecha_Recepcion', 'Ingrediente_Activo', 'Incompatible_Con', 'Periodo_Carencia_Dias', 'Precio_Unitario_PEN', 'Valorizado_PEN']
-        # Por defecto solo 5 columnas para móvil
-        seleccionadas = st.multiselect("Añadir Detalles a la tabla:", options=cols_opcionales, default=[])
+        # SELECTOR DE COLUMNAS PARA MÓVIL
+        cols_opcionales = ['Proveedor', 'Factura', 'Guia_Remision', 'Fecha_Recepcion', 'Ingrediente_Activo', 'Precio_Unitario_PEN', 'Valorizado_PEN', 'Observaciones']
+        mostrar_extras = st.multiselect("⚙️ Ver más detalles (PC):", options=cols_opcionales, default=[])
 
 # Aplicar Filtros
 if busqueda:
@@ -112,32 +109,29 @@ if busqueda:
 if filtro_tipo != "Todos":
     df_kardex = df_kardex[df_kardex['Tipo_Accion'] == filtro_tipo]
 
-# --- 5. MÉTRICAS ---
-st.divider()
+# --- 6. MÉTRICAS ---
+st.write("")
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("Valor Inventario", f"S/ {df_kardex['Valorizado_PEN'].sum():,.2f}")
-m2.metric("Items Críticos", len(df_kardex[df_kardex['Stock_Lote'] < df_kardex['Stock_Minimo']]))
-m3.metric("Por Vencer (<15d)", len(df_kardex[df_kardex['Dias_para_Vencer'] < 15]))
-m4.metric("Registros", len(df_kardex))
+style_metric_cards()
+m1.metric("Valor total en Almacén", f"S/ {df_kardex['Valorizado_PEN'].sum():,.2f}")
+m2.metric("Stock Crítico", len(df_kardex[df_kardex['Stock_Lote'] < df_kardex['Stock_Minimo']]))
+m3.metric("Próximos a Vencer", len(df_kardex[df_kardex['Dias_para_Vencer'] < 15]))
+m4.metric("Registros Visibles", len(df_kardex))
 
-# --- 6. AG-GRID CONFIGURACIÓN (MÓVIL FRIENDLY) ---
-# Columnas base (siempre visibles)
-cols_base = ['Codigo', 'Producto', 'Codigo_Lote', 'Stock_Lote', 'Unidad']
-cols_finales = cols_base + seleccionadas + ['Dias_para_Vencer']
+# --- 7. AG-GRID (OPTIMIZACIÓN MÓVIL) ---
+# Columnas fijas (Las que verá el ingeniero en el celular por defecto)
+cols_visibles = ['Codigo', 'Producto', 'Codigo_Lote', 'Stock_Lote', 'Unidad'] + mostrar_extras + ['Dias_para_Vencer']
 
 if not df_kardex.empty:
-    gb = GridOptionsBuilder.from_dataframe(df_kardex[cols_finales])
+    gb = GridOptionsBuilder.from_dataframe(df_kardex[cols_visibles])
     gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
     gb.configure_selection('single', use_checkbox=True)
     
-    # Configuración de anchos para que no se vea mal en móvil
-    for col in cols_finales:
-        if col in ['Producto', 'Proveedor', 'Factura']:
-            gb.configure_column(col, minWidth=180, flex=1)
-        else:
-            gb.configure_column(col, minWidth=100)
+    # Configuración Responsiva: Las columnas crecen pero tienen un mínimo
+    for col in cols_visibles:
+        gb.configure_column(col, minWidth=120, flex=1 if col in ['Producto', 'Proveedor'] else 0)
 
-    # Colores de Alerta
+    # Lógica de colores (JS)
     cellsytle_jcode = JsCode("""
     function(params) {
         if (params.data.Stock_Lote <= 0) { return { 'color': 'white', 'backgroundColor': '#e74c3c' }; }
@@ -156,14 +150,14 @@ if not df_kardex.empty:
         height=500
     )
 
-    # --- 7. EXPORTAR ---
+    # Exportar Reporte
+    st.write("")
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-        df_kardex[cols_finales].to_excel(writer, index=False)
-    
-    st.download_button("📥 Descargar Reporte Personalizado", data=buffer.getvalue(), file_name=f"Kardex_{date.today()}.xlsx", mime="application/vnd.ms-excel")
+        df_kardex[cols_visibles].to_excel(writer, index=False)
+    st.download_button("📥 Descargar Reporte (Excel)", data=buffer.getvalue(), file_name=f"Kardex_{date.today()}.xlsx", mime="application/vnd.ms-excel")
 
-    # --- 8. ACCIONES ---
+# --- 8. DIÁLOGOS DE EDICIÓN ---
     selected = grid_response['selected_rows']
     if selected is not None and not (isinstance(selected, pd.DataFrame) and selected.empty):
         sel_row = selected.iloc[0] if isinstance(selected, pd.DataFrame) else selected[0]

@@ -37,13 +37,13 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- 3. CARGA DE DATOS AUDITADA (Excel Sync) ---
+# --- 3. CARGA DE DATOS AUDITADA ---
 @st.cache_data(ttl=60)
 def cargar_todo():
     if not supabase: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     
     p = supabase.table('Productos').select("*").order('Producto').execute()
-    # AUDITORÍA: Añadimos 'PREC. UNI $.' y 'DEPOSITO (BCP_COD)' del Excel
+    # AUDITORÍA: Columnas exactas del Excel
     i = supabase.table('Ingresos').select("id, Codigo_Producto, Codigo_Lote, Cantidad_Ingresada, Precio_Unitario_PEN, Precio_Unitario_USD, Fecha_Vencimiento, Proveedor, Factura, Guia_Remision, Observaciones, Fecha_Recepcion, Deposito").execute()
     s = supabase.table('Salidas').select("Ingreso_ID, Cantidad_Usada").execute()
     
@@ -77,8 +77,9 @@ def generar_kardex(df_p, df_i, df_s):
     return df_final
 
 # --- 4. PROCESAMIENTO ---
-df_p_raw, df_i_raw, df_s_raw = cargar_todo()
-df_kardex = generar_kardex(df_p_raw, df_i_raw, df_s_raw)
+df_p, df_i, df_s = cargar_todo()
+df_kardex_crudo = generar_kardex(df_p, df_i, df_s)
+df_kardex = df_kardex_crudo.copy()
 
 # --- 5. PANEL DE CONTROL ---
 with stylable_container(key="green_panel", css_styles="{ background-color: #1e3d33; color: white; padding: 1.5rem; border-radius: 1rem; }"):
@@ -92,7 +93,6 @@ with stylable_container(key="green_panel", css_styles="{ background-color: #1e3d
         tipos_limpios = sorted([str(t) for t in tipos_raw if t and str(t) not in ['0', 'nan', 'None']])
         filtro_tipo = st.selectbox("Categoría:", ["Todos"] + tipos_limpios)
     with c3:
-        # AUDITORÍA: Añadimos Depósito y Precio USD al selector
         cols_detalle = ['Proveedor', 'Factura', 'Guia_Remision', 'Deposito', 'Precio_Unitario_PEN', 'Precio_Unitario_USD', 'Ingrediente_Activo', 'Observaciones']
         mostrar_extras = st.multiselect("⚙️ Columnas adicionales:", options=cols_detalle, default=[])
 
@@ -112,7 +112,7 @@ m2.metric("Alertas Stock", len(df_kardex[df_kardex['Stock_Lote'] < df_kardex['St
 m3.metric("Vencimientos <15d", len(df_kardex[df_kardex['Dias_para_Vencer'] < 15]))
 m4.metric("Lotes en Vista", len(df_kardex))
 
-# --- 7. AG-GRID (REGLA DE LAS 5 COLUMNAS + EXTRAS) ---
+# --- 7. AG-GRID ---
 cols_visibles = ['Codigo', 'Producto', 'Codigo_Lote', 'Stock_Lote', 'Unidad'] + mostrar_extras + ['Dias_para_Vencer']
 
 if not df_kardex.empty:
@@ -123,7 +123,6 @@ if not df_kardex.empty:
     for col in cols_visibles:
         gb.configure_column(col, minWidth=120, flex=1 if col in ['Producto', 'Proveedor'] else 0)
 
-    # Lógica de colores (JS)
     cellsytle_jcode = JsCode("""
     function(params) {
         if (params.data.Stock_Lote <= 0) { return { 'color': 'white', 'backgroundColor': '#e74c3c' }; }
@@ -158,18 +157,18 @@ if not df_kardex.empty:
         c_acc1, c_acc2, c_acc3 = st.columns([2,2,4])
         
         if c_acc1.button("✏️ Editar Producto Master"):
-            match = df_p_raw[df_p_raw['Codigo'] == sel_row['Codigo']]
+            match = df_p[df_p['Codigo'] == sel_row['Codigo']]
             if not match.empty:
                 st.session_state.editing_product_id = int(match.iloc[0]['id'])
                 st.rerun()
         
         with c_acc3:
             with stylable_container("obs", css_styles="{ background-color: #e8f4fd; padding: 10px; border-radius: 8px; border: 1px solid #b3d7ff;}"):
-                st.write(f"**💡 Observaciones del Lote:** {sel_row.get('Observaciones','Sin notas.')}")
+                st.write(f"**💡 Observaciones:** {sel_row.get('Observaciones','Sin notas.')}")
 
 # --- 9. DIÁLOGOS DE GESTIÓN ---
 if st.session_state.editing_product_id:
-    prod_to_edit = df_p_raw[df_p_raw['id'] == st.session_state.editing_product_id].iloc[0]
+    prod_to_edit = df_p[df_p['id'] == st.session_state.editing_product_id].iloc[0]
     @st.dialog("✏️ Editar Maestro")
     def show_edit_dialog(p):
         with st.form("form_ed"):

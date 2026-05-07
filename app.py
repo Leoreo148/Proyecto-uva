@@ -1,66 +1,133 @@
 import streamlit as st
 import pandas as pd
-import joblib
+import plotly.express as px
+from datetime import datetime, date, timedelta
+from supabase import create_client
 
-# --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Panel del Fundo", page_icon="🍇", layout="wide")
+# --- LIBRERÍAS PRO ---
+from streamlit_extras.metric_cards import style_metric_cards
+from streamlit_extras.stylable_container import stylable_container
 
-# --- FUNCIONES AUXILIARES ---
-def cargar_modelo():
-    try:
-        return joblib.load('modelo_oidio.joblib')
-    except FileNotFoundError:
-        st.error("Error Crítico: No se encontró 'modelo_oidio.joblib'.")
-        st.stop()
+# --- 1. CONFIGURACIÓN E IDENTIDAD VISUAL ---
+st.set_page_config(page_title="Panel del Fundo - Dashboard", page_icon="📊", layout="wide")
 
-def cargar_inventario():
-    try:
-        return pd.read_excel("Inventario_Productos.xlsx")
-    except FileNotFoundError:
-        return pd.DataFrame(columns=['Producto', 'Tipo_Accion'])
+st.markdown("""
+    <style>
+    .stApp { background-color: #f8f9fa; }
+    div[data-testid="stMetric"] {
+        background-color: #ffffff;
+        border: 1px solid #e0e0e0;
+        padding: 15px;
+        border-radius: 10px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-def obtener_recomendacion(prediccion, inventario_df):
-    if prediccion == 0:
-        return "🟢 **RIESGO BAJO:** No se requiere acción inmediata."
-    elif prediccion == 1:
-        recomendacion = "🟡 **RIESGO MEDIO:** Aplicación **Preventiva** sugerida."
-        productos_sugeridos = inventario_df[inventario_df['Tipo_Accion'].isin(['Preventivo', 'Curativo'])]
-        if not productos_sugeridos.empty:
-            recomendacion += "\n\n**Productos:** " + ", ".join(productos_sugeridos['Producto'].tolist())
-        return recomendacion
+# --- 2. CONEXIÓN A SUPABASE ---
+@st.cache_resource
+def init_supabase():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = init_supabase()
+
+# --- 3. CARGA DE DATOS CENTRALIZADA ---
+@st.cache_data(ttl=300)
+def cargar_todo():
+    if not supabase: return {}
+    
+    # Tablas necesarias para el resumen
+    tablas = ["Productos", "Ingresos", "Salidas", "Registro_Horas_Tractor", "Maquinaria", "Ordenes_de_Trabajo"]
+    dfs = {}
+    for t in tablas:
+        try:
+            res = supabase.table(t).select("*").execute()
+            dfs[t] = pd.DataFrame(res.data)
+        except:
+            dfs[t] = pd.DataFrame()
+    return dfs
+
+data = cargar_todo()
+
+# --- 4. CEREBRO MATEMÁTICO (STOCK Y COSTOS) ---
+def procesar_kardex_dashboard(dfs):
+    df_p = dfs.get("Productos", pd.DataFrame())
+    df_i = dfs.get("Ingresos", pd.DataFrame())
+    df_s = dfs.get("Salidas", pd.DataFrame())
+    
+    if df_i.empty: return pd.DataFrame()
+
+    if not df_s.empty:
+        gastado = df_s.groupby('Ingreso_ID')['Cantidad_Usada'].sum().reset_index()
+        df_balance = pd.merge(df_i, gastado, left_on='id', right_on='Ingreso_ID', how='left').fillna({'Cantidad_Usada': 0})
+        df_balance['Stock_Lote'] = df_balance['Cantidad_Ingresada'] - df_balance['Cantidad_Usada']
     else:
-        recomendacion = "🔴 **RIESGO ALTO:** Aplicación **Curativa** o **Erradicante** sugerida."
-        productos_sugeridos = inventario_df[inventario_df['Tipo_Accion'].isin(['Curativo', 'Erradicante'])]
-        if not productos_sugeridos.empty:
-            recomendacion += "\n\n**Productos:** " + ", ".join(productos_sugeridos['Producto'].tolist())
-        return recomendacion
+        df_balance = df_i.copy()
+        df_balance['Stock_Lote'] = df_balance['Cantidad_Ingresada']
 
-# --- BARRA LATERAL ---
-st.sidebar.header('Parámetros del Clima')
-temp_max = st.sidebar.number_input('Temp. Máxima (°C)', 10.0, 40.0, 27.0)
-temp_min = st.sidebar.number_input('Temp. Mínima (°C)', 0.0, 30.0, 19.0)
-temp_prom = st.sidebar.number_input('Temp. Promedio (°C)', 5.0, 35.0, 23.0)
-hr_prom = st.sidebar.number_input('Humedad Rel. (%)', 30.0, 100.0, 89.0)
-precipitacion = st.sidebar.number_input('Precipitación (mm)', 0.0, 50.0, 0.0)
-viento = st.sidebar.number_input('Viento (km/h)', 0.0, 50.0, 14.0)
-sol = st.sidebar.number_input('Horas de Sol', 0.0, 14.0, 8.0)
+    df_final = pd.merge(df_balance, df_p, left_on='Codigo_Producto', right_on='Codigo', how='left')
+    df_final['Valorizado_PEN'] = df_final['Stock_Lote'] * df_final['Precio_Unitario_PEN'].fillna(0)
+    
+    # Limpieza de fechas para evitar el bug del número negativo
+    hoy = pd.Timestamp(date.today())
+    df_final['Venc_Date'] = pd.to_datetime(df_final['Fecha_Vencimiento'], errors='coerce')
+    df_final['Dias_para_Vencer'] = (df_final['Venc_Date'] - hoy).dt.days
+    df_final.loc[df_final['Venc_Date'].isnull() | (df_final['Venc_Date'].dt.year < 2000), 'Dias_para_Vencer'] = 999
+    
+    return df_final
 
-# --- PÁGINA PRINCIPAL ---
-st.title('🍇 Predicción de Riesgo de Oídio')
-st.write("Esta página predice el riesgo de enfermedad basado en los parámetros del clima.")
-modelo = cargar_modelo()
-input_data = {
-    'Temp_Max_C': temp_max, 'Temp_Min_C': temp_min, 'Temp_Prom_C': temp_prom,
-    'HR_Prom_Porc': hr_prom, 'Precipitacion_mm': precipitacion,
-    'Vel_Viento_Prom_kmh': viento, 'Horas_Sol': sol
-}
-input_df = pd.DataFrame(input_data, index=[0])
-st.subheader('Parámetros Ingresados:')
-st.write(input_df)
-if st.button('Predecir Riesgo'):
-    inventario_df = cargar_inventario()
-    prediction = modelo.predict(input_df)
-    recomendacion_texto = obtener_recomendacion(prediction[0], inventario_df)
-    st.info(recomendacion_texto)
+df_kardex = procesar_kardex_dashboard(data)
 
+# --- 5. CABECERA PRINCIPAL ---
+with stylable_container(key="title_panel", css_styles="{ background-color: #1e3d33; color: white; padding: 1.5rem; border-radius: 1rem; }"):
+    st.title("📊 Dashboard General del Fundo")
+    st.write(f"Resumen operativo y financiero actualizado al {datetime.now().strftime('%d/%m/%Y')}")
 
+# --- 6. KPIs (MÉTRICAS CLAVE) ---
+st.write("")
+m1, m2, m3, m4 = st.columns(4)
+style_metric_cards(border_left_color="#1e3d33")
+
+if not df_kardex.empty:
+    m1.metric("💰 Valor Almacén", f"S/ {df_kardex['Valorizado_PEN'].sum():,.2f}")
+    m2.metric("⚠️ Lotes por Vencer", len(df_kardex[(df_kardex['Dias_para_Vencer'] < 30) & (df_kardex['Stock_Lote'] > 0)]))
+
+df_h = data.get("Registro_Horas_Tractor", pd.DataFrame())
+if not df_h.empty:
+    h7 = pd.to_datetime(df_h['Fecha']).dt.date >= (date.today() - timedelta(days=7))
+    m3.metric("🚜 Horas Tractor (7d)", f"{df_h[h7]['Total_Horas'].sum():,.1f} h")
+
+df_ot = data.get("Ordenes_de_Trabajo", pd.DataFrame())
+if not df_ot.empty:
+    pendientes = len(df_ot[df_ot['Status'] != 'Aplicada en Campo'])
+    m4.metric("📝 Órdenes en Curso", pendientes)
+
+# --- 7. GRÁFICOS ---
+st.divider()
+c1, c2 = st.columns(2)
+
+with c1:
+    with st.container(border=True):
+        st.subheader("📦 Inversión por Categoría")
+        if not df_kardex.empty:
+            df_pie = df_kardex.groupby('Tipo_Accion')['Valorizado_PEN'].sum().reset_index()
+            fig_pie = px.pie(df_pie, values='Valorizado_PEN', names='Tipo_Accion', hole=0.4,
+                             color_discrete_sequence=px.colors.qualitative.Prism)
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+with c2:
+    with st.container(border=True):
+        st.subheader("📉 Consumo de Insumos (Top 10)")
+        df_s = data.get("Salidas", pd.DataFrame())
+        df_i = data.get("Ingresos", pd.DataFrame())
+        df_p = data.get("Productos", pd.DataFrame())
+        if not df_s.empty and not df_i.empty:
+            df_merge = pd.merge(df_s, df_i[['id', 'Codigo_Producto']], left_on='Ingreso_ID', right_on='id')
+            df_merge = pd.merge(df_merge, df_p[['Codigo', 'Producto']], left_on='Codigo_Producto', right_on='Codigo')
+            top_insumos = df_merge.groupby('Producto')['Cantidad_Usada'].sum().sort_values(ascending=False).head(10).reset_index()
+            fig_bar = px.bar(top_insumos, x='Cantidad_Usada', y='Producto', orientation='h', 
+                             color_discrete_sequence=['#2ecc71'])
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+st.info("👈 Usa la barra lateral para navegar entre el Inventario, Mezclas y Gestión de Campo.")

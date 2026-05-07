@@ -1,160 +1,139 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-import json
+from datetime import datetime, date
 from io import BytesIO
+from supabase import create_client
 
-# --- LIBRERÍAS PARA LA CONEXIÓN A SUPABASE ---
-from supabase import create_client, Client
-# NOTA: La librería streamlit_local_storage es un componente personalizado.
-# Asegúrate de que esté funcionando en tu entorno.
-from streamlit_local_storage import LocalStorage
-
-# --- CONFIGURACIÓN DE LA PÁGINA ---
+# --- 1. CONFIGURACIÓN MÓVIL ---
 st.set_page_config(page_title="Monitoreo de Mosca", page_icon="🪰", layout="wide")
-st.title("🪰 Monitoreo de Mosca de la Fruta")
-st.write("Inicie una sesión de monitoreo para un sector y registre las capturas de múltiples trampas.")
 
-# --- INICIALIZACIÓN Y CONEXIONES ---
-localS = LocalStorage()
-LOCAL_STORAGE_KEY = 'mosca_fruta_offline'
+st.markdown("""
+    <style>
+    .stApp { background-color: #f4f7f6; }
+    .stButton>button { width: 100%; border-radius: 10px; height: 3.5em; font-weight: bold; }
+    .sync-box { background-color: #e3f2fd; padding: 15px; border-radius: 10px; border: 1px solid #90caf9; margin-bottom: 20px; }
+    /* Ajuste para inputs en móvil */
+    .stNumberInput input { font-size: 18px !important; }
+    </style>
+    """, unsafe_allow_html=True)
 
+# --- 2. MEMORIA LOCAL (COLA OFFLINE) ---
+if 'cola_mosca' not in st.session_state:
+    st.session_state.cola_mosca = []
+if 'sector_fijo' not in st.session_state:
+    st.session_state.sector_fijo = ""
+
+# --- 3. CONEXIÓN ---
 @st.cache_resource
-def init_supabase_connection():
+def init_supabase():
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+
+supabase = init_supabase()
+
+# --- 4. FUNCIONES ---
+def sync_mosca():
+    if not st.session_state.cola_mosca:
+        st.info("No hay datos pendientes.")
+        return
+
     try:
-        url = st.secrets["SUPABASE_URL"]
-        key = st.secrets["SUPABASE_KEY"]
-        return create_client(url, key)
+        with st.spinner("Subiendo datos a la nube..."):
+            supabase.table('Monitoreo_Mosca').insert(st.session_state.cola_mosca).execute()
+            st.session_state.cola_mosca = []
+            st.success("¡Sincronización Exitosa!")
+            st.balloons()
+            st.cache_data.clear()
     except Exception as e:
-        st.error(f"Error al conectar con Supabase: {e}")
-        return None
-
-supabase = init_supabase_connection()
-
-# --- NUEVAS FUNCIONES ADAPTADAS PARA SUPABASE ---
-@st.cache_data(ttl=60)
-def cargar_monitoreo_supabase():
-    """Carga el historial de monitoreo desde la tabla de Supabase."""
-    if supabase:
-        try:
-            response = supabase.table('Monitoreo_Mosca').select("*").execute()
-            df = pd.DataFrame(response.data)
-            return df
-        except Exception as e:
-            st.error(f"Error al cargar el historial de Supabase: {e}")
-    return pd.DataFrame()
+        st.error(f"Error de conexión: {e}. Los datos siguen guardados en el celular.")
 
 def to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Reporte_Monitoreo_Mosca')
+        df.to_excel(writer, index=False, sheet_name='Monitoreo_Mosca')
     return output.getvalue()
 
-# --- INICIALIZAR MEMORIA DE SESIÓN ---
-if 'sesion_monitoreo' not in st.session_state:
-    st.session_state.sesion_monitoreo = []
-if 'sector_actual' not in st.session_state:
-    st.session_state.sector_actual = ""
+# --- 5. INTERFAZ PRINCIPAL ---
+with st.container():
+    st.title("🪰 Monitor de Mosca")
+    
+    # INDICADOR DE COLA PENDIENTE
+    if st.session_state.cola_mosca:
+        st.markdown(f"""
+            <div class="sync-box">
+                🔵 <strong>{len(st.session_state.cola_mosca)} registros listos</strong> para subir.<br>
+                Sincroniza cuando tengas internet.
+            </div>
+            """, unsafe_allow_html=True)
+        if st.button("🔄 SUBIR DATOS A SUPABASE"):
+            sync_mosca()
 
-# --- INTERFAZ DE REGISTRO ---
-with st.expander("➕ Iniciar y Registrar Sesión de Monitoreo"):
-    st.subheader("1. Iniciar Sesión")
-    col1, col2 = st.columns(2)
-    with col1:
-        sector_manual = st.text_input("Escriba el nombre del Sector a monitorear:", placeholder="Ej: Palto, Fundo Aledaño, Cerco 1", key="sector_input")
-    with col2:
-        fecha_conteo = st.date_input("Fecha de Conteo", datetime.now())
+# --- FORMULARIO DE REGISTRO RÁPIDO ---
+with st.expander("📝 Registro de Trampa", expanded=True):
+    # Datos de cabecera (se mantienen fijos por sesión)
+    c1, c2 = st.columns(2)
+    with c1:
+        sectores = ['J1', 'J2', 'R1', 'R2', 'W1', 'W2', 'W3', 'K1', 'K2','K3']
+        sector_input = st.selectbox("Sector", sectores, index=0)
+    with c2:
+        fecha_input = st.date_input("Fecha", value=date.today())
 
-    if sector_manual:
-        st.session_state.sector_actual = sector_manual
-
-    if st.session_state.sector_actual:
-        st.subheader(f"2. Registrar Trampas para el Sector: **{st.session_state.sector_actual}**")
-        with st.form("nueva_trampa_form", clear_on_submit=True):
-            numero_trampa = st.text_input("Número o Código de Trampa", placeholder="Ej: T1, 105")
-            tipo_trampa = st.selectbox("Tipo de Trampa", ["Jackson", "McPhail", "Otro"])
-            capturas_capitata = st.number_input("Ceratitis capitata", min_value=0, step=1)
-            capturas_fraterculus = st.number_input("Anastrepha fraterculus", min_value=0, step=1)
-            capturas_distinta = st.number_input("Anastrepha distinta", min_value=0, step=1)
-            
-            submitted_trampa = st.form_submit_button("➕ Añadir Trampa a la Sesión")
-            if submitted_trampa and numero_trampa:
-                st.session_state.sesion_monitoreo.append({
-                    "Fecha": fecha_conteo.strftime("%Y-%m-%d"), 
-                    "Sector": st.session_state.sector_actual, 
-                    "Numero_Trampa": numero_trampa, 
-                    "Tipo_Trampa": tipo_trampa,
-                    "Ceratitis_capitata": capturas_capitata, 
-                    "Anastrepha_fraterculus": capturas_fraterculus, 
-                    "Anastrepha_distinta": capturas_distinta
-                })
-            elif submitted_trampa:
-                st.warning("Por favor, ingrese el número de la trampa.")
-
-# --- RESUMEN DE LA SESIÓN Y GUARDADO LOCAL ---
-if st.session_state.sesion_monitoreo:
     st.divider()
-    st.subheader("Resumen de la Sesión Actual")
-    st.dataframe(pd.DataFrame(st.session_state.sesion_monitoreo), use_container_width=True)
-    col_g1, col_g2 = st.columns(2)
-    with col_g1:
-        if st.button("💾 Guardar Sesión en Dispositivo (Offline)"):
-            registros_locales_str = localS.getItem(LOCAL_STORAGE_KEY)
-            registros_locales = json.loads(registros_locales_str) if registros_locales_str else []
-            registros_locales.extend(st.session_state.sesion_monitoreo)
-            localS.setItem(LOCAL_STORAGE_KEY, json.dumps(registros_locales))
-            st.success(f"¡Sesión con {len(st.session_state.sesion_monitoreo)} registros guardada en el dispositivo!")
-            st.session_state.sesion_monitoreo = []
-            st.session_state.sector_actual = ""
+
+    with st.form("form_trampa", clear_on_submit=True):
+        col_t1, col_t2 = st.columns(2)
+        n_trampa = col_t1.text_input("N° Trampa", placeholder="Ej: 101")
+        t_trampa = col_t2.selectbox("Tipo", ["Jackson", "McPhail", "Otro"])
+
+        st.markdown("**Capturas Encontradas:**")
+        capitata = st.number_input("Ceratitis capitata", min_value=0, step=1, value=0)
+        fraterculus = st.number_input("Anastrepha fraterculus", min_value=0, step=1, value=0)
+        distinta = st.number_input("Anastrepha distinta", min_value=0, step=1, value=0)
+
+        if st.form_submit_button("➕ AÑADIR A LA LISTA"):
+            if not n_trampa:
+                st.warning("Debes poner el número de trampa.")
+            else:
+                nuevo_registro = {
+                    "Fecha": str(fecha_input),
+                    "Sector": sector_input,
+                    "Numero_Trampa": n_trampa,
+                    "Tipo_Trampa": t_trampa,
+                    "Ceratitis_capitata": int(capitata),
+                    "Anastrepha_fraterculus": int(fraterculus),
+                    "Anastrepha_distinta": int(distinta)
+                }
+                st.session_state.cola_mosca.append(nuevo_registro)
+                st.toast(f"Trampa {n_trampa} guardada", icon="✅")
+
+# --- 6. VISUALIZACIÓN DE COLA ACTUAL ---
+if st.session_state.cola_mosca:
+    with st.expander("📋 Ver registros en el teléfono"):
+        df_cola = pd.DataFrame(st.session_state.cola_mosca)
+        st.dataframe(df_cola[['Numero_Trampa', 'Ceratitis_capitata', 'Anastrepha_fraterculus']], use_container_width=True)
+        if st.button("🗑️ Borrar lista local"):
+            st.session_state.cola_mosca = []
             st.rerun()
-    with col_g2:
-        if st.button("❌ Limpiar Sesión Actual"):
-            st.session_state.sesion_monitoreo = []
-            st.session_state.sector_actual = ""
-            st.rerun()
 
-# --- SECCIÓN DE SINCRONIZACIÓN ---
+# --- 7. HISTORIAL (NUBE) ---
 st.divider()
-st.subheader("📡 Sincronización con la Base de Datos")
+st.subheader("📚 Historial Sincronizado")
+try:
+    res = supabase.table('Monitoreo_Mosca').select("*").order('Fecha', desc=True).limit(50).execute()
+    df_db = pd.DataFrame(res.data)
+except:
+    df_db = pd.DataFrame()
 
-registros_pendientes_str = localS.getItem(LOCAL_STORAGE_KEY)
-registros_pendientes = json.loads(registros_pendientes_str) if registros_pendientes_str else []
-
-if registros_pendientes:
-    st.warning(f"Hay **{len(registros_pendientes)}** registros de trampas guardados localmente pendientes de sincronizar.")
-    if st.button("Sincronizar Ahora con Supabase"):
-        if supabase:
-            with st.spinner("Sincronizando..."):
-                try:
-                    supabase.table('Monitoreo_Mosca').insert(registros_pendientes).execute()
-                    localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
-                    st.success("¡Sincronización completada!")
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar en Supabase: {e}. Sus datos locales están a salvo.")
-        else:
-            st.error("No se pudo sincronizar. La conexión con Supabase no está disponible.")
-else:
-    st.info("✅ Todos los registros de monitoreo están sincronizados.")
-
-# --- HISTORIAL Y DESCARGA ---
-st.divider()
-st.subheader("📚 Historial de Monitoreo Sincronizado")
-df_historial = cargar_monitoreo_supabase()
-
-if df_historial is not None and not df_historial.empty:
-    df_historial['Fecha'] = pd.to_datetime(df_historial['Fecha'])
-    df_historial_ordenado = df_historial.sort_values(by='Fecha', ascending=False)
+if not df_db.empty:
+    # Agrupamos por fecha y sector para que el de sanidad vea resúmenes
+    df_view = df_db[['Fecha', 'Sector', 'Numero_Trampa', 'Ceratitis_capitata', 'Anastrepha_fraterculus', 'Anastrepha_distinta']]
+    st.dataframe(df_view, use_container_width=True, hide_index=True)
     
-    st.dataframe(df_historial_ordenado, use_container_width=True)
-    
-    reporte_excel = to_excel(df_historial_ordenado)
+    excel_file = to_excel(df_db)
     st.download_button(
-        label="📥 Descargar Historial Completo",
-        data=reporte_excel,
-        file_name=f"Historial_Monitoreo_Mosca_{datetime.now().strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        label="📥 Descargar Historial Completo (Excel)",
+        data=excel_file,
+        file_name=f"Monitoreo_Mosca_{date.today()}.xlsx",
+        mime="application/vnd.ms-excel"
     )
 else:
-    st.info("Aún no se ha sincronizado ninguna sesión de monitoreo.")
+    st.info("No hay datos históricos sincronizados.")

@@ -85,21 +85,32 @@ with st.form("form_registro", clear_on_submit=True):
     
     with c1:
         def search_products(searchterm: str):
-            # 1. Verificamos que haya algo escrito y que los datos existan
+            # 1. Seguridad: Si no hay texto o la tabla está vacía, no busques
             if not searchterm or df_p.empty: 
                 return []
             
-            # 2. El truco: agregamos 'na=False' para que los nulos no rompan el filtro
-            # También usamos .astype(str) por si acaso hay códigos numéricos
-            mask = (
-                df_p['Producto'].astype(str).str.contains(searchterm, case=False, na=False) | 
-                df_p['Codigo'].astype(str).str.contains(searchterm, case=False, na=False)
-            )
+            try:
+                # 2. Limpieza en tiempo real: Forzamos a texto y eliminamos espacios
+                # 'na=False' es vital: evita que el buscador se rompa si encuentra una celda vacía
+                mask = (
+                    df_p['Producto'].astype(str).str.contains(searchterm, case=False, na=False) | 
+                    df_p['Codigo'].astype(str).str.contains(searchterm, case=False, na=False)
+                )
+                
+                filtered = df_p[mask]
+                
+                # 3. Retorno seguro: Si no hay coincidencias, devolvemos lista vacía
+                if filtered.empty:
+                    return []
+                
+                # 4. Formato para el buscador: (Etiqueta que ves, Valor que se guarda)
+                # Limitamos a 15 resultados para que el celular no se trabe
+                return [(f"{row['Producto']} ({row['Codigo']})", str(row['Codigo'])) 
+                        for _, row in filtered.head(15).iterrows()]
             
-            filtered = df_p[mask]
-            
-            # 3. Retornamos máximo 15 resultados para que el celular no sufra
-            return [(f"{row['Producto']} ({row['Codigo']})", row['Codigo']) for _, row in filtered.head(15).iterrows()]
+            except Exception as e:
+                # Si algo falla, no bloqueamos la app, solo devolvemos vacío
+                return []
         
         cod_prod = st_searchbox(search_products, key="prod_search", label="Seleccionar Producto")
         lote = st.text_input("Código de Lote / Batch")

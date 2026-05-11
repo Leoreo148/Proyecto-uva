@@ -74,10 +74,12 @@ def get_history():
 # --- 5. INTERFAZ DE USUARIO ---
 with stylable_container(key="title_container", css_styles="""{ background-color: #1e3d33; color: white; padding: 1.5rem; border-radius: 1rem; margin-bottom: 2rem; }"""):
     st.title("📥 Registro Maestro de Ingresos")
-    st.write(f"🔍 DEBUG: He cargado {len(df_p)} productos de la base de datos.")
+    st.write("Auditoría de almacén y control de compras.")
+
+st.write(f"🔍 DEBUG: He cargado {len(df_p)} productos de la base de datos.")
 if not df_p.empty:
     st.write("Primeros 3 productos:", df_p.head(3))
-
+    
 df_p = get_products()
 
 # FORMULARIO DE REGISTRO

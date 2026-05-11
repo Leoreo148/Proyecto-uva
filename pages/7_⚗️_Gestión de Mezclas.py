@@ -205,10 +205,18 @@ with tab3:
                 
                 col_aud1, col_aud2 = st.columns([1, 1])
                 
-                with col_aud1:
-                    st.caption("🧪 Composición de la Mezcla:")
-                    st.table(pd.DataFrame(ot['Receta_Mezcla_Lotes']).rename(columns={'p': 'Producto', 'l': 'Lote', 'c': 'Cant'}))
-                
+                with col_aud2:
+                    st.caption("⚙️ Parámetros Técnicos Programados:")
+                    st.info(ot.get('Observaciones_Aplicacion', 'Sin datos técnicos.'))
+                    
+                    # 🛡️ FIX: Validamos que la fecha exista y sea texto antes de cortarla
+                    fecha_fin = ot.get('Aplicacion_Completada_Fecha')
+                    if pd.notna(fecha_fin) and str(fecha_fin).strip() not in ["", "NaT", "nan", "None"]:
+                        # Reemplazamos la 'T' por un espacio para que se lea mejor (Ej: 2026-05-10 14:30)
+                        st.success(f"🚜 Finalizado en campo: {str(fecha_fin)[:16].replace('T', ' ')}")
+                    else:
+                        st.warning("⏳ En espera de aplicación por el tractorista.")
+                        
                 with col_aud2:
                     st.caption("⚙️ Parámetros Técnicos Programados:")
                     st.info(ot.get('Observaciones_Aplicacion', 'Sin datos técnicos.'))

@@ -159,6 +159,7 @@ else:
 
                             st.success(f"¡Labor finalizada! Tiempo total registrado: {round(horas_trabajadas, 2)} horas.")
                             st.balloons()
+                            st.cache_data.clear()
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al finalizar: {e}")

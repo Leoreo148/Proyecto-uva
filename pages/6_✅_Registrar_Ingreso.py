@@ -30,13 +30,14 @@ class IngresoSchema(BaseModel):
     Codigo_Producto: str
     Codigo_Lote: str
     Fecha_Recepcion: date
-    Fecha_Vencimiento: Optional[date] = None # <-- NUEVO
+    Fecha_Vencimiento: Optional[date] = None 
     Cantidad_Ingresada: float
     Precio_Unitario_PEN: float = 0.0
     Proveedor: Optional[str] = None
     Factura: Optional[str] = None
-    Guia_Remision: Optional[str] = None      # <-- NUEVO
-    Observaciones: Optional[str] = None       # <-- NUEVO
+    Guia_Remision: Optional[str] = None      
+    Observaciones: Optional[str] = None       
+    Responsable: Optional[str] = None # <-- NUEVO CAMPO DE AUDITORÍA
 
     @field_validator('Cantidad_Ingresada', 'Precio_Unitario_PEN')
     def must_be_positive(cls, v):
@@ -76,7 +77,6 @@ with stylable_container(key="title_container", css_styles="""{ background-color:
     st.write("Auditoría de almacén y control de compras.")
 df_p = get_products()
 
-# FORMULARIO DE REGISTRO
 # --- DIÁLOGO PARA CREAR PRODUCTO NUEVO ---
 @st.dialog("📦 Registrar Nuevo Producto en el Catálogo")
 def modal_crear_producto():
@@ -88,7 +88,7 @@ def modal_crear_producto():
         
         c_mod3, c_mod4 = st.columns(2)
         n_uni = c_mod3.selectbox("Unidad de Medida", ["001", "002"], help="001=Lt | 002=Kg")
-        n_tipo = c_mod4.selectbox("Categoría", ["Funguisida y Bactericida", "Insecticida y Acaricida", "Fertilizante", "Agroquímicos", "Herbicida", "Otro"])
+        n_tipo = c_mod4.selectbox("Categoría", ["Fungicida y Bactericida", "Insecticida y Acaricida", "Fertilizante", "Agroquímicos", "Herbicida", "Otro"])
         
         if st.form_submit_button("Guardar en Catálogo Maestro", use_container_width=True):
             if n_cod and n_nom:
@@ -142,8 +142,10 @@ with st.form("form_registro", clear_on_submit=True):
         fecha_venc = st.date_input("Fecha de Vencimiento", value=date.today().replace(year=date.today().year + 2))
 
     st.divider()
-    st.markdown("##### 🚛 Datos Logísticos y Documentos")
-    c4, c5, c6 = st.columns(3)
+    st.markdown("##### 🚛 Datos Logísticos y Auditoría")
+    
+    # 🛡️ Cambiamos a 4 columnas para incluir al Responsable
+    c4, c5, c6, c7 = st.columns(4)
     
     with c4:
         prov = st.text_input("Proveedor")
@@ -151,23 +153,29 @@ with st.form("form_registro", clear_on_submit=True):
         fact = st.text_input("N° de Factura")
     with c6:
         guia = st.text_input("Guía de Remisión")
+    with c7:
+        resp = st.text_input("Responsable (Recepción)", placeholder="Tu nombre")
     
     obs = st.text_area("Observaciones Adicionales", placeholder="Ej: Sacos con humedad, entrega parcial, etc.")
 
     if st.form_submit_button("💾 Confirmar Ingreso a Almacén", use_container_width=True):
         if cod_prod and lote and cant > 0:
-            try:
-                nuevo = IngresoSchema(
-                    Codigo_Producto=cod_prod, Codigo_Lote=lote, Fecha_Recepcion=fecha_rec,
-                    Fecha_Vencimiento=fecha_venc, Cantidad_Ingresada=cant, Precio_Unitario_PEN=p_pen,
-                    Proveedor=prov, Factura=fact, Guia_Remision=guia, Observaciones=obs
-                )
-                supabase.table('Ingresos').insert(nuevo.model_dump(mode='json')).execute()
-                st.success("✅ Ingreso registrado correctamente en la base de datos.")
-                st.cache_data.clear()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error al guardar: {e}")
+            if not resp:
+                st.warning("⚠️ Por favor, indica quién es el responsable de la recepción.")
+            else:
+                try:
+                    nuevo = IngresoSchema(
+                        Codigo_Producto=cod_prod, Codigo_Lote=lote, Fecha_Recepcion=fecha_rec,
+                        Fecha_Vencimiento=fecha_venc, Cantidad_Ingresada=cant, Precio_Unitario_PEN=p_pen,
+                        Proveedor=prov, Factura=fact, Guia_Remision=guia, Observaciones=obs,
+                        Responsable=resp # <-- Se guarda el responsable
+                    )
+                    supabase.table('Ingresos').insert(nuevo.model_dump(mode='json')).execute()
+                    st.success("✅ Ingreso registrado correctamente en la base de datos.")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al guardar: {e}")
         else:
             st.error("⚠️ Producto, Lote y Cantidad son campos obligatorios.")
 
@@ -183,7 +191,8 @@ st.subheader("📋 Historial de Movimientos")
 df_hist = get_history()
 
 if not df_hist.empty:
-    cols_visibles = ['Fecha_Recepcion', 'Producto', 'Codigo_Lote', 'Cantidad_Ingresada', 'Precio_Unitario_PEN', 'Proveedor', 'Factura']
+    # 🛡️ Añadimos 'Responsable' a las columnas visibles del historial
+    cols_visibles = ['Fecha_Recepcion', 'Producto', 'Codigo_Lote', 'Cantidad_Ingresada', 'Precio_Unitario_PEN', 'Proveedor', 'Factura', 'Responsable']
     cols_reales = [c for c in cols_visibles if c in df_hist.columns]
     
     gb = GridOptionsBuilder.from_dataframe(df_hist[cols_reales])

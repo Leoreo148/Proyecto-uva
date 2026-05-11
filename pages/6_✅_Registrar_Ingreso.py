@@ -85,9 +85,21 @@ with st.form("form_registro", clear_on_submit=True):
     
     with c1:
         def search_products(searchterm: str):
-            if not searchterm or df_p.empty: return []
-            filtered = df_p[df_p['Producto'].str.contains(searchterm, case=False) | df_p['Codigo'].str.contains(searchterm, case=False)]
-            return [(f"{row['Producto']} ({row['Codigo']})", row['Codigo']) for _, row in filtered.iterrows()]
+            # 1. Verificamos que haya algo escrito y que los datos existan
+            if not searchterm or df_p.empty: 
+                return []
+            
+            # 2. El truco: agregamos 'na=False' para que los nulos no rompan el filtro
+            # También usamos .astype(str) por si acaso hay códigos numéricos
+            mask = (
+                df_p['Producto'].astype(str).str.contains(searchterm, case=False, na=False) | 
+                df_p['Codigo'].astype(str).str.contains(searchterm, case=False, na=False)
+            )
+            
+            filtered = df_p[mask]
+            
+            # 3. Retornamos máximo 15 resultados para que el celular no sufra
+            return [(f"{row['Producto']} ({row['Codigo']})", row['Codigo']) for _, row in filtered.head(15).iterrows()]
         
         cod_prod = st_searchbox(search_products, key="prod_search", label="Seleccionar Producto")
         lote = st.text_input("Código de Lote / Batch")

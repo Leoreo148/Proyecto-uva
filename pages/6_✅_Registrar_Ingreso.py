@@ -77,13 +77,43 @@ with stylable_container(key="title_container", css_styles="""{ background-color:
 df_p = get_products()
 
 # FORMULARIO DE REGISTRO
+# --- DIÁLOGO PARA CREAR PRODUCTO NUEVO ---
+@st.dialog("📦 Registrar Nuevo Producto en el Catálogo")
+def modal_crear_producto():
+    st.write("Crea el 'molde' del producto antes de ingresarlo al almacén.")
+    with st.form("form_crear_maestro"):
+        c_mod1, c_mod2 = st.columns(2)
+        n_cod = c_mod1.text_input("Código (Ej: A260)", help="Debe ser único")
+        n_nom = c_mod2.text_input("Nombre del Producto")
+        
+        c_mod3, c_mod4 = st.columns(2)
+        n_uni = c_mod3.selectbox("Unidad de Medida", ["001", "002"], help="001=Lt | 002=Kg")
+        n_tipo = c_mod4.selectbox("Categoría", ["Funguisida y Bactericida", "Insecticida y Acaricida", "Fertilizante", "Agroquímicos", "Herbicida", "Otro"])
+        
+        if st.form_submit_button("Guardar en Catálogo Maestro", use_container_width=True):
+            if n_cod and n_nom:
+                try:
+                    nuevo_prod = {
+                        "Codigo": n_cod.strip().upper(),
+                        "Producto": n_nom.strip().upper(),
+                        "Unidad": n_uni,
+                        "Tipo_Accion": n_tipo
+                    }
+                    supabase.table('Productos').insert(nuevo_prod).execute()
+                    st.success(f"¡{n_nom} agregado al catálogo!")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error (¿Código duplicado?): {e}")
+            else:
+                st.warning("Código y Nombre son obligatorios.")
+
+# FORMULARIO DE REGISTRO
 with st.form("form_registro", clear_on_submit=True):
     st.markdown("##### 📝 Información del Producto")
     c1, c2, c3 = st.columns(3)
     
     with c1:
-        # 1. Creamos un diccionario a prueba de fallos: {"Nombre (Codigo)": "Codigo"}
-        # Ignoramos los que no tengan nombre para que no se rompa
         dict_productos = {}
         if not df_p.empty:
             for _, row in df_p.iterrows():
@@ -93,15 +123,12 @@ with st.form("form_registro", clear_on_submit=True):
                     etiqueta = f"{nombre} ({codigo})"
                     dict_productos[etiqueta] = codigo
         
-        # 2. Usamos el Selectbox NATIVO de Streamlit (¡Ya incluye lupa/buscador!)
         seleccion = st.selectbox(
             "Seleccionar Producto", 
             options=list(dict_productos.keys()), 
             index=None, 
-            placeholder="🔍 Escribe para buscar (ej. Abamectina)..."
+            placeholder="🔍 Escribe para buscar..."
         )
-        
-        # 3. Extraemos el código real para guardarlo en la base de datos
         cod_prod = dict_productos[seleccion] if seleccion else None
         
         lote = st.text_input("Código de Lote / Batch")
@@ -143,6 +170,12 @@ with st.form("form_registro", clear_on_submit=True):
                 st.error(f"Error al guardar: {e}")
         else:
             st.error("⚠️ Producto, Lote y Cantidad son campos obligatorios.")
+
+# BOTÓN DE CREACIÓN RÁPIDA (Fuera del formulario principal)
+st.write("")
+col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+if col_btn2.button("💡 ¿El producto no existe? Crea uno nuevo aquí", use_container_width=True):
+    modal_crear_producto()
 
 # HISTORIAL DINÁMICO
 st.divider()

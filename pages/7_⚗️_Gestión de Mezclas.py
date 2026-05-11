@@ -107,75 +107,121 @@ with tab1:
 # TAB 2: ÓRDENES DE MEZCLA (EL INGENIERO MANDA)
 # ==========================================
 with tab2:
-    with st.expander("👨‍🔬 Nueva Programación de Mezcla", expanded=True):
+    with st.expander("👨‍🔬 Programar Mezcla (Formato Fundo Belessia)", expanded=True):
         if not df_fefo.empty:
             with st.form("nueva_ot_pro"):
+                
+                # --- 1. DATOS GENERALES ---
                 st.markdown('<div class="seccion-titulo">1. Datos Generales y Maquinaria</div>', unsafe_allow_html=True)
                 ca1, ca2, ca3, ca4 = st.columns(4)
-                f_ot = ca1.date_input("Fecha")
-                sec_ot = ca2.text_input("Sector", placeholder="Ej: W3")
-                ha_ot = ca3.number_input("Hectáreas", value=1.80)
+                f_ot = ca1.date_input("Fecha Programada")
+                sec_ot = ca2.text_input("Lotes / Sector", placeholder="Ej: W3")
+                ha_ot = ca3.number_input("Hectáreas", min_value=0.01, value=1.80)
                 turno_ot = ca4.selectbox("Turno", ["Día", "Noche"])
                 
+                obj_ot = st.text_input("Objetivo del Tratamiento", placeholder="Ej: Trips - araña roja")
+
                 cm1, cm2, cm3 = st.columns(3)
-                tract_ot = cm1.text_input("Tractor", placeholder="Ej: Antonio Carraro")
-                imple_ot = cm2.text_input("Tanque", value="Full Maquinarias")
-                oper_ot = cm3.text_input("Operario")
+                tract_ot = cm1.text_input("Tractor Utilizado", placeholder="Ej: Antonio Carraro")
+                imple_ot = cm2.text_input("Tanque / Implemento", value="Full Maquinarias")
+                oper_ot = cm3.text_input("Operario Asignado")
 
-                st.markdown('<div class="seccion-titulo">2. Calibración y Agua</div>', unsafe_allow_html=True)
+                # --- 2. MÉTODO DE APLICACIÓN Y AGUA ---
+                st.markdown('<div class="seccion-titulo">2. Método de Aplicación y Caldo</div>', unsafe_allow_html=True)
                 cw1, cw2, cw3, cw4 = st.columns(4)
-                vol_ha = cw1.number_input("Vol. Lts/Ha", value=1200)
-                vol_tot = cw2.number_input("Vol. Total", value=2200)
-                marcha = cw3.number_input("Marcha", value=1)
-                presion = cw4.number_input("Presión (Bar)", value=9.0)
+                tipo_app = cw1.selectbox("Tipo de Aplicación", ["Nebulizado (Turbo)", "Pulverizado", "Barras", "Pistolas/Drench", "Mochila Manual"])
+                vol_tot = cw2.number_input("Volumen Total (Lts)", value=2200)
+                vol_ha = cw3.number_input("Volumen Lts/Ha", value=1200)
+                ph_agua = cw4.number_input("pH Agua", value=6.0, step=0.1)
 
-                st.markdown('<div class="seccion-titulo">3. Receta de Productos</div>', unsafe_allow_html=True)
+                # --- 3. CALIBRACIÓN ---
+                st.markdown('<div class="seccion-titulo">3. Calibración y Boquillas</div>', unsafe_allow_html=True)
+                cb1, cb2, cb3 = st.columns(3)
+                marcha = cb1.number_input("Marcha Tractor (N°)", min_value=1, value=1)
+                velocidad = cb2.number_input("Velocidad Km/h", value=0.0)
+                presion = cb3.number_input("Presión (Bar/Lb)", value=9.0)
+
+                ct1, ct2 = st.columns([1, 2])
+                n_boq = ct1.number_input("N° Total de Boquillas", value=18)
+                color_boq = ct2.text_input("Color de Boquillas", value="9 negras, 9 marrones")
+                
+                obs_ot = st.text_input("Observaciones Generales", value="Aplicación con turbo y con boquillas intercaladas una negra y una marron")
+
+                # --- 4. RECETA DE INSUMOS ---
+                st.markdown('<div class="seccion-titulo">4. Receta de Fitosanitarios / Foliares</div>', unsafe_allow_html=True)
                 editor = st.data_editor(
                     pd.DataFrame([{"Insumo": list(opciones_lotes.keys())[0], "Cantidad": 0.0}]),
                     num_rows="dynamic",
                     column_config={
-                        "Insumo": st.column_config.SelectboxColumn("Lote de Almacén", options=list(opciones_lotes.keys()), required=True),
-                        "Cantidad": st.column_config.NumberColumn("Cantidad (Kg/L)", min_value=0.0)
+                        "Insumo": st.column_config.SelectboxColumn("Seleccionar Lote de Almacén", options=list(opciones_lotes.keys()), required=True),
+                        "Cantidad": st.column_config.NumberColumn("Total Producto (Kg/L)", min_value=0.0)
                     }
                 )
 
-                if st.form_submit_button("📡 Enviar Orden Maestra", type="primary"):
+                if st.form_submit_button("📡 Enviar Orden Maestra al Campo", type="primary"):
                     receta = []
                     for _, row in editor.iterrows():
                         info = opciones_lotes[row['Insumo']]
                         receta.append({"id": int(info['id']), "p": info['Producto'], "l": info['Codigo_Lote'], "c": row['Cantidad']})
                     
-                    reporte_tecnico = f"[ÁREA]: {ha_ot} Ha | [TURNO]: {turno_ot} | [AGUA]: {vol_tot}L ({vol_ha}L/Ha) | [CALIBRACIÓN]: M:{marcha} P:{presion} Bar | [EQUIPO]: {tract_ot} - {imple_ot}"
+                    # Empaquetamos todo de nuevo en el super-reporte técnico
+                    reporte_tecnico = f"""[ÁREA]: {ha_ot} Ha | [TURNO]: {turno_ot}
+[MÉTODO]: {tipo_app} | [AGUA]: Vol Total: {vol_tot} L | Vol/Ha: {vol_ha} L | pH: {ph_agua}
+[CALIBRACIÓN]: Marcha: {marcha} | Velocidad: {velocidad} km/h | Presión: {presion} Bar
+[BOQUILLAS]: {n_boq} totales ({color_boq})
+[EQUIPO]: Tractor: {tract_ot} | Tanque: {imple_ot} | Operario: {oper_ot}
+[OBSERVACIONES]: {obs_ot}"""
                     
                     ot_data = {
                         "ID_Orden_Personalizado": f"OT-{datetime.now().strftime('%y%m%d-%H%M')}",
                         "Status": "En Preparación",
                         "Fecha_Programada": str(f_ot),
                         "Sector_Aplicacion": sec_ot,
-                        "Objetivo": "Aplicación Mezcla",
+                        "Objetivo": obj_ot,
                         "Receta_Mezcla_Lotes": receta,
                         "Observaciones_Aplicacion": reporte_tecnico 
                     }
-                    supabase.table('Ordenes_de_Trabajo').insert(ot_data).execute()
-                    st.success("📡 Orden enviada.")
-                    st.cache_data.clear()
-                    st.rerun()
+                    
+                    try:
+                        supabase.table('Ordenes_de_Trabajo').insert(ot_data).execute()
+                        st.success("📡 Orden maestra creada. Almacén puede preparar y el tractorista ya la verá en su app.")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al enviar la orden: {e}")
 
-    # VISOR DE PENDIENTES
+    # VISOR DE PENDIENTES EN ALMACÉN
     df_pendientes = df_ord[df_ord['Status'] == 'En Preparación'] if not df_ord.empty else pd.DataFrame()
     if not df_pendientes.empty:
         st.subheader("⏳ Mezclas por Despachar (Almacén)")
         for _, ot in df_pendientes.iterrows():
             with st.container(border=True):
                 c_ot1, c_ot2 = st.columns([3, 1])
-                c_ot1.write(f"🆔 **{ot['ID_Orden_Personalizado']}** | 📍 {ot['Sector_Aplicacion']}")
+                c_ot1.write(f"🆔 **{ot['ID_Orden_Personalizado']}** | 📍 {ot['Sector_Aplicacion']} | 🎯 {ot['Objetivo']}")
+                
+                with c_ot1.expander("Ver Parámetros de Aplicación Configurados"):
+                    st.text(ot.get('Observaciones_Aplicacion', 'Sin parámetros adicionales.'))
+                    
                 c_ot1.dataframe(pd.DataFrame(ot['Receta_Mezcla_Lotes']), hide_index=True)
-                if c_ot2.button("✅ Despachar", key=f"d_{ot['id']}"):
-                    batch = [{"Fecha_Aplicacion": ot['Fecha_Programada'], "Ingreso_ID": i['id'], "Cantidad_Usada": i['c'], "Sector_Destino": ot['Sector_Aplicacion'], "Objetivo_Tratamiento": ot['Objetivo']} for i in ot['Receta_Mezcla_Lotes']]
-                    supabase.table('Salidas').insert(batch).execute()
-                    supabase.table('Ordenes_de_Trabajo').update({"Status": "Finalizada"}).eq('id', ot['id']).execute()
-                    st.rerun()
-
+                
+                if c_ot2.button("✅ Confirmar Despacho", key=f"d_{ot['id']}", type="primary"):
+                    try:
+                        batch = []
+                        for i in ot['Receta_Mezcla_Lotes']:
+                            batch.append({
+                                "Fecha_Aplicacion": ot['Fecha_Programada'], 
+                                "Ingreso_ID": i['id'], 
+                                "Cantidad_Usada": i['c'], 
+                                "Sector_Destino": ot['Sector_Aplicacion'], 
+                                "Objetivo_Tratamiento": ot['Objetivo']
+                            })
+                        supabase.table('Salidas').insert(batch).execute()
+                        supabase.table('Ordenes_de_Trabajo').update({"Status": "Finalizada"}).eq('id', ot['id']).execute()
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error DB: {e}")
+                        
 # ==========================================
 # TAB 3: HISTORIAL Y AUDITORÍA (LO NUEVO)
 # ==========================================

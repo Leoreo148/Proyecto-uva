@@ -54,13 +54,21 @@ def obtener_stock_por_lote(df_p, df_i, df_s):
     # Cálculo de stock disponible por ID único de ingreso
     if not df_s.empty:
         gastado = df_s.groupby('Ingreso_ID')['Cantidad_Usada'].sum().reset_index()
-        df_lotes = pd.merge(df_i, gastado, left_on='id', right_on='Ingreso_ID', how='left').fillna(0)
+        df_lotes = pd.merge(df_i, gastado, left_on='id', right_on='Ingreso_ID', how='left').fillna({'Cantidad_Usada': 0})
         df_lotes['Stock_Actual'] = df_lotes['Cantidad_Ingresada'] - df_lotes['Cantidad_Usada']
     else:
         df_lotes = df_i.copy()
         df_lotes['Stock_Actual'] = df_lotes['Cantidad_Ingresada']
 
-    return pd.merge(df_lotes, df_p, left_on='Codigo_Producto', right_on='Codigo', how='left')
+    df_final = pd.merge(df_lotes, df_p, left_on='Codigo_Producto', right_on='Codigo', how='left')
+    
+    # --- 🛡️ EL ESCUDO ANTI-ERRORES DE FECHA ---
+    # Convertimos todo a formato Fecha. Si hay algo vacío o roto (errors='coerce'), 
+    # lo vuelve 'NaT' (Not a Time) para que Pandas lo pueda ordenar sin colapsar.
+    if 'Fecha_Vencimiento' in df_final.columns:
+        df_final['Fecha_Vencimiento'] = pd.to_datetime(df_final['Fecha_Vencimiento'], errors='coerce')
+        
+    return df_final
 
 # --- PROCESAMIENTO ---
 df_prod, df_ing, df_sal, df_ord = cargar_datos_operativos()

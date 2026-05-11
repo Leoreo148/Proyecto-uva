@@ -4,7 +4,6 @@ from datetime import datetime, date
 from typing import Optional
 from pydantic import BaseModel, ValidationError, field_validator
 from supabase import create_client, Client
-from streamlit_searchbox import st_searchbox
 from st_aggrid import AgGrid, GridOptionsBuilder, ColumnsAutoSizeMode
 from streamlit_extras.stylable_container import stylable_container
 
@@ -83,32 +82,28 @@ with st.form("form_registro", clear_on_submit=True):
     c1, c2, c3 = st.columns(3)
     
     with c1:
-        def search_products(searchterm: str):
-            # 1. Si no hay texto, no buscamos nada (evita procesar de más)
-            if not searchterm or df_p.empty: 
-                return []
-            
-            try:
-                # 2. Lógica de "Examen": Filtro robusto
-                # Usamos astype(str) por si hay códigos numéricos
-                # Usamos na=False para que las celdas vacías no rompan el buscador
-                mask = (
-                    df_p['Producto'].astype(str).str.contains(searchterm, case=False, na=False) | 
-                    df_p['Codigo'].astype(str).str.contains(searchterm, case=False, na=False)
-                )
-                
-                filtered = df_p[mask]
-                
-                # 3. Retorno de tuplas: (Lo que ve el usuario, lo que guarda el código)
-                # Limitamos a 10-15 resultados para que sea rápido en el celular
-                return [(f"{row['Producto']} ({row['Codigo']})", str(row['Codigo'])) 
-                        for _, row in filtered.head(15).iterrows()]
-            
-            except Exception as e:
-                # Si algo sale mal, devolvemos lista vacía para no trabar la app
-                return []
+        # 1. Creamos un diccionario a prueba de fallos: {"Nombre (Codigo)": "Codigo"}
+        # Ignoramos los que no tengan nombre para que no se rompa
+        dict_productos = {}
+        if not df_p.empty:
+            for _, row in df_p.iterrows():
+                nombre = str(row['Producto']).strip()
+                codigo = str(row['Codigo']).strip()
+                if nombre and nombre != 'nan':
+                    etiqueta = f"{nombre} ({codigo})"
+                    dict_productos[etiqueta] = codigo
         
-        cod_prod = st_searchbox(search_products, key="prod_search", label="Seleccionar Producto")
+        # 2. Usamos el Selectbox NATIVO de Streamlit (¡Ya incluye lupa/buscador!)
+        seleccion = st.selectbox(
+            "Seleccionar Producto", 
+            options=list(dict_productos.keys()), 
+            index=None, 
+            placeholder="🔍 Escribe para buscar (ej. Abamectina)..."
+        )
+        
+        # 3. Extraemos el código real para guardarlo en la base de datos
+        cod_prod = dict_productos[seleccion] if seleccion else None
+        
         lote = st.text_input("Código de Lote / Batch")
     
     with c2:

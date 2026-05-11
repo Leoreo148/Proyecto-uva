@@ -84,9 +84,29 @@ with st.form("form_registro", clear_on_submit=True):
     
     with c1:
         def search_products(searchterm: str):
-            if not searchterm or df_p.empty: return []
-            filtered = df_p[df_p['Producto'].str.contains(searchterm, case=False) | df_p['Codigo'].str.contains(searchterm, case=False)]
-            return [(f"{row['Producto']} ({row['Codigo']})", row['Codigo']) for _, row in filtered.iterrows()]
+            # 1. Si no hay texto, no buscamos nada (evita procesar de más)
+            if not searchterm or df_p.empty: 
+                return []
+            
+            try:
+                # 2. Lógica de "Examen": Filtro robusto
+                # Usamos astype(str) por si hay códigos numéricos
+                # Usamos na=False para que las celdas vacías no rompan el buscador
+                mask = (
+                    df_p['Producto'].astype(str).str.contains(searchterm, case=False, na=False) | 
+                    df_p['Codigo'].astype(str).str.contains(searchterm, case=False, na=False)
+                )
+                
+                filtered = df_p[mask]
+                
+                # 3. Retorno de tuplas: (Lo que ve el usuario, lo que guarda el código)
+                # Limitamos a 10-15 resultados para que sea rápido en el celular
+                return [(f"{row['Producto']} ({row['Codigo']})", str(row['Codigo'])) 
+                        for _, row in filtered.head(15).iterrows()]
+            
+            except Exception as e:
+                # Si algo sale mal, devolvemos lista vacía para no trabar la app
+                return []
         
         cod_prod = st_searchbox(search_products, key="prod_search", label="Seleccionar Producto")
         lote = st.text_input("Código de Lote / Batch")

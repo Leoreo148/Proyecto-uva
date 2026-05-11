@@ -94,10 +94,33 @@ def generar_kardex(df_p, df_i, df_s):
     
     return df_final
 
-# --- 4. PROCESAMIENTO ---
+# --- 4. PROCESAMIENTO Y ANÁLISIS ABC ---
 df_p, df_i, df_s = cargar_todo()
 df_kardex_crudo = generar_kardex(df_p, df_i, df_s)
 df_kardex = df_kardex_crudo.copy()
+
+# Lógica del Modelo ABC Financiero
+if not df_kardex.empty and df_kardex['Valorizado_PEN'].sum() > 0:
+    # 1. Filtramos para evaluar solo lo que tiene stock y lo ordenamos por valor
+    df_kardex = df_kardex.sort_values(by='Valorizado_PEN', ascending=False).reset_index(drop=True)
+    
+    # 2. Calculamos el valor total del almacén y el peso acumulado de cada producto
+    total_valor = df_kardex['Valorizado_PEN'].sum()
+    df_kardex['Porcentaje_Acumulado'] = df_kardex['Valorizado_PEN'].cumsum() / total_valor
+    
+    # 3. Asignamos las categorías basándonos en el Principio de Pareto
+    condiciones = [
+        (df_kardex['Porcentaje_Acumulado'] <= 0.80), # 80% del valor del almacén
+        (df_kardex['Porcentaje_Acumulado'] > 0.80) & (df_kardex['Porcentaje_Acumulado'] <= 0.95), # Siguiente 15%
+        (df_kardex['Porcentaje_Acumulado'] > 0.95) # Último 5%
+    ]
+    valores = ['A (Crítico)', 'B (Intermedio)', 'C (Rutina)']
+    df_kardex['Clase_ABC'] = np.select(condiciones, valores, default='C (Rutina)')
+    
+    # Limpiamos los que tienen stock cero para que no ensucien el análisis
+    df_kardex.loc[df_kardex['Valorizado_PEN'] == 0, 'Clase_ABC'] = 'Sin Stock'
+else:
+    df_kardex['Clase_ABC'] = 'Sin Stock'
 
 # --- 5. PANEL DE CONTROL ---
 with stylable_container(key="green_panel", css_styles="{ background-color: #1e3d33; color: white; padding: 1.5rem; border-radius: 1rem; }"):
@@ -131,7 +154,7 @@ m3.metric("Vencimientos <15d", len(df_kardex[df_kardex['Dias_para_Vencer'] < 15]
 m4.metric("Lotes en Vista", len(df_kardex))
 
 # --- 7. AG-GRID ---
-cols_visibles = ['Codigo', 'Producto', 'Codigo_Lote', 'Stock_Lote', 'Unidad'] + mostrar_extras + ['Dias_para_Vencer']
+cols_visibles = ['Codigo', 'Producto', 'Clase_ABC', 'Codigo_Lote', 'Stock_Lote', 'Unidad'] + mostrar_extras + ['Dias_para_Vencer']
 
 if not df_kardex.empty:
     gb = GridOptionsBuilder.from_dataframe(df_kardex[cols_visibles])

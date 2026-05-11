@@ -137,8 +137,8 @@ else:
                             data_horas = {
                                 "Fecha": str(date.today()),
                                 "Turno": tarea.get('Turno', 'Día'),
-                                "personal_id": tarea['operador_id'], 
-                                "maquinaria_id": tarea['maquinaria_id'], 
+                                "personal_id": int(tarea['operador_id']), # <--- FIX: Forzamos a entero
+                                "maquinaria_id": int(tarea['maquinaria_id']), # <--- FIX: Forzamos a entero
                                 "Implemento": "Pulverizador", 
                                 "Labor_Realizada": f"Aplicación {nombre_objetivo}",
                                 "Sector": tarea.get('Sector_Aplicacion', ''),

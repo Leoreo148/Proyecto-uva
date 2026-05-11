@@ -75,19 +75,7 @@ def get_history():
 with stylable_container(key="title_container", css_styles="""{ background-color: #1e3d33; color: white; padding: 1.5rem; border-radius: 1rem; margin-bottom: 2rem; }"""):
     st.title("📥 Registro Maestro de Ingresos")
     st.write("Auditoría de almacén y control de compras.")
-
-# 1. Cargamos los productos
 df_p = get_products()
-
-# 2. INSERTAMOS EL DEBUG AQUÍ (Fuera del formulario)
-st.write(f"🔍 DEBUG: Se han cargado {len(df_p)} productos de la base de datos.")
-if not df_p.empty:
-    st.write("Muestra de los primeros productos:", df_p.head(3))
-
-# 3. Empieza el Formulario
-with st.form("form_registro", clear_on_submit=True):
-    st.markdown("##### 📝 Información del Producto")
-    # ... resto de tu código
 
 # FORMULARIO DE REGISTRO
 with st.form("form_registro", clear_on_submit=True):
@@ -96,32 +84,9 @@ with st.form("form_registro", clear_on_submit=True):
     
     with c1:
         def search_products(searchterm: str):
-            # 1. Seguridad: Si no hay texto o la tabla está vacía, no busques
-            if not searchterm or df_p.empty: 
-                return []
-            
-            try:
-                # 2. Limpieza en tiempo real: Forzamos a texto y eliminamos espacios
-                # 'na=False' es vital: evita que el buscador se rompa si encuentra una celda vacía
-                mask = (
-                    df_p['Producto'].astype(str).str.contains(searchterm, case=False, na=False) | 
-                    df_p['Codigo'].astype(str).str.contains(searchterm, case=False, na=False)
-                )
-                
-                filtered = df_p[mask]
-                
-                # 3. Retorno seguro: Si no hay coincidencias, devolvemos lista vacía
-                if filtered.empty:
-                    return []
-                
-                # 4. Formato para el buscador: (Etiqueta que ves, Valor que se guarda)
-                # Limitamos a 15 resultados para que el celular no se trabe
-                return [(f"{row['Producto']} ({row['Codigo']})", str(row['Codigo'])) 
-                        for _, row in filtered.head(15).iterrows()]
-            
-            except Exception as e:
-                # Si algo falla, no bloqueamos la app, solo devolvemos vacío
-                return []
+            if not searchterm or df_p.empty: return []
+            filtered = df_p[df_p['Producto'].str.contains(searchterm, case=False) | df_p['Codigo'].str.contains(searchterm, case=False)]
+            return [(f"{row['Producto']} ({row['Codigo']})", row['Codigo']) for _, row in filtered.iterrows()]
         
         cod_prod = st_searchbox(search_products, key="prod_search", label="Seleccionar Producto")
         lote = st.text_input("Código de Lote / Batch")

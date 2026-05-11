@@ -186,21 +186,32 @@ with tab2:
                     resp = st.text_input("Firma Responsable", key=f"r_{ot['id']}")
                     if st.button("✅ Confirmar Mezcla y Despacho", key=f"b_{ot['id']}"):
                         if resp:
-                            # Descontar cada item de la receta de la tabla Salidas
-                            batch = []
-                            for item in ot['Receta_Mezcla_Lotes']:
-                                batch.append({
-                                    "Fecha_Aplicacion": ot['Fecha_Programada'],
-                                    "Ingreso_ID": item['id'],
-                                    "Cantidad_Usada": item['c'],
-                                    "Sector_Destino": ot['Sector_Aplicacion'],
-                                    "Objetivo_Tratamiento": ot['Objetivo'],
-                                    "Responsable": resp,
-                                    "H2O": ot.get('Datos_Tecnicos', {}).get('H2O', 0),
-                                    "Labor": ot.get('Datos_Tecnicos', {}).get('Labor', '')
-                                })
-                            supabase.table('Salidas').insert(batch).execute()
-                            supabase.table('Ordenes_de_Trabajo').update({"Status": "Finalizada"}).eq('id', ot['id']).execute()
-                            st.success("¡Inventario descontado!")
-                            st.cache_data.clear()
-                            st.rerun()
+                            try:
+                                # Descontar cada item de la receta de la tabla Salidas
+                                batch = []
+                                for item in ot['Receta_Mezcla_Lotes']:
+                                    batch.append({
+                                        "Fecha_Aplicacion": ot['Fecha_Programada'],
+                                        "Ingreso_ID": item['id'],
+                                        "Cantidad_Usada": item['c'],
+                                        "Sector_Destino": ot['Sector_Aplicacion'],
+                                        "Objetivo_Tratamiento": ot['Objetivo']
+                                        
+                                        # ⚠️ COMENTADOS: Para que Supabase no rechace la inserción.
+                                        # Si en el futuro creas estas columnas en tu SQL, solo quítales el "#"
+                                        # "Responsable": resp,
+                                        # "H2O": ot.get('Datos_Tecnicos', {}).get('H2O', 0),
+                                        # "Labor": ot.get('Datos_Tecnicos', {}).get('Labor', '')
+                                    })
+                                
+                                # Ejecutamos la subida a Supabase
+                                supabase.table('Salidas').insert(batch).execute()
+                                supabase.table('Ordenes_de_Trabajo').update({"Status": "Finalizada"}).eq('id', ot['id']).execute()
+                                
+                                st.success("¡Inventario descontado exitosamente!")
+                                st.cache_data.clear()
+                                st.rerun()
+                                
+                            except Exception as e:
+                                # Escudo anti-caídas: Te mostrará el error en la app sin detener el programa
+                                st.error(f"Error al guardar en Base de Datos: {e}")

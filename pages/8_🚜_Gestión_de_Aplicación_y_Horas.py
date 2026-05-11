@@ -15,9 +15,10 @@ st.markdown("""
     <style>
     .stApp { background-color: #f4f7f6; }
     div[data-testid="stMetric"] { background-color: #ffffff; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
-    .btn-start > button { background-color: #2ecc71; color: white; height: 3.5em; font-size: 18px; border-radius: 10px;}
-    .btn-stop > button { background-color: #e74c3c; color: white; height: 3.5em; font-size: 18px; border-radius: 10px;}
+    .btn-start > button { background-color: #2ecc71; color: white; height: 3.5em; font-size: 18px; border-radius: 10px; font-weight: bold;}
+    .btn-stop > button { background-color: #e74c3c; color: white; height: 3.5em; font-size: 18px; border-radius: 10px; font-weight: bold;}
     .status-progreso { background-color: #fff3cd; padding: 15px; border-radius: 10px; border: 1px solid #ffeeba; text-align: center; margin-bottom: 15px;}
+    .instrucciones-box { background-color: #e8f4f8; padding: 15px; border-left: 5px solid #3498db; border-radius: 5px; margin-bottom: 15px; font-family: monospace;}
     </style>
     """, unsafe_allow_html=True)
 
@@ -46,7 +47,7 @@ df_ord, df_pers, df_maqu, df_hist_h = cargar_datos_operacion()
 # --- 4. CABECERA ---
 with stylable_container(key="green_title", css_styles="{ background-color: #1e3d33; color: white; padding: 1.5rem; border-radius: 1rem; }"):
     st.title("🚜 Panel de Operador en Campo")
-    st.write("Control de tiempos de aplicación y registros de maquinaria.")
+    st.write("Control de tiempos de aplicación y parámetros de maquinaria.")
 
 # --- 5. TAREAS PARA APLICAR ---
 st.subheader("📋 Mis Labores Asignadas")
@@ -70,33 +71,30 @@ else:
         # Si está en progreso, lo expandimos por defecto para que el tractorista lo vea rápido
         with st.expander(exp_title, expanded=(estado_actual == 'En Progreso')):
             
-            # --- ESTADO 1: LISTO PARA INICIAR (Configuración) ---
+            # --- ESTADO 1: LISTO PARA INICIAR (Modo Lectura + Cronómetro) ---
             if estado_actual == 'Finalizada':
                 st.info(f"🧪 **Mezcla lista en tanque:** {', '.join([f"{i['p']} ({i['c']})" for i in tarea.get('Receta_Mezcla_Lotes', [])])}")
                 
+                # Mostramos las instrucciones que el ingeniero mandó desde "Mezclas"
+                instrucciones = tarea.get('Observaciones_Aplicacion', 'Sin instrucciones especiales.')
+                st.markdown(f'<div class="instrucciones-box"><b>📝 PARÁMETROS DEL INGENIERO:</b><br>{instrucciones}</div>', unsafe_allow_html=True)
+                
                 with st.form(key=f"form_start_{tarea['id']}"):
-                    st.write("⚙️ **Configuración del Equipo**")
+                    st.write("👤 **Confirma tu identidad y equipo antes de iniciar:**")
                     c1, c2 = st.columns(2)
-                    op_sel = c1.selectbox("Operador", options=list(dict_personal.keys()))
-                    tract_sel = c2.selectbox("Tractor Utilizado", options=list(dict_maquina.keys()))
+                    # Solo pedimos esto para que la base de datos sepa a qué tractor sumarle las horas
+                    op_sel = c1.selectbox("Soy el Operador:", options=list(dict_personal.keys()))
+                    tract_sel = c2.selectbox("Voy a usar el Tractor:", options=list(dict_maquina.keys()))
                     
-                    c3, c4, c5 = st.columns(3)
-                    marcha = c3.number_input("Marcha", value=1)
-                    presion = c4.number_input("Presión (Bar)", value=9.0)
-                    vol_ha = c5.number_input("Vol. Lts/Ha", value=1200)
-
                     st.markdown('<div class="btn-start">', unsafe_allow_html=True)
                     if st.form_submit_button("▶️ INICIAR LABOR", use_container_width=True):
                         try:
-                            # Guardamos la configuración y la hora de inicio exactas
+                            # Guardamos la hora de inicio exacta
                             data_update = {
                                 "Status": "En Progreso",
                                 "Hora_Inicio_Real": datetime.now().isoformat(),
                                 "operador_id": dict_personal[op_sel],
-                                "maquinaria_id": dict_maquina[tract_sel],
-                                "Marcha": marcha,
-                                "Presion_Bar": int(presion),
-                                "Observaciones_Aplicacion": f"[CALIBRACIÓN] Marcha: {marcha} | Presión: {presion} Bar | Vol/Ha: {vol_ha} L\n"
+                                "maquinaria_id": dict_maquina[tract_sel]
                             }
                             supabase.table('Ordenes_de_Trabajo').update(data_update).eq('id', tarea['id']).execute()
                             st.success("¡Cronómetro Iniciado! Ya puedes bloquear tu celular y trabajar.")
@@ -118,29 +116,30 @@ else:
                 """, unsafe_allow_html=True)
 
                 with st.form(key=f"form_stop_{tarea['id']}"):
-                    obs = st.text_area("📝 Observaciones de Campo (Llenar al terminar)", placeholder="Clima, problemas mecánicos, viento...")
+                    obs = st.text_area("📝 Novedades en campo (Opcional)", placeholder="Problemas mecánicos, viento fuerte, etc.")
                     
                     st.markdown('<div class="btn-stop">', unsafe_allow_html=True)
                     if st.form_submit_button("⏹️ FINALIZAR LABOR", use_container_width=True):
                         hora_fin = datetime.now()
-                        # Cálculo de horas trabajadas (diferencia en segundos / 3600)
+                        
+                        # CÁLCULO MÁGICO: Diferencia en segundos convertida a horas con 2 decimales
                         horas_trabajadas = (hora_fin - hora_inicio).total_seconds() / 3600.0
                         
                         try:
-                            # 1. Creamos el registro en el historial de horas (Con Horómetros en 0, ya no se usan)
-                            reporte_final = tarea.get('Observaciones_Aplicacion', '') + f"[OBSERVACIONES CAMPO]: {obs}"
+                            # 1. Registramos las horas generadas en el historial (Sin horómetros manuales)
+                            reporte_final = tarea.get('Observaciones_Aplicacion', '') + f"\n[NOTAS DEL OPERADOR]: {obs}"
                             
                             data_horas = {
                                 "Fecha": str(date.today()),
                                 "Turno": tarea.get('Turno', 'Día'),
                                 "personal_id": tarea['operador_id'], 
                                 "maquinaria_id": tarea['maquinaria_id'], 
-                                "Implemento": "Pulverizador", # Genérico
+                                "Implemento": "Pulverizador", 
                                 "Labor_Realizada": f"Aplicación {nombre_objetivo}",
                                 "Sector": tarea.get('Sector_Aplicacion', ''),
-                                "Horometro_Inicial": 0.0,
-                                "Horometro_Final": 0.0,
-                                "Total_Horas": round(horas_trabajadas, 2), # Redondeado a 2 decimales
+                                "Horometro_Inicial": 0.0, # Ya no se usa
+                                "Horometro_Final": round(horas_trabajadas, 2), # Guardamos directamente las horas
+                                "Total_Horas": round(horas_trabajadas, 2),
                                 "Observaciones": reporte_final
                             }
                             supabase.table('Registro_Horas_Tractor').insert(data_horas).execute()

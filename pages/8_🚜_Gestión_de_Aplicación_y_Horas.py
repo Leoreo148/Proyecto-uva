@@ -163,3 +163,56 @@ else:
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al finalizar: {e}")
+                            
+# --- 6. HISTORIAL DE LABORES Y DESCARGA (Build 8.2) ---
+st.divider()
+st.header("📚 Historial de Aplicaciones")
+
+try:
+    # 1. Consulta fresca al historial (Ultimas 20 para no saturar el celular)
+    res_h = supabase.table('Registro_Horas_Tractor').select("*").order('created_at', desc=True).limit(20).execute()
+    df_hist_fresco = pd.DataFrame(res_h.data)
+
+    if not df_hist_fresco.empty:
+        # Unimos para ver nombres reales de Personas y Maquinaria
+        df_merged = pd.merge(df_hist_fresco, df_pers, left_on='personal_id', right_on='id', how='left')
+        df_merged = pd.merge(df_merged, df_maqu, left_on='maquinaria_id', right_on='id', how='left')
+        
+        # Limpiamos y renombramos para que se vea "decente"
+        df_view = df_merged[[
+            'Fecha', 'nombre_completo', 'nombre', 'Sector', 'Total_Horas', 'Observaciones'
+        ]].copy()
+        
+        df_view.columns = ['📅 Fecha', '👤 Operador', '🚜 Tractor', '📍 Sector', '⏱️ Hrs', '📝 Detalles']
+
+        # Mostramos métricas rápidas del historial visualizado
+        c_h1, c_h2 = st.columns(2)
+        total_acumulado = df_view['⏱️ Hrs'].sum()
+        c_h1.metric("Horas en Pantalla", f"{total_acumulado:.2f} hrs")
+        
+        # Botón de Descarga Excel (CSV compatible)
+        csv = df_view.to_csv(index=False).encode('utf-8-sig')
+        c_h2.download_button(
+            label="📥 Descargar Reporte (Excel)",
+            data=csv,
+            file_name=f'reporte_tractor_{date.today()}.csv',
+            mime='text/csv',
+            use_container_width=True
+        )
+
+        # Tabla Decente y Estética
+        st.dataframe(
+            df_view,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "📝 Detalles": st.column_config.TextColumn("Detalles Técnicos", width="large"),
+                "📅 Fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY"),
+                "⏱️ Hrs": st.column_config.NumberColumn("Hrs", format="%.2f")
+            }
+        )
+    else:
+        st.info("Aún no hay registros en el historial de campo.")
+
+except Exception as e:
+    st.error(f"Error visualizando historial: {e}")

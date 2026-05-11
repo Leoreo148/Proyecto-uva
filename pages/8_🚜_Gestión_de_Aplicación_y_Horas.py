@@ -126,8 +126,13 @@ else:
                         horas_trabajadas = (hora_fin - hora_inicio).total_seconds() / 3600.0
                         
                         try:
-                            # 1. Registramos las horas generadas en el historial (Sin horómetros manuales)
-                            reporte_final = tarea.get('Observaciones_Aplicacion', '') + f"\n[NOTAS DEL OPERADOR]: {obs}"
+                            # --- 🛡️ FIX ANTI-FLOAT ---
+                            obs_ant = tarea.get('Observaciones_Aplicacion', '')
+                            if pd.isna(obs_ant): # Si es NaN (float), lo volvemos texto vacío
+                                obs_ant = ""
+                            
+                            reporte_final = str(obs_ant) + f"\n[NOTAS DEL OPERADOR]: {obs}"
+                            # --------------------------
                             
                             data_horas = {
                                 "Fecha": str(date.today()),
@@ -137,8 +142,8 @@ else:
                                 "Implemento": "Pulverizador", 
                                 "Labor_Realizada": f"Aplicación {nombre_objetivo}",
                                 "Sector": tarea.get('Sector_Aplicacion', ''),
-                                "Horometro_Inicial": 0.0, # Ya no se usa
-                                "Horometro_Final": round(horas_trabajadas, 2), # Guardamos directamente las horas
+                                "Horometro_Inicial": 0.0, 
+                                "Horometro_Final": round(horas_trabajadas, 2), 
                                 "Total_Horas": round(horas_trabajadas, 2),
                                 "Observaciones": reporte_final
                             }
@@ -157,20 +162,3 @@ else:
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al finalizar: {e}")
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-# --- 6. HISTORIAL RÁPIDO ---
-st.divider()
-st.subheader("📚 Mis Últimas Labores")
-
-if not df_hist_h.empty:
-    df_h_view = pd.merge(df_hist_h, df_pers, left_on='personal_id', right_on='id', how='left')
-    df_h_view = pd.merge(df_h_view, df_maqu, left_on='maquinaria_id', right_on='id', how='left')
-    
-    # Filtramos solo para ver en tabla las columnas esenciales
-    cols_hist = ['Fecha', 'nombre_completo', 'nombre', 'Total_Horas', 'Sector']
-    df_mini = df_h_view[cols_hist].rename(columns={'nombre_completo': 'Operador', 'nombre': 'Tractor'})
-    
-    gb = GridOptionsBuilder.from_dataframe(df_mini)
-    gb.configure_pagination(paginationPageSize=5)
-    AgGrid(df_mini, gridOptions=gb.build(), theme='balham', height=250, columns_auto_size_mode=ColumnsAutoSizeMode.FIT_CONTENTS)

@@ -76,7 +76,18 @@ with stylable_container(key="title_container", css_styles="""{ background-color:
     st.title("📥 Registro Maestro de Ingresos")
     st.write("Auditoría de almacén y control de compras.")
 
+# 1. Cargamos los productos
 df_p = get_products()
+
+# 2. INSERTAMOS EL DEBUG AQUÍ (Fuera del formulario)
+st.write(f"🔍 DEBUG: Se han cargado {len(df_p)} productos de la base de datos.")
+if not df_p.empty:
+    st.write("Muestra de los primeros productos:", df_p.head(3))
+
+# 3. Empieza el Formulario
+with st.form("form_registro", clear_on_submit=True):
+    st.markdown("##### 📝 Información del Producto")
+    # ... resto de tu código
 
 # FORMULARIO DE REGISTRO
 with st.form("form_registro", clear_on_submit=True):

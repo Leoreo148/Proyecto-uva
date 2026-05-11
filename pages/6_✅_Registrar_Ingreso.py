@@ -79,7 +79,6 @@ with stylable_container(key="title_container", css_styles="""{ background-color:
 st.write(f"🔍 DEBUG: He cargado {len(df_p)} productos de la base de datos.")
 if not df_p.empty:
     st.write("Primeros 3 productos:", df_p.head(3))
-    
 df_p = get_products()
 
 # FORMULARIO DE REGISTRO

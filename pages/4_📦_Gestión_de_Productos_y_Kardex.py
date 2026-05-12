@@ -27,8 +27,6 @@ st.markdown("""
 
 if 'editing_product_id' not in st.session_state:
     st.session_state.editing_product_id = None
-if 'deleting_product_id' not in st.session_state:
-    st.session_state.deleting_product_id = None
 
 # --- 2. CONEXIÓN ---
 @st.cache_resource
@@ -37,7 +35,6 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# Un aviso pequeño y profesional
 st.info("💡 **Guía de Unidades:** Usa **001** para productos líquidos (Lt) y **002** para sólidos/polvos (Kg).")
 
 # --- 3. CARGA DE DATOS AUDITADA ---
@@ -46,22 +43,30 @@ def cargar_todo():
     if not supabase: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     
     p = supabase.table('Productos').select("*").order('Producto').execute()
-    # AUDITORÍA: Columnas exactas del Excel
-    i = supabase.table('Ingresos').select("id, Codigo_Producto, Codigo_Lote, Cantidad_Ingresada, Precio_Unitario_PEN, Precio_Unitario_USD, Fecha_Vencimiento, Proveedor, Factura, Guia_Remision, Observaciones, Fecha_Recepcion, Deposito").execute()
+    # Usamos select(*) para asegurar que traiga Estado_Registro y Motivo_Anulacion
+    i = supabase.table('Ingresos').select("*").execute()
     s = supabase.table('Salidas').select("Ingreso_ID, Cantidad_Usada").execute()
     
     return pd.DataFrame(p.data), pd.DataFrame(i.data), pd.DataFrame(s.data)
 
 def generar_kardex(df_p, df_i, df_s):
-    if df_p.empty: return pd.DataFrame()
+    # 🛡️ Inicialización segura
+    df_balance = pd.DataFrame()
+
+    if df_p.empty: 
+        return pd.DataFrame(columns=['Codigo', 'Producto', 'Stock_Lote', 'Valorizado_PEN', 'Dias_para_Vencer', 'Unidad', 'Stock_Minimo', 'Tipo_Accion', 'Estado_Registro'])
     
-    # Limpieza básica
-    df_p['Stock_Minimo'] = df_p.get('Stock_Minimo', 0.0).fillna(0.0)
+    if 'Stock_Minimo' not in df_p.columns:
+        df_p['Stock_Minimo'] = 0.0
+    df_p['Stock_Minimo'] = df_p['Stock_Minimo'].fillna(0.0)
     
     if df_i.empty:
         df_final = df_p.copy()
-        df_final[['Stock_Lote', 'Valorizado_PEN']] = 0.0
+        df_final['Stock_Lote'] = 0.0
+        df_final['Valorizado_PEN'] = 0.0
         df_final['Dias_para_Vencer'] = 999
+        df_final['Codigo_Lote'] = "SIN LOTES"
+        df_final['Estado_Registro'] = "N/A"
         return df_final
 
     # Cálculo de saldos
@@ -74,23 +79,23 @@ def generar_kardex(df_p, df_i, df_s):
         df_balance['Stock_Lote'] = df_balance['Cantidad_Ingresada']
 
     # Merge con catálogo
-    df_final = pd.merge(df_balance, df_p, left_on='Codigo_Producto', right_on='Codigo', how='right').fillna(0)
+    df_final = pd.merge(df_balance, df_p, left_on='Codigo_Producto', right_on='Codigo', how='right')
+    
+    # Limpieza post-merge
+    df_final['Stock_Lote'] = df_final['Stock_Lote'].fillna(0.0)
+    df_final['Precio_Unitario_PEN'] = pd.to_numeric(df_final['Precio_Unitario_PEN'], errors='coerce').fillna(0.0)
     df_final['Valorizado_PEN'] = df_final['Stock_Lote'] * df_final['Precio_Unitario_PEN']
     
-    # --- PROCESAMIENTO DE FECHAS SEGURO ---
+    # Manejo de nulos en Estado
+    if 'Estado_Registro' not in df_final.columns:
+        df_final['Estado_Registro'] = "Completo 🟢"
+    df_final['Estado_Registro'] = df_final['Estado_Registro'].fillna("Completo 🟢")
+    
+    # Fechas
     hoy = pd.Timestamp(date.today())
-    
-    # 1. Convertimos a fecha, los errores se vuelven NaT (Not a Time)
     df_final['Venc_Date'] = pd.to_datetime(df_final['Fecha_Vencimiento'], errors='coerce')
-    
-    # 2. Calculamos los días
     df_final['Dias_para_Vencer'] = (df_final['Venc_Date'] - hoy).dt.days
-    
-    # 3. FILTRO ANTI-BUG: 
-    # Si la fecha es nula (NaT) O si es una fecha "fantasma" muy antigua (anterior al año 2000)
-    # le asignamos 999 para que no arruine las métricas.
-    df_final.loc[df_final['Venc_Date'].isnull(), 'Dias_para_Vencer'] = 999
-    df_final.loc[df_final['Venc_Date'].dt.year < 2000, 'Dias_para_Vencer'] = 999
+    df_final.loc[df_final['Venc_Date'].isnull() | (df_final['Venc_Date'].dt.year < 2000), 'Dias_para_Vencer'] = 999
     
     return df_final
 
@@ -99,28 +104,23 @@ df_p, df_i, df_s = cargar_todo()
 df_kardex_crudo = generar_kardex(df_p, df_i, df_s)
 df_kardex = df_kardex_crudo.copy()
 
-# Lógica del Modelo ABC Financiero
+# Lógica del Modelo ABC
 if not df_kardex.empty and df_kardex['Valorizado_PEN'].sum() > 0:
-    # 1. Filtramos para evaluar solo lo que tiene stock y lo ordenamos por valor
     df_kardex = df_kardex.sort_values(by='Valorizado_PEN', ascending=False).reset_index(drop=True)
-    
-    # 2. Calculamos el valor total del almacén y el peso acumulado de cada producto
     total_valor = df_kardex['Valorizado_PEN'].sum()
     df_kardex['Porcentaje_Acumulado'] = df_kardex['Valorizado_PEN'].cumsum() / total_valor
     
-    # 3. Asignamos las categorías basándonos en el Principio de Pareto
     condiciones = [
-        (df_kardex['Porcentaje_Acumulado'] <= 0.80), # 80% del valor del almacén
-        (df_kardex['Porcentaje_Acumulado'] > 0.80) & (df_kardex['Porcentaje_Acumulado'] <= 0.95), # Siguiente 15%
-        (df_kardex['Porcentaje_Acumulado'] > 0.95) # Último 5%
+        (df_kardex['Porcentaje_Acumulado'] <= 0.80),
+        (df_kardex['Porcentaje_Acumulado'] > 0.80) & (df_kardex['Porcentaje_Acumulado'] <= 0.95),
+        (df_kardex['Porcentaje_Acumulado'] > 0.95)
     ]
     valores = ['A (Crítico)', 'B (Intermedio)', 'C (Rutina)']
     df_kardex['Clase_ABC'] = np.select(condiciones, valores, default='C (Rutina)')
-    
-    # Limpiamos los que tienen stock cero para que no ensucien el análisis
     df_kardex.loc[df_kardex['Valorizado_PEN'] == 0, 'Clase_ABC'] = 'Sin Stock'
 else:
-    df_kardex['Clase_ABC'] = 'Sin Stock'
+    if not df_kardex.empty:
+        df_kardex['Clase_ABC'] = 'Sin Stock'
 
 # --- 5. PANEL DE CONTROL ---
 with stylable_container(key="green_panel", css_styles="{ background-color: #1e3d33; color: white; padding: 1.5rem; border-radius: 1rem; }"):
@@ -130,12 +130,15 @@ with stylable_container(key="green_panel", css_styles="{ background-color: #1e3d
     with c1:
         busqueda = st.text_input("🔍 Buscador:", placeholder="Lote, Factura, Producto...")
     with c2:
-        tipos_raw = df_kardex['Tipo_Accion'].unique()
-        tipos_limpios = sorted([str(t) for t in tipos_raw if t and str(t) not in ['0', 'nan', 'None']])
+        if 'Tipo_Accion' in df_kardex.columns:
+            tipos_raw = df_kardex['Tipo_Accion'].unique()
+            tipos_limpios = sorted([str(t) for t in tipos_raw if t and str(t) not in ['0', 'nan', 'None']])
+        else:
+            tipos_limpios = []
         filtro_tipo = st.selectbox("Categoría:", ["Todos"] + tipos_limpios)
     with c3:
-        cols_detalle = ['Proveedor', 'Factura', 'Guia_Remision', 'Deposito', 'Precio_Unitario_PEN', 'Precio_Unitario_USD', 'Ingrediente_Activo', 'Observaciones']
-        mostrar_extras = st.multiselect("⚙️ Columnas adicionales:", options=cols_detalle, default=[])
+        cols_detalle = ['Proveedor', 'Factura', 'Guia_Remision', 'Deposito', 'Precio_Unitario_PEN', 'Precio_Unitario_USD', 'Observaciones', 'Motivo_Anulacion']
+        mostrar_extras = st.multiselect("⚙️ Columnas adicionales:", options=[c for c in cols_detalle if c in df_kardex.columns], default=[])
 
 # Filtros
 if busqueda:
@@ -144,17 +147,27 @@ if busqueda:
 if filtro_tipo != "Todos":
     df_kardex = df_kardex[df_kardex['Tipo_Accion'] == filtro_tipo]
 
-# --- 6. MÉTRICAS ---
+# --- 6. MÉTRICAS (Actualizadas con Provisionales) ---
 st.write("")
 m1, m2, m3, m4 = st.columns(4)
 style_metric_cards(background_color="#ffffff", border_left_color="#1e3d33")
-m1.metric("Valorización (S/)", f"S/ {df_kardex['Valorizado_PEN'].sum():,.2f}")
-m2.metric("Alertas Stock", len(df_kardex[df_kardex['Stock_Lote'] < df_kardex['Stock_Minimo']]))
-m3.metric("Vencimientos <15d", len(df_kardex[df_kardex['Dias_para_Vencer'] < 15]))
-m4.metric("Lotes en Vista", len(df_kardex))
+
+val_total = df_kardex['Valorizado_PEN'].sum() if 'Valorizado_PEN' in df_kardex.columns else 0.0
+m1.metric("Valorización (S/)", f"S/ {val_total:,.2f}")
+
+n_alertas = len(df_kardex[(df_kardex['Stock_Lote'] < df_kardex['Stock_Minimo']) & (df_kardex['Estado_Registro'] != 'ANULADO ❌')]) if 'Stock_Lote' in df_kardex.columns else 0
+m2.metric("Alertas Stock", n_alertas)
+
+n_venc = len(df_kardex[(df_kardex['Dias_para_Vencer'] < 15) & (df_kardex['Stock_Lote'] > 0)]) if 'Dias_para_Vencer' in df_kardex.columns else 0
+m3.metric("Vencimientos <15d", n_venc)
+
+# Nueva métrica: Lotes pendientes de factura
+n_prov = len(df_kardex[df_kardex['Estado_Registro'] == 'Provisional 🔴']) if 'Estado_Registro' in df_kardex.columns else 0
+m4.metric("Docs. Pendientes 🔴", n_prov)
 
 # --- 7. AG-GRID ---
-cols_visibles = ['Codigo', 'Producto', 'Clase_ABC', 'Codigo_Lote', 'Stock_Lote', 'Unidad'] + mostrar_extras + ['Dias_para_Vencer']
+cols_base = ['Codigo', 'Producto', 'Estado_Registro', 'Clase_ABC', 'Codigo_Lote', 'Stock_Lote', 'Unidad']
+cols_visibles = [c for c in cols_base if c in df_kardex.columns] + mostrar_extras + ['Dias_para_Vencer']
 
 if not df_kardex.empty:
     gb = GridOptionsBuilder.from_dataframe(df_kardex[cols_visibles])
@@ -164,14 +177,18 @@ if not df_kardex.empty:
     for col in cols_visibles:
         gb.configure_column(col, minWidth=120, flex=1 if col in ['Producto', 'Proveedor'] else 0)
 
+    # 🎨 ESTILOS INTELIGENTES PARA ESTADOS
     cellsytle_jcode = JsCode("""
     function(params) {
+        if (params.data.Estado_Registro === 'ANULADO ❌') { return { 'color': '#ffffff', 'backgroundColor': '#95a5a6' }; }
+        if (params.data.Estado_Registro === 'Provisional 🔴') { return { 'color': '#000000', 'backgroundColor': '#fef9e7' }; }
         if (params.data.Stock_Lote <= 0) { return { 'color': 'white', 'backgroundColor': '#e74c3c' }; }
-        if (params.data.Dias_para_Vencer < 15) { return { 'color': 'black', 'backgroundColor': '#f1c40f' }; }
+        if (params.data.Dias_para_Vencer < 15 && params.data.Stock_Lote > 0) { return { 'color': 'black', 'backgroundColor': '#f1c40f' }; }
         return null;
     }
     """)
     gb.configure_column("Stock_Lote", cellStyle=cellsytle_jcode)
+    gb.configure_column("Estado_Registro", cellStyle=cellsytle_jcode)
     
     grid_response = AgGrid(
         df_kardex,
@@ -205,7 +222,8 @@ if not df_kardex.empty:
         
         with c_acc3:
             with stylable_container("obs", css_styles="{ background-color: #e8f4fd; padding: 10px; border-radius: 8px; border: 1px solid #b3d7ff;}"):
-                st.write(f"**💡 Observaciones:** {sel_row.get('Observaciones','Sin notas.')}")
+                motivo = f" | **Motivo Anulación:** {sel_row.get('Motivo_Anulacion')}" if sel_row.get('Estado_Registro') == 'ANULADO ❌' else ""
+                st.write(f"**💡 Observaciones:** {sel_row.get('Observaciones','Sin notas.')} {motivo}")
 
 # --- 9. DIÁLOGOS DE GESTIÓN ---
 if st.session_state.editing_product_id:
@@ -223,11 +241,8 @@ if st.session_state.editing_product_id:
             
             if st.form_submit_button("Guardar"):
                 data_upd = {
-                    "Producto": n_nombre, 
-                    "Stock_Minimo": n_min, 
-                    "Periodo_Carencia_Dias": n_car, 
-                    "Tipo_Accion": n_tipo, 
-                    "Incompatible_Con": n_inc
+                    "Producto": n_nombre, "Stock_Minimo": n_min, "Periodo_Carencia_Dias": n_car, 
+                    "Tipo_Accion": n_tipo, "Incompatible_Con": n_inc
                 }
                 supabase.table('Productos').update(data_upd).eq('id', p['id']).execute()
                 st.session_state.editing_product_id = None

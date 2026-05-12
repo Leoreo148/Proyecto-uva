@@ -221,25 +221,43 @@ else:
 
 # --- 9. DIÁLOGOS DE GESTIÓN ---
 if st.session_state.editing_product_id:
-    prod_to_edit = df_p[df_p['id'] == st.session_state.editing_product_id].iloc[0]
-    @st.dialog("✏️ Editar Maestro")
-    def show_edit_dialog(p):
-        with st.form("form_ed"):
-            st.write(f"Editando: **{p['Producto']}**")
-            col_a, col_b = st.columns(2)
-            n_nombre = col_a.text_input("Nombre", value=p['Producto'])
-            n_min = col_b.number_input("Mínimo", value=float(p.get('Stock_Minimo', 0)))
-            n_car = col_a.number_input("Carencia", value=int(p.get('Periodo_Carencia_Dias', 0)))
-            n_tipo = col_b.selectbox("Tipo", ["Insecticida", "Fungicida", "Herbicida", "Fertilizante", "Regulador", "Agroquímicos", "N/A"])
-            n_inc = st.text_area("Incompatibilidades", value=p.get('Incompatible_Con', ''))
+    # 🛡️ Blindaje extra: asegurarnos de que el DataFrame no esté vacío al buscar
+    match_prod = df_p[df_p['id'] == st.session_state.editing_product_id]
+    
+    if not match_prod.empty:
+        prod_to_edit = match_prod.iloc[0]
+        
+        @st.dialog("✏️ Editar Maestro")
+        def show_edit_dialog(p):
+            # LA CAJA DEL FORMULARIO
+            with st.form("form_ed"):
+                st.write(f"Editando: **{p['Producto']}**")
+                col_a, col_b = st.columns(2)
+                n_nombre = col_a.text_input("Nombre", value=p['Producto'])
+                n_min = col_b.number_input("Mínimo", value=float(p.get('Stock_Minimo', 0)))
+                n_car = col_a.number_input("Carencia", value=int(p.get('Periodo_Carencia_Dias', 0)))
+                n_tipo = col_b.selectbox("Tipo", ["Insecticida", "Fungicida", "Herbicida", "Fertilizante", "Regulador", "Agroquímicos", "N/A"])
+                n_inc = st.text_area("Incompatibilidades", value=p.get('Incompatible_Con', ''))
+                
+                # Único botón permitido dentro del form
+                submit = st.form_submit_button("Guardar Cambios")
+                
+                if submit:
+                    data_upd = {
+                        "Producto": n_nombre, 
+                        "Stock_Minimo": n_min, 
+                        "Periodo_Carencia_Dias": n_car, 
+                        "Tipo_Accion": n_tipo, 
+                        "Incompatible_Con": n_inc
+                    }
+                    supabase.table('Productos').update(data_upd).eq('id', p['id']).execute()
+                    st.session_state.editing_product_id = None
+                    st.cache_data.clear()
+                    st.rerun()
             
-            if st.form_submit_button("Guardar Cambios"):
-                data_upd = {"Producto": n_nombre, "Stock_Minimo": n_min, "Periodo_Carencia_Dias": n_car, "Tipo_Accion": n_tipo, "Incompatible_Con": n_inc}
-                supabase.table('Productos').update(data_upd).eq('id', p['id']).execute()
-                st.session_state.editing_product_id = None
-                st.cache_data.clear()
-                st.rerun()
-            if st.button("Cancelar"):
+            # 🛑 EL FIX: El botón normal va AFUERA del bloque 'with st.form', pero dentro del diálogo
+            if st.button("❌ Cancelar Edición"):
                 st.session_state.editing_product_id = None
                 st.rerun()
-    show_edit_dialog(prod_to_edit)
+                
+        show_edit_dialog(prod_to_edit)

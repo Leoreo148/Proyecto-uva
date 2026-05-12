@@ -4,20 +4,15 @@ from datetime import datetime, date
 from supabase import create_client
 
 # --- 1. CONFIGURACIÓN E IDENTIDAD VISUAL ---
-st.set_page_config(page_title="Gestión de Salidas y Mezclas", page_icon="⚗️", layout="wide")
+st.set_page_config(page_title="Gestión de Salidas y Mezclas - Project Uva", page_icon="⚗️", layout="wide")
 
 st.markdown("""
     <style>
     .stApp { background-color: #f8f9fa; }
-    .stHeader { background-color: #1e3d33; }
-    div[data-testid="stExpander"] { background-color: #ffffff; border-radius: 10px; border: 1px solid #e0e0e0; }
-    .seccion-titulo { color: #1e3d33; font-weight: 600; margin-top: 15px; margin-bottom: 10px; border-bottom: 2px solid #2ecc71; padding-bottom: 5px;}
-    .card-auditoria { background-color: #ffffff; border-radius: 10px; padding: 15px; border-left: 5px solid #2ecc71; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .seccion-titulo { color: #1e3d33; font-weight: 600; margin-top: 15px; border-bottom: 2px solid #2ecc71; padding-bottom: 5px;}
+    div[data-testid="stMetric"] { background-color: #ffffff; padding: 15px; border-radius: 10px; border: 1px solid #e0e0e0; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     </style>
     """, unsafe_allow_html=True)
-
-st.title("⚗️ Centro de Mezclas y Salidas (Build 9.6)")
-st.write("Control técnico y auditoría integral de aplicaciones.")
 
 # --- 2. CONEXIÓN ---
 @st.cache_resource
@@ -26,243 +21,214 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- 3. CARGA DE DATOS ---
+# --- 3. CARGA DE DATOS RELACIONALES (Jalando de tus tablas SQL reales) ---
 @st.cache_data(ttl=60)
-def cargar_datos_operativos():
-    if not supabase: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-    
-    p = supabase.table('Productos').select("Codigo, Producto, Unidad").execute()
-    i = supabase.table('Ingresos').select("id, Codigo_Producto, Codigo_Lote, Cantidad_Ingresada, Fecha_Vencimiento, Precio_Unitario_PEN").execute()
-    
-    try:
-        s = supabase.table('Salidas').select("Ingreso_ID, Cantidad_Usada").execute()
-        df_s = pd.DataFrame(s.data)
-    except:
-        df_s = pd.DataFrame()
-        
-    try:
-        # Traemos TODO el historial de órdenes para la auditoría
-        o = supabase.table('Ordenes_de_Trabajo').select("*").order('created_at', desc=True).execute()
-        df_o = pd.DataFrame(o.data)
-    except:
-        df_o = pd.DataFrame()
+def cargar_catalogos():
+    pers = supabase.table('Personal').select("id, nombre_completo").eq('activo', True).execute()
+    maq = supabase.table('Maquinaria').select("id, nombre").execute()
+    prod = supabase.table('Productos').select("Codigo, Producto, Unidad").execute()
+    ing = supabase.table('Ingresos').select("id, Codigo_Producto, Codigo_Lote, Cantidad_Ingresada, Precio_Unitario_PEN").execute()
+    sal = supabase.table('Salidas').select("Ingreso_ID, Cantidad_Usada").execute()
+    ord_ = supabase.table('Ordenes_de_Trabajo').select("*").order('created_at', desc=True).execute()
 
-    return pd.DataFrame(p.data), pd.DataFrame(i.data), df_s, df_o
+    return pd.DataFrame(pers.data), pd.DataFrame(maq.data), pd.DataFrame(prod.data), pd.DataFrame(ing.data), pd.DataFrame(sal.data), pd.DataFrame(ord_.data)
 
-def obtener_stock_por_lote(df_p, df_i, df_s):
+df_pers, df_maq, df_prod, df_ing, df_sal, df_ord = cargar_catalogos()
+
+# Motor FEFO (First Expired, First Out)
+def obtener_fefo(df_p, df_i, df_s):
     if df_i.empty: return pd.DataFrame()
-    if not df_s.empty:
-        gastado = df_s.groupby('Ingreso_ID')['Cantidad_Usada'].sum().reset_index()
-        df_lotes = pd.merge(df_i, gastado, left_on='id', right_on='Ingreso_ID', how='left').fillna({'Cantidad_Usada': 0})
-        df_lotes['Stock_Actual'] = df_lotes['Cantidad_Ingresada'] - df_lotes['Cantidad_Usada']
-    else:
-        df_lotes = df_i.copy()
-        df_lotes['Stock_Actual'] = df_lotes['Cantidad_Ingresada']
+    gastado = df_s.groupby('Ingreso_ID')['Cantidad_Usada'].sum().reset_index() if not df_s.empty else pd.DataFrame(columns=['Ingreso_ID', 'Cantidad_Usada'])
+    df_res = pd.merge(df_i, gastado, left_on='id', right_on='Ingreso_ID', how='left').fillna(0)
+    df_res['Stock_Actual'] = df_res['Cantidad_Ingresada'] - df_res['Cantidad_Usada']
+    return pd.merge(df_res[df_res['Stock_Actual'] > 0], df_p, left_on='Codigo_Producto', right_on='Codigo')
 
-    df_final = pd.merge(df_lotes, df_p, left_on='Codigo_Producto', right_on='Codigo', how='left')
-    if 'Fecha_Vencimiento' in df_final.columns:
-        df_final['Fecha_Vencimiento'] = pd.to_datetime(df_final['Fecha_Vencimiento'], errors='coerce')
-    return df_final
+df_stock = obtener_fefo(df_prod, df_ing, df_sal)
 
-df_prod, df_ing, df_sal, df_ord = cargar_datos_operativos()
-df_fefo = obtener_stock_por_lote(df_prod, df_ing, df_sal)
-
-OBJETIVOS_COMUNES = ["Control de Plagas", "Fertilización", "Control de Enfermedades", "Herbicida", "Riego", "Otro"]
-LABORES_COMUNES = ["Motorista", "Aplicador Manual", "Riego tecnificado", "Foliar Tractor"]
-
-# --- INTERFAZ ---
-tab1, tab2, tab3 = st.tabs(["🚀 Salida Rápida", "📋 Programar Mezcla", "📚 Historial y Auditoría"])
+# --- 4. INTERFAZ PRINCIPAL ---
+st.title("⚗️ Centro de Mezclas y Auditoría Técnica")
+tab1, tab2, tab3 = st.tabs(["📋 Programar Mezcla (Ingeniero)", "🚚 Almacén y Despacho", "💰 Historial de Costos"])
 
 # ==========================================
-# TAB 1: SALIDA DIRECTA RÁPIDA 
+# TAB 1: PROGRAMAR MEZCLA (Diseño Belessia con KPIs Financieros)
 # ==========================================
 with tab1:
-    st.subheader("Descargo Directo de Almacén")
-    if df_fefo.empty or not (df_fefo['Stock_Actual'] > 0).any():
-        st.error("❌ No hay stock disponible.")
+    if df_stock.empty:
+        st.warning("⚠️ No hay stock disponible en el Kardex para programar mezclas.")
     else:
-        df_disponible = df_fefo[df_fefo['Stock_Actual'] > 0].sort_values('Fecha_Vencimiento')
-        opciones_lotes = { f"{r['Producto']} | Lote: {r['Codigo_Lote']} (Saldo: {r['Stock_Actual']:.2f} {r['Unidad']})": r for _, r in df_disponible.iterrows() }
+        with st.form("nueva_ot_belessia"):
+            st.markdown('<div class="seccion-titulo">1. Ubicación y Maquinaria</div>', unsafe_allow_html=True)
+            c1, c2, c3 = st.columns(3)
+            f_prog = c1.date_input("Fecha Programada", value=date.today())
+            sec_dest = c2.text_input("Sector / Lotes (Ej: W3)")
+            ha_dest = c3.number_input("Hectáreas a tratar", min_value=0.1, value=1.8)
 
-        with st.form("salida_directa"):
-            c1, c2 = st.columns([2, 1])
-            lote_sel = c1.selectbox("Producto y Lote:", list(opciones_lotes.keys()))
-            lote_info = opciones_lotes[lote_sel]
-            cant_salida = c2.number_input(f"Cantidad ({lote_info['Unidad']}):", min_value=0.01, value=1.0)
+            c4, c5, c6 = st.columns(3)
+            # PROTECCIÓN: Si las tablas están vacías, damos un valor por defecto para que no explote
+            lista_opers = df_pers['nombre_completo'].tolist() if not df_pers.empty else ["Sin operadores"]
+            lista_maqs = df_maq['nombre'].tolist() if not df_maq.empty else ["Sin maquinaria"]
             
-            st.divider()
-            c3, c4, c5 = st.columns(3)
-            fecha = c3.date_input("Fecha", value=date.today())
-            sector = c4.text_input("Sector Destino", placeholder="Ej: W3")
-            objetivo = c5.selectbox("Objetivo", OBJETIVOS_COMUNES)
+            oper_sel = c4.selectbox("Operario de Maquinaria", options=lista_opers)
+            maq_sel = c5.selectbox("Tractor Utilizado", options=lista_maqs)
+            obj_app = c6.text_input("Objetivo (Ej: Trips - Araña Roja)")
+
+            st.markdown('<div class="seccion-titulo">2. Parámetros Técnicos (Calibración)</div>', unsafe_allow_html=True)
+            ct1, ct2, ct3, ct4 = st.columns(4)
+            tipo_app = ct1.selectbox("Método", ["Nebulizado (Turbo)", "Pulverizado", "Barras", "Drench", "Mochila"])
+            vol_ha = ct2.number_input("Vol. Lts/Ha", value=1200)
+            marcha = ct3.number_input("Marcha Tractor", value=1)
+            presion = ct4.number_input("Presión (Bar/Lb)", value=9.0)
             
-            if st.form_submit_button("⚡ Registrar Salida Directa", type="primary"):
-                nueva_salida = { "Fecha_Aplicacion": str(fecha), "Ingreso_ID": int(lote_info['id']), "Cantidad_Usada": cant_salida, "Sector_Destino": sector, "Objetivo_Tratamiento": objetivo }
-                supabase.table('Salidas').insert(nueva_salida).execute()
-                st.success("✅ Salida registrada.")
-                st.cache_data.clear()
-                st.rerun()
+            config_barras = st.text_input("Distribución Boquillas", placeholder="Ej: Izq: 2N-2M | Der: 2M-2N")
 
-# ==========================================
-# TAB 2: ÓRDENES DE MEZCLA (EL INGENIERO MANDA)
-# ==========================================
-with tab2:
-    with st.expander("👨‍🔬 Programar Mezcla (Formato Fundo Belessia)", expanded=True):
-        if not df_fefo.empty:
-            with st.form("nueva_ot_pro"):
-                
-                # --- 1. DATOS GENERALES ---
-                st.markdown('<div class="seccion-titulo">1. Datos Generales y Maquinaria</div>', unsafe_allow_html=True)
-                ca1, ca2, ca3, ca4 = st.columns(4)
-                f_ot = ca1.date_input("Fecha Programada")
-                sec_ot = ca2.text_input("Lotes / Sector", placeholder="Ej: W3")
-                ha_ot = ca3.number_input("Hectáreas", min_value=0.01, value=1.80)
-                turno_ot = ca4.selectbox("Turno", ["Día", "Noche"])
-                
-                obj_ot = st.text_input("Objetivo del Tratamiento", placeholder="Ej: Trips - araña roja")
+            st.markdown('<div class="seccion-titulo">3. Receta de Insumos (Cálculo Automático)</div>', unsafe_allow_html=True)
+            opciones_fefo = {f"{r['Producto']} - Lote: {r['Codigo_Lote']} (Sald: {r['Stock_Actual']} {r.get('Unidad','')} - S/{r['Precio_Unitario_PEN']:.2f})": r for _, r in df_stock.iterrows()}
+            
+            editor_receta = st.data_editor(
+                pd.DataFrame([{"Insumo": list(opciones_fefo.keys())[0], "Cantidad_Total": 0.0}]),
+                num_rows="dynamic",
+                column_config={
+                    "Insumo": st.column_config.SelectboxColumn("Lote en Almacén", options=list(opciones_fefo.keys()), required=True),
+                    "Cantidad_Total": st.column_config.NumberColumn("Cantidad (L/Kg)", min_value=0.0)
+                }
+            )
 
-                cm1, cm2, cm3 = st.columns(3)
-                tract_ot = cm1.text_input("Tractor Utilizado", placeholder="Ej: Antonio Carraro")
-                imple_ot = cm2.text_input("Tanque / Implemento", value="Full Maquinarias")
-                oper_ot = cm3.text_input("Operario Asignado")
-
-                # --- 2. MÉTODO DE APLICACIÓN Y AGUA ---
-                st.markdown('<div class="seccion-titulo">2. Método de Aplicación y Caldo</div>', unsafe_allow_html=True)
-                cw1, cw2, cw3, cw4 = st.columns(4)
-                tipo_app = cw1.selectbox("Tipo de Aplicación", ["Nebulizado (Turbo)", "Pulverizado", "Barras", "Pistolas/Drench", "Mochila Manual"])
-                vol_tot = cw2.number_input("Volumen Total (Lts)", value=2200)
-                vol_ha = cw3.number_input("Volumen Lts/Ha", value=1200)
-                ph_agua = cw4.number_input("pH Agua", value=6.0, step=0.1)
-
-                # --- 3. CALIBRACIÓN ---
-                st.markdown('<div class="seccion-titulo">3. Calibración y Boquillas</div>', unsafe_allow_html=True)
-                cb1, cb2, cb3 = st.columns(3)
-                marcha = cb1.number_input("Marcha Tractor (N°)", min_value=1, value=1)
-                velocidad = cb2.number_input("Velocidad Km/h", value=0.0)
-                presion = cb3.number_input("Presión (Bar/Lb)", value=9.0)
-
-                ct1, ct2 = st.columns([1, 2])
-                n_boq = ct1.number_input("N° Total de Boquillas", value=18)
-                color_boq = ct2.text_input("Color de Boquillas", value="9 negras, 9 marrones")
-                
-                obs_ot = st.text_input("Observaciones Generales", value="Aplicación con turbo y con boquillas intercaladas una negra y una marron")
-
-                # --- 4. RECETA DE INSUMOS ---
-                st.markdown('<div class="seccion-titulo">4. Receta de Fitosanitarios / Foliares</div>', unsafe_allow_html=True)
-                editor = st.data_editor(
-                    pd.DataFrame([{"Insumo": list(opciones_lotes.keys())[0], "Cantidad": 0.0}]),
-                    num_rows="dynamic",
-                    column_config={
-                        "Insumo": st.column_config.SelectboxColumn("Seleccionar Lote de Almacén", options=list(opciones_lotes.keys()), required=True),
-                        "Cantidad": st.column_config.NumberColumn("Total Producto (Kg/L)", min_value=0.0)
-                    }
-                )
-
-                if st.form_submit_button("📡 Enviar Orden Maestra al Campo", type="primary"):
-                    receta = []
-                    for _, row in editor.iterrows():
-                        info = opciones_lotes[row['Insumo']]
-                        receta.append({"id": int(info['id']), "p": info['Producto'], "l": info['Codigo_Lote'], "c": row['Cantidad']})
+            if st.form_submit_button("📡 Enviar Orden Maestra a Almacén", type="primary"):
+                if ha_dest <= 0:
+                    st.error("⚠️ Las hectáreas deben ser mayores a 0 para calcular costos.")
+                else:
+                    costo_total_mezcla = 0
+                    receta_final = []
                     
-                    # Empaquetamos todo de nuevo en el super-reporte técnico
-                    reporte_tecnico = f"""[ÁREA]: {ha_ot} Ha | [TURNO]: {turno_ot}
-[MÉTODO]: {tipo_app} | [AGUA]: Vol Total: {vol_tot} L | Vol/Ha: {vol_ha} L | pH: {ph_agua}
-[CALIBRACIÓN]: Marcha: {marcha} | Velocidad: {velocidad} km/h | Presión: {presion} Bar
-[BOQUILLAS]: {n_boq} totales ({color_boq})
-[EQUIPO]: Tractor: {tract_ot} | Tanque: {imple_ot} | Operario: {oper_ot}
-[OBSERVACIONES]: {obs_ot}"""
-                    
+                    # MAGIA FINANCIERA: Recorremos la receta y calculamos costo en tiempo real
+                    for _, row in editor_receta.iterrows():
+                        info = opciones_fefo[row['Insumo']]
+                        precio_unitario = float(info.get('Precio_Unitario_PEN', 0))
+                        costo_insumo = row['Cantidad_Total'] * precio_unitario
+                        costo_total_mezcla += costo_insumo
+                        
+                        receta_final.append({
+                            "id": int(info['id']), 
+                            "p": info['Producto'], 
+                            "l": info['Codigo_Lote'], 
+                            "c": row['Cantidad_Total'],
+                            "precio_u": precio_unitario,
+                            "costo_total": costo_insumo
+                        })
+
+                    # Se guardan IDs si existen, sino None (evita errores ForeignKey)
+                    maq_id = df_maq[df_maq['nombre'] == maq_sel]['id'].values[0] if not df_maq.empty else None
+                    oper_id = df_pers[df_pers['nombre_completo'] == oper_sel]['id'].values[0] if not df_pers.empty else None
+
                     ot_data = {
                         "ID_Orden_Personalizado": f"OT-{datetime.now().strftime('%y%m%d-%H%M')}",
                         "Status": "En Preparación",
-                        "Fecha_Programada": str(f_ot),
-                        "Sector_Aplicacion": sec_ot,
-                        "Objetivo": obj_ot,
-                        "Receta_Mezcla_Lotes": receta,
-                        "Observaciones_Aplicacion": reporte_tecnico 
+                        "Fecha_Programada": str(f_prog),
+                        "Sector_Aplicacion": sec_dest,
+                        "Objetivo": obj_app,
+                        "Receta_Mezcla_Lotes": receta_final,
+                        "Volumen_Hectarea": ha_dest, # Lo usamos para el cálculo de costo por Ha
+                        "Marcha": int(marcha),
+                        "Presion_Bar": float(presion),
+                        "Tipo_Aplicacion": tipo_app,
+                        "Color_Boquilla": config_barras,
+                        "maquinaria_id": int(maq_id) if maq_id else None,
+                        "operador_id": int(oper_id) if oper_id else None,
+                        "Datos_Tecnicos": {"Costo_Estimado_Total": costo_total_mezcla, "Costo_Por_Ha": (costo_total_mezcla/ha_dest) if ha_dest>0 else 0}
                     }
                     
-                    try:
-                        supabase.table('Ordenes_de_Trabajo').insert(ot_data).execute()
-                        st.success("📡 Orden maestra creada. Almacén puede preparar y el tractorista ya la verá en su app.")
-                        st.cache_data.clear()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al enviar la orden: {e}")
+                    supabase.table('Ordenes_de_Trabajo').insert(ot_data).execute()
+                    st.success(f"✅ Orden enviada a Almacén. Inversión calculada: S/ {costo_total_mezcla:,.2f}")
+                    st.cache_data.clear()
+                    st.rerun()
 
-    # VISOR DE PENDIENTES EN ALMACÉN
-    df_pendientes = df_ord[df_ord['Status'] == 'En Preparación'] if not df_ord.empty else pd.DataFrame()
-    if not df_pendientes.empty:
-        st.subheader("⏳ Mezclas por Despachar (Almacén)")
-        for _, ot in df_pendientes.iterrows():
-            with st.container(border=True):
-                c_ot1, c_ot2 = st.columns([3, 1])
-                c_ot1.write(f"🆔 **{ot['ID_Orden_Personalizado']}** | 📍 {ot['Sector_Aplicacion']} | 🎯 {ot['Objetivo']}")
-                
-                with c_ot1.expander("Ver Parámetros de Aplicación Configurados"):
-                    st.text(ot.get('Observaciones_Aplicacion', 'Sin parámetros adicionales.'))
-                    
-                c_ot1.dataframe(pd.DataFrame(ot['Receta_Mezcla_Lotes']), hide_index=True)
-                
-                if c_ot2.button("✅ Confirmar Despacho", key=f"d_{ot['id']}", type="primary"):
-                    try:
-                        batch = []
-                        for i in ot['Receta_Mezcla_Lotes']:
-                            batch.append({
-                                "Fecha_Aplicacion": ot['Fecha_Programada'], 
-                                "Ingreso_ID": i['id'], 
-                                "Cantidad_Usada": i['c'], 
-                                "Sector_Destino": ot['Sector_Aplicacion'], 
-                                "Objetivo_Tratamiento": ot['Objetivo']
-                            })
-                        supabase.table('Salidas').insert(batch).execute()
-                        supabase.table('Ordenes_de_Trabajo').update({"Status": "Finalizada"}).eq('id', ot['id']).execute()
-                        st.cache_data.clear()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error DB: {e}")
-                        
 # ==========================================
-# TAB 3: HISTORIAL Y AUDITORÍA (LO NUEVO)
+# TAB 2: ALMACÉN Y DESPACHO (La Firma Digital)
+# ==========================================
+with tab2:
+    st.subheader("Órdenes por Despachar al Tractor")
+    pendientes = df_ord[df_ord['Status'] == 'En Preparación'] if not df_ord.empty else pd.DataFrame()
+    
+    if pendientes.empty:
+        st.info("No hay mezclas pendientes. El ingeniero no ha programado nada nuevo.")
+    else:
+        for _, ot in pendientes.iterrows():
+            with st.expander(f"📦 {ot['ID_Orden_Personalizado']} | Sector: {ot['Sector_Aplicacion']} | 🎯 {ot['Objetivo']}"):
+                col_d1, col_d2 = st.columns([3, 1])
+                
+                # Formateamos el dataframe del JSON para que se vea limpio
+                df_receta = pd.DataFrame(ot['Receta_Mezcla_Lotes'])
+                col_d1.dataframe(df_receta[['p', 'l', 'c']].rename(columns={'p':'Producto', 'l':'Lote', 'c':'Cantidad(L/Kg)'}), hide_index=True)
+                
+                with col_d2:
+                    st.markdown("**Firma de Salida Logística**")
+                    # AUDITORÍA: Almacenero obligatorio
+                    resp_alm = st.text_input("Nombre Responsable Almacén*", key=f"resp_{ot['id']}", placeholder="Ej: Carlos M.")
+                    
+                    if st.button("✅ Confirmar y Descargar Stock", key=f"btn_{ot['id']}", type="primary"):
+                        if resp_alm.strip():
+                            batch_salidas = []
+                            for insumo in ot['Receta_Mezcla_Lotes']:
+                                batch_salidas.append({
+                                    "Fecha_Aplicacion": ot['Fecha_Programada'],
+                                    "Ingreso_ID": insumo['id'],
+                                    "Cantidad_Usada": insumo['c'],
+                                    "Sector_Destino": ot['Sector_Aplicacion'],
+                                    "Objetivo_Tratamiento": ot['Objetivo'],
+                                    "Responsable": resp_alm,
+                                    "Labor": "Aplicación OT"
+                                })
+                            
+                            # Transacción doble: Quita stock y cambia estado
+                            supabase.table('Salidas').insert(batch_salidas).execute()
+                            supabase.table('Ordenes_de_Trabajo').update({"Status": "Finalizada"}).eq('id', ot['id']).execute()
+                            
+                            st.success("Despacho exitoso. Kardex actualizado.")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error("⚠️ La firma del responsable es obligatoria por auditoría.")
+
+# ==========================================
+# TAB 3: HISTORIAL Y KPIs DE COSTOS (Finanzas)
 # ==========================================
 with tab3:
-    st.subheader("📚 Registro Histórico de Mezclas")
+    st.subheader("Auditoría Financiera de Aplicaciones en Campo")
+    finalizadas = df_ord[df_ord['Status'] == 'Finalizada'] if not df_ord.empty else pd.DataFrame()
     
-    if df_ord.empty:
-        st.info("No hay órdenes registradas.")
+    if finalizadas.empty:
+        st.info("Aún no hay órdenes finalizadas para mostrar estadísticas.")
     else:
-        # Filtramos órdenes que ya pasaron por almacén (Finalizada o Aplicada)
-        df_audit = df_ord[df_ord['Status'].isin(['Finalizada', 'Aplicada en Campo'])].copy()
+        # Recuperamos los costos desde el JSONB 'Datos_Tecnicos'
+        costos_totales = []
+        hectareas_totales = 0
         
-        # Botón de Descarga Excel
-        csv = df_audit.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 Descargar Todo el Historial (Excel)", data=csv, file_name=f"auditoria_mezclas_{date.today()}.csv", mime="text/csv")
+        for _, ot in finalizadas.iterrows():
+            if ot.get('Datos_Tecnicos'):
+                costos_totales.append(ot['Datos_Tecnicos'].get('Costo_Estimado_Total', 0))
+            hectareas_totales += float(ot.get('Volumen_Hectarea', 0))
+            
+        inversion_global = sum(costos_totales)
+        promedio_global_ha = inversion_global / hectareas_totales if hectareas_totales > 0 else 0
+
+        # Tarjetas de KPI
+        k1, k2, k3 = st.columns(3)
+        k1.metric("💰 Inversión Total en Químicos", f"S/ {inversion_global:,.2f}")
+        k2.metric("📉 Costo Promedio General / Ha", f"S/ {promedio_global_ha:,.2f}")
+        k3.metric("🚜 Hectáreas Totales Tratadas", f"{hectareas_totales:,.1f} Ha")
+
+        st.divider()
+        st.write("### Desglose por Orden de Trabajo")
         
-        st.write("---")
-        
-        # Mostramos las últimas 10 órdenes con detalle completo
-        for _, ot in df_audit.head(10).iterrows():
-            with st.container():
-                st.markdown(f"""
-                <div class="card-auditoria">
-                    <b>🆔 {ot['ID_Orden_Personalizado']}</b> | 📅 {ot['Fecha_Programada']} | 📍 Sector: {ot['Sector_Aplicacion']} | 🚦 Estado: {ot['Status']}
-                </div>
-                """, unsafe_allow_html=True)
-                
-                col_aud1, col_aud2 = st.columns([1, 1])
-                
-                with col_aud1:
-                    st.caption("🧪 Composición de la Mezcla:")
-                    st.table(pd.DataFrame(ot['Receta_Mezcla_Lotes']).rename(columns={'p': 'Producto', 'l': 'Lote', 'c': 'Cant'}))
-                
-                with col_aud2:
-                    st.caption("⚙️ Parámetros Técnicos Programados:")
-                    st.info(ot.get('Observaciones_Aplicacion', 'Sin datos técnicos.'))
-                    
-                    # 🛡️ FIX DEFINITIVO: Validamos la fecha antes de intentar cortarla
-                    fecha_fin = ot.get('Aplicacion_Completada_Fecha')
-                    if pd.notna(fecha_fin) and str(fecha_fin).strip() not in ["", "NaT", "nan", "None"]:
-                        st.success(f"🚜 Finalizado en campo: {str(fecha_fin)[:16].replace('T', ' ')}")
-                    else:
-                        st.warning("⏳ En espera de aplicación por el tractorista.")
-                st.write("---")
+        for _, ot in finalizadas.iterrows():
+            dt = ot.get('Datos_Tecnicos', {})
+            c_ot = dt.get('Costo_Estimado_Total', 0)
+            c_ha = dt.get('Costo_Por_Ha', 0)
+            ha_uso = ot.get('Volumen_Hectarea', 0)
+            
+            st.markdown(f"""
+            <div style='background-color:#ffffff; padding:15px; border-radius:8px; border-left:4px solid #2ecc71; margin-bottom:10px; box-shadow:0 1px 3px rgba(0,0,0,0.1);'>
+                <b>OT: {ot['ID_Orden_Personalizado']}</b> | 📍 Sector: {ot['Sector_Aplicacion']} ({ha_uso} Ha) <br>
+                💵 <b>Costo Total: S/ {c_ot:,.2f}</b>  👉 (<i>S/ {c_ha:,.2f} por Hectárea</i>)
+            </div>
+            """, unsafe_allow_html=True)

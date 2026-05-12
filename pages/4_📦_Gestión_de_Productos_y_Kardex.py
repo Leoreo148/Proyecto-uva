@@ -167,7 +167,7 @@ if not df_kardex.empty:
 
     gb = GridOptionsBuilder.from_dataframe(df_kardex[cols_visibles])
     gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
-    gb.configure_selection('single', use_checkbox=True)
+    gb.configure_selection('multiple', use_checkbox=True, header_checkbox=True)
     
     for col in cols_visibles: gb.configure_column(col, minWidth=120)
 
@@ -191,33 +191,55 @@ if not df_kardex.empty:
 
     # --- 8. ACCIONES Y DETALLES ---
     selected = grid_response['selected_rows']
-    if selected is not None and not (isinstance(selected, pd.DataFrame) and selected.empty):
-        sel_row = selected.iloc[0] if isinstance(selected, pd.DataFrame) else selected[0]
-        
+    
+    # Verificamos que haya al menos un elemento seleccionado
+    if selected is not None and len(selected) > 0:
+        # Streamlit a veces devuelve un DataFrame y a veces una lista de diccionarios
+        if isinstance(selected, pd.DataFrame):
+            selected_records = selected.to_dict('records')
+        else:
+            selected_records = selected
+            
         st.divider()
         c_acc1, c_acc2, c_acc3 = st.columns([2,2,4])
         
-        if c_acc1.button("✏️ Editar Producto Master"):
-            match = df_p[df_p['Codigo'] == sel_row['Codigo']]
-            if not match.empty:
-                st.session_state.editing_product_id = int(match.iloc[0]['id'])
-                st.rerun()
-                
-        # 💡 NUEVO BOTÓN: Archivar Producto (Soft Delete)
-        if c_acc2.button("📦 Archivar/Desactivar Master", type="secondary"):
-            match = df_p[df_p['Codigo'] == sel_row['Codigo']]
-            if not match.empty:
-                real_id = int(match.iloc[0]['id'])
-                supabase.table('Productos').update({"Activo": False}).eq('id', real_id).execute()
-                st.success("Producto archivado. Sus registros históricos se mantienen, pero ya no aparecerá en búsquedas nuevas.")
-                st.cache_data.clear()
-                st.rerun()
+        # 1. BOTÓN DE EDITAR (Solo funciona si hay exactamente 1 seleccionado)
+        if len(selected_records) == 1:
+            if c_acc1.button("✏️ Editar Producto Master"):
+                match = df_p[df_p['Codigo'] == selected_records[0]['Codigo']]
+                if not match.empty:
+                    st.session_state.editing_product_id = int(match.iloc[0]['id'])
+                    st.rerun()
+        else:
+            c_acc1.write(f"Has seleccionado **{len(selected_records)}** productos.")
+            
+        # 2. BOTÓN DE ARCHIVAR MASIVO
+        if c_acc2.button(f"📦 Archivar ({len(selected_records)}) Productos", type="secondary"):
+            for row in selected_records:
+                match = df_p[df_p['Codigo'] == row['Codigo']]
+                if not match.empty:
+                    real_id = int(match.iloc[0]['id'])
+                    # Archivamos uno por uno en la base de datos
+                    supabase.table('Productos').update({"Activo": False}).eq('id', real_id).execute()
+            
+            st.success(f"Se han archivado {len(selected_records)} productos correctamente.")
+            st.cache_data.clear()
+            st.rerun()
         
+        # 3. PANEL DE OBSERVACIONES (Con el Fix del "None")
         with c_acc3:
             with stylable_container("obs", css_styles="{ background-color: #e8f4fd; padding: 10px; border-radius: 8px; border: 1px solid #b3d7ff;}"):
-                st.write(f"**💡 Observaciones del Lote:** {sel_row.get('Observaciones','Sin notas.')}")
-else:
-    st.info("El Kardex está vacío. Ingresa productos para comenzar.")
+                if len(selected_records) == 1:
+                    # Filtro Anti-None
+                    obs_raw = str(selected_records[0].get('Observaciones', ''))
+                    if obs_raw.strip() == '' or obs_raw == 'None' or obs_raw == 'nan':
+                        obs_clean = "Sin notas."
+                    else:
+                        obs_clean = obs_raw
+                        
+                    st.write(f"**💡 Observaciones del Lote:** {obs_clean}")
+                else:
+                    st.write("**💡 Observaciones:** Selecciona solo 1 producto para ver sus notas específicas.")
 
 # --- 9. DIÁLOGOS DE GESTIÓN ---
 if st.session_state.editing_product_id:

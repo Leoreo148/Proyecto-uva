@@ -131,3 +131,43 @@ with c2:
             st.plotly_chart(fig_bar, use_container_width=True)
 
 st.info("👈 Usa la barra lateral para navegar entre el Inventario, Mezclas y Gestión de Campo.")
+
+# --- 8. ANÁLISIS FINANCIERO DE CAMPO (COSTO POR LOTE) ---
+st.divider()
+st.subheader("🗺️ Inversión Acumulada por Cuartel / Sector")
+
+df_ot = data.get("Ordenes_de_Trabajo", pd.DataFrame())
+
+if not df_ot.empty and 'Datos_Tecnicos' in df_ot.columns:
+    # Filtramos solo las órdenes que ya se aplicaron y gastaron
+    df_ot_fin = df_ot[df_ot['Status'] == 'Aplicada en Campo'].copy()
+    
+    if not df_ot_fin.empty:
+        # Función para extraer el costo del JSON oculto
+        def extraer_costo(json_data):
+            if isinstance(json_data, dict):
+                return json_data.get('Costo_Estimado_Total', 0.0)
+            return 0.0
+            
+        df_ot_fin['Costo_Total'] = df_ot_fin['Datos_Tecnicos'].apply(extraer_costo)
+        
+        # Agrupamos todo el dinero gastado por cada sector
+        costo_por_sector = df_ot_fin.groupby('Sector_Aplicacion')['Costo_Total'].sum().reset_index()
+        costo_por_sector = costo_por_sector.sort_values(by='Costo_Total', ascending=False)
+        
+        # Creamos el gráfico de barras para la gerencia
+        fig_sectores = px.bar(
+            costo_por_sector, 
+            x='Sector_Aplicacion', 
+            y='Costo_Total', 
+            text_auto='.2s',
+            color='Costo_Total', 
+            color_continuous_scale='Greens',
+            labels={'Sector_Aplicacion': 'Sector / Lote', 'Costo_Total': 'Inversión Total (S/)'}
+        )
+        fig_sectores.update_traces(textfont_size=12, textangle=0, textposition="outside", cliponaxis=False)
+        st.plotly_chart(fig_sectores, use_container_width=True)
+    else:
+        st.info("Aún no hay aplicaciones finalizadas en campo para calcular los costos por sector.")
+else:
+    st.info("No se encontraron registros de órdenes de trabajo.")

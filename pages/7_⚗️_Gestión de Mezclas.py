@@ -50,36 +50,64 @@ st.title("⚗️ Centro de Mezclas y Auditoría Técnica")
 tab1, tab2, tab3 = st.tabs(["📋 Programar Mezcla (Ingeniero)", "🚚 Almacén y Despacho", "💰 Historial de Costos"])
 
 # ==========================================
-# TAB 1: PROGRAMAR MEZCLA (Diseño Belessia con KPIs Financieros)
+# TAB 1: PROGRAMAR MEZCLA (Foliar vs Fertirriego)
 # ==========================================
 with tab1:
     if df_stock.empty:
         st.warning("⚠️ No hay stock disponible en el Kardex para programar mezclas.")
     else:
+        # 💡 EL INTERRUPTOR MÁGICO: Separa visualmente las labores
+        tipo_labor = st.radio(
+            "Seleccione el Tipo de Labor a Programar:", 
+            ["🚜 Aplicación Foliar (Maquinaria/Mochila)", "💧 Fertirriego (Sistema de Riego)"],
+            horizontal=True
+        )
+        st.write("---")
+
         with st.form("nueva_ot_belessia"):
-            st.markdown('<div class="seccion-titulo">1. Ubicación y Maquinaria</div>', unsafe_allow_html=True)
-            c1, c2, c3 = st.columns(3)
+            st.markdown('<div class="seccion-titulo">1. Ubicación General</div>', unsafe_allow_html=True)
+            c1, c2, c3, c4 = st.columns(4)
             f_prog = c1.date_input("Fecha Programada", value=date.today())
             sec_dest = c2.text_input("Sector / Lotes (Ej: W3)")
             ha_dest = c3.number_input("Hectáreas a tratar", min_value=0.1, value=1.8)
+            obj_app = c4.text_input("Objetivo (Ej: Nutrición, Trips)")
 
-            c4, c5, c6 = st.columns(3)
-            # PROTECCIÓN: Si las tablas están vacías, damos un valor por defecto para que no explote
-            lista_opers = df_pers['nombre_completo'].tolist() if not df_pers.empty else ["Sin operadores"]
+            st.markdown('<div class="seccion-titulo">2. Parámetros Técnicos</div>', unsafe_allow_html=True)
+            
+            # Listas de base de datos
+            lista_opers = df_pers['nombre_completo'].tolist() if not df_pers.empty else ["Sin personal"]
             lista_maqs = df_maq['nombre'].tolist() if not df_maq.empty else ["Sin maquinaria"]
-            
-            oper_sel = c4.selectbox("Operario de Maquinaria", options=lista_opers)
-            maq_sel = c5.selectbox("Tractor Utilizado", options=lista_maqs)
-            obj_app = c6.text_input("Objetivo (Ej: Trips - Araña Roja)")
 
-            st.markdown('<div class="seccion-titulo">2. Parámetros Técnicos (Calibración)</div>', unsafe_allow_html=True)
-            ct1, ct2, ct3, ct4 = st.columns(4)
-            tipo_app = ct1.selectbox("Método", ["Nebulizado (Turbo)", "Pulverizado", "Barras", "Drench", "Mochila"])
-            vol_ha = ct2.number_input("Vol. Lts/Ha", value=1200)
-            marcha = ct3.number_input("Marcha Tractor", value=1)
-            presion = ct4.number_input("Presión (Bar/Lb)", value=9.0)
-            
-            config_barras = st.text_input("Distribución Boquillas", placeholder="Ej: Izq: 2N-2M | Der: 2M-2N")
+            # 🔀 LÓGICA CONDICIONAL: Cambia el formulario según el botón de arriba
+            if "Foliar" in tipo_labor:
+                cf1, cf2, cf3 = st.columns(3)
+                oper_sel = cf1.selectbox("Operario / Tractorista", options=lista_opers)
+                maq_sel = cf2.selectbox("Tractor Utilizado", options=lista_maqs)
+                tipo_app = cf3.selectbox("Método", ["Nebulizado (Turbo)", "Pulverizado", "Barras", "Mochila"])
+                
+                cf4, cf5, cf6, cf7 = st.columns(4)
+                vol_ha = cf4.number_input("Vol. Lts/Ha", value=1200)
+                marcha = cf5.number_input("Marcha Tractor", value=1)
+                presion = cf6.number_input("Presión (Bar/Lb)", value=9.0)
+                config_barras = cf7.text_input("Distribución Boquillas", placeholder="Ej: Izq: 2N-2M")
+                
+                datos_extra_json = {"Metodo": "Foliar"} # Para guardar en JSONB
+                caseta_sel, ph_agua, ce_agua, tiempo_riego = None, None, None, None # Nulos para foliar
+
+            else: # Es Fertirriego
+                cr1, cr2, cr3 = st.columns(3)
+                oper_sel = cr1.selectbox("Casetero / Operador de Riego", options=lista_opers)
+                caseta_sel = cr2.selectbox("Caseta / Cabezal de Riego", ["Caseta 1", "Caseta 2", "Válvula Directa"])
+                tipo_app = "Fertirriego"
+                
+                cr4, cr5, cr6, cr7 = st.columns(4)
+                vol_ha = cr4.number_input("Vol. Agua (m3/Ha)", value=15.0)
+                ph_agua = cr5.number_input("pH Esperado", value=5.5, step=0.1)
+                ce_agua = cr6.number_input("Conductividad (CE)", value=1.2, step=0.1)
+                tiempo_riego = cr7.number_input("Tiempo Inyección (Min)", value=45)
+                
+                maq_sel, marcha, presion, config_barras = None, 0, 0.0, None # Nulos para riego
+                datos_extra_json = {"Caseta": caseta_sel, "pH": ph_agua, "CE": ce_agua, "Tiempo_Min": tiempo_riego, "Metodo": "Fertirriego"}
 
             st.markdown('<div class="seccion-titulo">3. Receta de Insumos (Cálculo Automático)</div>', unsafe_allow_html=True)
             opciones_fefo = {f"{r['Producto']} - Lote: {r['Codigo_Lote']} (Sald: {r['Stock_Actual']} {r.get('Unidad','')} - S/{r['Precio_Unitario_PEN']:.2f})": r for _, r in df_stock.iterrows()}
@@ -100,7 +128,6 @@ with tab1:
                     costo_total_mezcla = 0
                     receta_final = []
                     
-                    # MAGIA FINANCIERA: Recorremos la receta y calculamos costo en tiempo real
                     for _, row in editor_receta.iterrows():
                         info = opciones_fefo[row['Insumo']]
                         precio_unitario = float(info.get('Precio_Unitario_PEN', 0))
@@ -116,9 +143,12 @@ with tab1:
                             "costo_total": costo_insumo
                         })
 
-                    # Se guardan IDs si existen, sino None (evita errores ForeignKey)
-                    maq_id = df_maq[df_maq['nombre'] == maq_sel]['id'].values[0] if not df_maq.empty else None
-                    oper_id = df_pers[df_pers['nombre_completo'] == oper_sel]['id'].values[0] if not df_pers.empty else None
+                    # Empaquetamos los costos dentro del diccionario de datos extra que ya definimos
+                    datos_extra_json["Costo_Estimado_Total"] = costo_total_mezcla
+                    datos_extra_json["Costo_Por_Ha"] = (costo_total_mezcla/ha_dest) if ha_dest>0 else 0
+
+                    maq_id = df_maq[df_maq['nombre'] == maq_sel]['id'].values[0] if maq_sel and not df_maq.empty else None
+                    oper_id = df_pers[df_pers['nombre_completo'] == oper_sel]['id'].values[0] if oper_sel and not df_pers.empty else None
 
                     ot_data = {
                         "ID_Orden_Personalizado": f"OT-{datetime.now().strftime('%y%m%d-%H%M')}",
@@ -127,14 +157,14 @@ with tab1:
                         "Sector_Aplicacion": sec_dest,
                         "Objetivo": obj_app,
                         "Receta_Mezcla_Lotes": receta_final,
-                        "Volumen_Hectarea": ha_dest, # Lo usamos para el cálculo de costo por Ha
+                        "Volumen_Hectarea": ha_dest,
                         "Marcha": int(marcha),
                         "Presion_Bar": float(presion),
                         "Tipo_Aplicacion": tipo_app,
                         "Color_Boquilla": config_barras,
                         "maquinaria_id": int(maq_id) if maq_id else None,
                         "operador_id": int(oper_id) if oper_id else None,
-                        "Datos_Tecnicos": {"Costo_Estimado_Total": costo_total_mezcla, "Costo_Por_Ha": (costo_total_mezcla/ha_dest) if ha_dest>0 else 0}
+                        "Datos_Tecnicos": datos_extra_json # Aquí viaja si es fertirriego o foliar limpiamente
                     }
                     
                     supabase.table('Ordenes_de_Trabajo').insert(ot_data).execute()

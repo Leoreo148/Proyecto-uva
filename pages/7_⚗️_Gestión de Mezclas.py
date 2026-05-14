@@ -68,7 +68,8 @@ with tab1:
             st.markdown('<div class="seccion-titulo">1. Ubicación General</div>', unsafe_allow_html=True)
             c1, c2, c3, c4 = st.columns(4)
             f_prog = c1.date_input("Fecha Programada", value=date.today())
-            sec_dest = c2.text_input("Sector / Lotes (Ej: W3)")
+            SECTORES_UVA = ['J1', 'J2', 'R1', 'R2', 'W1', 'W2', 'W3', 'K1', 'K2', 'K3']
+            sec_dest = c2.selectbox("Sector / Lote Destino", options=SECTORES_UVA)
             ha_dest = c3.number_input("Hectáreas a tratar", min_value=0.1, value=1.8)
             obj_app = c4.text_input("Objetivo (Ej: Nutrición, Trips)")
 

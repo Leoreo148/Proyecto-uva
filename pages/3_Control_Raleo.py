@@ -66,16 +66,37 @@ with st.expander("➕ Registrar Nueva Cartilla de Raleo por Fila", expanded=True
         [{"Nombre del Trabajador": "", "Número de Fila": None, "Racimos Reales (Conteo Final)": 0} for _ in range(15)]
     )
     
+    # 1. Candados Antierrores en la configuración de la tabla
     df_editada = st.data_editor(
         df_plantilla,
         num_rows="dynamic",
         use_container_width=True,
         column_config={
             "Nombre del Trabajador": st.column_config.TextColumn("Nombre del Trabajador", required=True),
-            "Número de Fila": st.column_config.NumberColumn("Número de Fila", required=True, min_value=1, step=1, format="%d"),
-            "Racimos Reales (Conteo Final)": st.column_config.NumberColumn("N° de Racimos Reales", min_value=0, step=1, format="%d")
+            "Número de Fila": st.column_config.NumberColumn("Número de Fila", required=True, min_value=1, max_value=500, step=1),
+            "Racimos Reales (Conteo Final)": st.column_config.NumberColumn(
+                "N° de Racimos Reales", 
+                min_value=0, 
+                max_value=1000, # Límite biológicamente imposible para un humano en un turno
+                step=1
+            )
         }
     )
+
+    # 2. Sumatorias en Tiempo Real (Auditoría visual)
+    df_calculo_vivo = df_editada.dropna(subset=["Nombre del Trabajador"]).copy()
+    df_calculo_vivo = df_calculo_vivo[df_calculo_vivo["Nombre del Trabajador"] != ""]
+    
+    total_racimos_vivo = df_calculo_vivo["Racimos Reales (Conteo Final)"].sum()
+    total_trabajadores = len(df_calculo_vivo)
+    total_tandas_vivo = total_racimos_vivo / RACIMOS_POR_TANDA
+
+    st.markdown("### 📊 Resumen de la Jornada Actual")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("👷 Personal Evaluado", f"{total_trabajadores} Trabajadores")
+    c2.metric("✂️ Total Racimos Raleados", f"{int(total_racimos_vivo):,}")
+    c3.metric("💰 Equivalente en Tandas", f"{total_tandas_vivo:.2f} Tandas")
+    st.divider()
 
     if st.button("✅ Guardar Jornada de Raleo"):
         if not evaluador:

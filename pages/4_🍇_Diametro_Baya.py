@@ -90,15 +90,6 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
     
     st.subheader("Tabla de Ingreso de Diámetros (mm)")
     
-    # Creamos la plantilla editable en cada ejecución
-    plant_numbers = [f"Planta {i+1}" for i in range(25)]
-    df_plantilla = pd.DataFrame(None, index=plant_numbers, columns=columnas_medicion)
-    
-    df_editada = st.data_editor(df_plantilla, use_container_width=True, key="editor_baya")
-    
-    # --- LÓGICA DE PROMEDIOS (SIMPLIFICADA) ---
-    st.subheader("Tabla de Ingreso de Diámetros (mm)")
-    
     # 1. EL TRUCO DE LOS CEROS: Usamos None para no arruinar el promedio
     plant_numbers = [f"Planta {i+1}" for i in range(25)]
     df_plantilla = pd.DataFrame(None, index=plant_numbers, columns=columnas_medicion)
@@ -114,7 +105,7 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
         for col in columnas_medicion
     }
 
-    # Creamos la tabla editable con los candados puestos
+    # ÚNICA CREACIÓN DE LA TABLA EDITABLE
     df_editada = st.data_editor(
         df_plantilla, 
         use_container_width=True, 
@@ -129,7 +120,7 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
     df_promedios['Promedio Racimo 2'] = df_promedios[columnas_racimo2].mean(axis=1)
     df_promedios['Promedio Final Planta'] = df_promedios[columnas_medicion].mean(axis=1)
     
-    # Cálculo estadístico global de la muestra actual (La magia de Numpy)
+    # Cálculo estadístico global de la muestra actual
     valores_planos = df_editada.values.flatten()
     valores_validos = [v for v in valores_planos if pd.notnull(v) and v > 0]
 
@@ -140,7 +131,6 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
 
         c1, c2, c3 = st.columns(3)
         c1.metric("📏 Promedio del Lote", f"{promedio_global:.2f} mm")
-        # Si el CV% es menor a 10, es excelente calidad de exportación
         c2.metric("🎯 Uniformidad (CV)", f"{cv_porcentaje:.1f} %", 
                   delta="Óptimo" if cv_porcentaje < 10 else "Desuniforme", 
                   delta_color="inverse")

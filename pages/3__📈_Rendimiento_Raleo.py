@@ -77,6 +77,10 @@ fecha_fin = st.sidebar.date_input("Fecha de Fin", today)
 sectores = ['Todos'] + sorted(df_raleo['Sector'].unique().tolist())
 sector_seleccionado = st.sidebar.selectbox("Seleccione un Sector", options=sectores)
 
+# NUEVO: Filtro de Trabajador para armar planillas de pago individuales
+trabajadores = ['Todos'] + sorted(df_raleo['Nombre_del_Trabajador'].unique().tolist())
+trabajador_seleccionado = st.sidebar.selectbox("Seleccione un Trabajador", options=trabajadores)
+
 # Aplicar filtros al DataFrame
 df_filtrado = df_raleo[
     (df_raleo['Fecha'].dt.date >= fecha_inicio) &
@@ -84,6 +88,8 @@ df_filtrado = df_raleo[
 ]
 if sector_seleccionado != 'Todos':
     df_filtrado = df_filtrado[df_filtrado['Sector'] == sector_seleccionado]
+if trabajador_seleccionado != 'Todos':
+    df_filtrado = df_filtrado[df_filtrado['Nombre_del_Trabajador'] == trabajador_seleccionado]
 
 # --- DASHBOARD ---
 if df_filtrado.empty:
@@ -104,31 +110,42 @@ else:
     st.divider()
 
     # --- MODIFICADO: Gráficos con Racimos_Reales ---
-    col_graf1, col_graf2 = st.columns(2)
+    # --- MODIFICADO: Gráficos a 3 columnas para incluir Análisis de Costos ---
+    col_graf1, col_graf2, col_graf3 = st.columns(3)
+    
     with col_graf1:
         st.subheader("🏆 Ranking de Personal")
         df_ranking = df_filtrado.groupby('Nombre_del_Trabajador').agg(
-            Total_Racimos=('Racimos_Reales', 'sum'),
-            Pago_Total=('Pago_Calculado_S', 'sum')
-        ).sort_values(by='Total_Racimos', ascending=False).reset_index()
+            Total_Racimos=('Racimos_Reales', 'sum')
+        ).sort_values(by='Total_Racimos', ascending=False).reset_index().head(10) # Top 10 para no saturar
 
         fig_ranking = px.bar(
             df_ranking, x='Total_Racimos', y='Nombre_del_Trabajador', orientation='h',
-            title='Total de Racimos Reales por Persona', text='Total_Racimos',
-            labels={'Nombre_del_Trabajador': 'Trabajador', 'Total_Racimos': 'Nº de Racimos Reales'}
+            title='Top 10: Racimos por Persona', text='Total_Racimos',
+            color_discrete_sequence=['#2ecc71']
         )
         fig_ranking.update_layout(yaxis={'categoryorder':'total ascending'})
         st.plotly_chart(fig_ranking, use_container_width=True)
 
     with col_graf2:
-        st.subheader("📅 Evolución Diaria del Raleo")
+        st.subheader("📅 Evolución Diaria")
         df_evolucion = df_filtrado.groupby(df_filtrado['Fecha'].dt.date)['Racimos_Reales'].sum().reset_index()
         fig_evolucion = px.line(
             df_evolucion, x='Fecha', y='Racimos_Reales',
-            title='Total de Racimos Reales por Día', markers=True,
-            labels={'Fecha': 'Día', 'Racimos_Reales': 'Nº de Racimos Reales'}
+            title='Avance Total por Día', markers=True,
+            color_discrete_sequence=['#e74c3c']
         )
         st.plotly_chart(fig_evolucion, use_container_width=True)
+
+    with col_graf3:
+        st.subheader("💰 Inversión por Sector")
+        df_sector_costo = df_filtrado.groupby('Sector')['Pago_Calculado_S'].sum().reset_index()
+        fig_sector = px.pie(
+            df_sector_costo, values='Pago_Calculado_S', names='Sector', 
+            title='Distribución de Pago por Lote', hole=0.4,
+            color_discrete_sequence=px.colors.qualitative.Prism
+        )
+        st.plotly_chart(fig_sector, use_container_width=True)
     
     st.divider()
 

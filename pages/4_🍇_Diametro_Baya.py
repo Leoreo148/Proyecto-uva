@@ -92,19 +92,64 @@ with st.expander("➕ Registrar Nueva Medición", expanded=True):
     
     # Creamos la plantilla editable en cada ejecución
     plant_numbers = [f"Planta {i+1}" for i in range(25)]
-    df_plantilla = pd.DataFrame(0.0, index=plant_numbers, columns=columnas_medicion)
+    df_plantilla = pd.DataFrame(None, index=plant_numbers, columns=columnas_medicion)
     
     df_editada = st.data_editor(df_plantilla, use_container_width=True, key="editor_baya")
     
     # --- LÓGICA DE PROMEDIOS (SIMPLIFICADA) ---
-    st.subheader("Promedios Calculados")
+    st.subheader("Tabla de Ingreso de Diámetros (mm)")
+    
+    # 1. EL TRUCO DE LOS CEROS: Usamos None para no arruinar el promedio
+    plant_numbers = [f"Planta {i+1}" for i in range(25)]
+    df_plantilla = pd.DataFrame(None, index=plant_numbers, columns=columnas_medicion)
+    
+    # 2. EL CANDADO ANTI-ERRORES: Restringimos de 5mm a 40mm
+    configuracion_columnas = {
+        col: st.column_config.NumberColumn(
+            col, 
+            min_value=5.0,   
+            max_value=40.0,  
+            format="%.2f"
+        )
+        for col in columnas_medicion
+    }
+
+    # Creamos la tabla editable con los candados puestos
+    df_editada = st.data_editor(
+        df_plantilla, 
+        use_container_width=True, 
+        key="editor_baya",
+        column_config=configuracion_columnas
+    )
+    
+    # --- 3. LÓGICA DE PROMEDIOS Y UNIFORMIDAD (CV%) ---
+    st.subheader("📊 Resultados Analíticos en Tiempo Real")
     df_promedios = df_editada.copy()
     df_promedios['Promedio Racimo 1'] = df_promedios[columnas_racimo1].mean(axis=1)
     df_promedios['Promedio Racimo 2'] = df_promedios[columnas_racimo2].mean(axis=1)
     df_promedios['Promedio Final Planta'] = df_promedios[columnas_medicion].mean(axis=1)
     
-    # Mostramos los promedios en una tabla separada y deshabilitada para claridad
-    st.dataframe(df_promedios[['Promedio Racimo 1', 'Promedio Racimo 2', 'Promedio Final Planta']].style.format("{:.2f}"), use_container_width=True)
+    # Cálculo estadístico global de la muestra actual (La magia de Numpy)
+    valores_planos = df_editada.values.flatten()
+    valores_validos = [v for v in valores_planos if pd.notnull(v) and v > 0]
+
+    if valores_validos:
+        promedio_global = np.mean(valores_validos)
+        desviacion_estandar = np.std(valores_validos)
+        cv_porcentaje = (desviacion_estandar / promedio_global) * 100
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("📏 Promedio del Lote", f"{promedio_global:.2f} mm")
+        # Si el CV% es menor a 10, es excelente calidad de exportación
+        c2.metric("🎯 Uniformidad (CV)", f"{cv_porcentaje:.1f} %", 
+                  delta="Óptimo" if cv_porcentaje < 10 else "Desuniforme", 
+                  delta_color="inverse")
+        c3.metric("🍇 Total Bayas Medidas", f"{len(valores_validos)}")
+    else:
+        st.info("Ingresa medidas válidas en la tabla para ver el análisis de uniformidad.")
+
+    # Mostramos la tabla de promedios individuales por planta
+    st.dataframe(df_promedios[['Promedio Racimo 1', 'Promedio Racimo 2', 'Promedio Final Planta']].style.format("{:.2f}", na_rep="-"), use_container_width=True)
 
     if st.button("💾 Guardar Medición en Dispositivo"):
         df_para_guardar = df_editada.copy()

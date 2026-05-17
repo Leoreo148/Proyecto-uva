@@ -3,10 +3,15 @@ import pandas as pd
 from datetime import datetime, date
 from supabase import create_client
 
-# 🚨 CANDADO DE SEGURIDAD (Colocar al inicio de la página, justo debajo de los imports)
+# 🚨 CANDADO VIP: EXCLUSIVO PARA ALMACÉN
 if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
-    st.warning("⚠️ Por favor, inicie sesión en la página principal antes de acceder a este módulo.")
-    st.stop() # Frena la ejecución del resto del código de golpe
+    st.warning("⚠️ Por favor, inicie sesión en la página principal.")
+    st.stop()
+
+# Aquí bloqueamos a José de Sanidad o a Edgar de Costos
+if st.session_state["rol"] not in ["Admin", "Logistica"]:
+    st.error("🚫 Acceso denegado. Este módulo es exclusivo para el área de Almacén y Mezclas (Miguel).")
+    st.stop()
 
 # --- 1. CONFIGURACIÓN E IDENTIDAD VISUAL ---
 st.set_page_config(page_title="Gestión de Salidas y Mezclas - Project Uva", page_icon="⚗️", layout="wide")

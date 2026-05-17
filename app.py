@@ -22,10 +22,9 @@ def verificar_usuario(usuario, clave):
     if not supabase:
         return None
     try:
-        # Consultamos en la tabla Usuarios de Supabase
         res = supabase.table("Usuarios").select("*").eq("Usuario", usuario).eq("Clave", clave).execute()
         if res.data and len(res.data) > 0:
-            return res.data[0]  # Retorna el diccionario con los datos del usuario encontrado
+            return res.data[0]
         return None
     except Exception as e:
         st.error(f"Error al consultar la base de datos: {e}")
@@ -39,12 +38,10 @@ if "autenticado" not in st.session_state:
     st.session_state["nombre"] = None
 
 # --- INTERFAZ DE LOGEO ---
-# --- INTERFAZ DE LOGEO ---
 if not st.session_state["autenticado"]:
     st.markdown("<h1 style='text-align: center;'>🍇 Sistema de Control - Fundo</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: gray;'>Ingrese sus credenciales para desbloquear los módulos</p>", unsafe_allow_html=True)
     
-    # NUEVO: Cajita de recordatorio de usuarios
     with st.expander("ℹ️ Ver lista de usuarios del Fundo"):
         st.markdown("""
         **Usuarios habilitados para el sistema:**
@@ -65,7 +62,6 @@ if not st.session_state["autenticado"]:
         
         if btn_ingresar:
             if user_input and pin_input:
-                # Limpiamos espacios y convertimos el usuario a minúsculas para evitar fallos de tipeo
                 datos_usuario = verificar_usuario(user_input.strip().lower(), pin_input.strip())
                 
                 if datos_usuario:
@@ -83,32 +79,54 @@ else:
     # --- VISTA CUANDO EL USUARIO YA INICIÓ SESIÓN ---
     rol = st.session_state["rol"]
     
-# 1. Definir TODAS las páginas 
+    # 1. Definición de páginas apuntando exactamente a tus archivos físicos
+    p_raleo = st.Page("modulos/1_ Control_Raleo.py", title="Control Raleo", icon="✂️")
+    p_baya = st.Page("modulos/1_Diametro_Baya.py", title="Diámetro Baya", icon="🍇")
+    p_fenologia = st.Page("modulos/1_Evaluación Fenológica.py", title="Evaluación Fenológica", icon="🌱")
     p_sanidad = st.Page("modulos/1_Evaluacion_Sanitaria.py", title="Evaluación Sanitaria", icon="📝")
     p_mosca = st.Page("modulos/1_Monitoreo_Mosca_Fruta.py", title="Monitoreo Mosca", icon="🪰")
-    p_fenologia = st.Page("modulos/1_Evaluación Fenológica.py", title="Evaluación Fenológica", icon="🌱")
-    p_baya = st.Page("modulos/1_Diametro_Baya.py", title="Diámetro Baya", icon="🍇")
-    p_raleo = st.Page("modulos/1_Control_Raleo.py", title="Control Raleo", icon="✂️")
+    
     p_tractor = st.Page("modulos/2_Gestión_de_Aplicación_y_Horas.py", title="Gestión Tractor", icon="🚜")
     
-    # NUEVO: Descomentamos el Dashboard de Sanidad
     p_dash_sanidad = st.Page("modulos/3_Dashboard_Sanidad.py", title="Dashboard Sanidad", icon="📊")
+    
+    p_mezclas = st.Page("modulos/4_Gestión de Mezclas.py", title="Gestión de Mezclas", icon="⚗️")
+    p_kardex = st.Page("modulos/4_Gestión_de_Productos_y_Kardex.py", title="Productos y Kardex", icon="📦")
+    p_ingreso = st.Page("modulos/4_Registrar_Ingreso.py", title="Registrar Ingreso", icon="✅")
+    
+    p_dash_finanzas = st.Page("modulos/5_Dashboard_Finanzas.py", title="Dashboard Finanzas", icon="💵")
+    p_rend_raleo = st.Page("modulos/5_Rendimiento_Raleo.py", title="Rendimiento Raleo", icon="📈")
+    
+    # El nuevo espacio para el Ingeniero en Jefe (Segundo)
+    p_dash_general = st.Page("modulos/6_Dashboard_General.py", title="Dashboard General Fundo", icon="🏢")
+    
+    p_carga_masiva = st.Page("modulos/99_Carga_Masiva.py", title="Carga Masiva", icon="🚀")
 
-    # 2. Armar el menú personalizado según el Rol
+    # 2. Armar el menú inteligente y en ruteo por cada Rol
     if rol == "Sanidad":
-        # CORREGIDO: José ahora SOLO ve su Dashboard de Sanidad
         paginas = [p_dash_sanidad]
         
-    elif rol == "Admin":
-        paginas = {
-            "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo],
-            "Maquinaria": [p_tractor],
-            "Jefatura": [p_dash_sanidad] # El jefe también puede ver el dashboard
-        }
+    elif rol == "Logistica":
+        # Miguel (mezclas) ahora ve exclusivamente el control de almacenes y mezclas
+        paginas = [p_kardex, p_ingreso, p_mezclas]
+        
+    elif rol == "Finanzas":
+        # Edgar (costos) ve los balances monetarios y el inventario para auditorías
+        paginas = [p_dash_finanzas, p_rend_raleo, p_kardex]
         
     elif rol == "Evaluador":
         paginas = [p_sanidad, p_mosca, p_fenologia, p_baya]
         
+    elif rol == "Admin":
+        # El Ingeniero Segundo ve absolutamente todo organizado por departamentos
+        paginas = {
+            "Control Central": [p_dash_general],
+            "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo],
+            "Logística y Almacén": [p_kardex, p_ingreso, p_mezclas],
+            "Maquinaria": [p_tractor],
+            "Reportes y Finanzas": [p_dash_finanzas, p_rend_raleo, p_dash_sanidad],
+            "Mantenimiento": [p_carga_masiva]
+        }
     else:
         paginas = []
 
@@ -118,6 +136,9 @@ else:
         st.markdown(f"🏷️ Puesto: *{rol}*")
         if st.button("🔒 Cerrar Sesión", use_container_width=True):
             st.session_state["autenticado"] = False
+            st.session_state["usuario"] = None
+            st.session_state["rol"] = None
+            st.session_state["nombre"] = None
             st.rerun()
 
     if paginas:

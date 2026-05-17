@@ -101,7 +101,18 @@ else:
     p_carga_masiva = st.Page("modulos/99_Carga_Masiva.py", title="Carga Masiva", icon="🚀")
 
     # 2. Armar el menú inteligente y en ruteo por cada Rol
-    if rol == "Sanidad":
+    if rol == "Programador":
+        # TÚ ves absolutamente todo, incluyendo los módulos de mantenimiento "peligrosos"
+        paginas = {
+            "Control Central": [p_dash_general],
+            "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo],
+            "Logística y Almacén": [p_kardex, p_ingreso, p_mezclas],
+            "Maquinaria": [p_tractor],
+            "Reportes y Finanzas": [p_dash_finanzas, p_rend_raleo, p_dash_sanidad],
+            "Mantenimiento BD": [p_carga_masiva] # <-- Esto es exclusivo tuyo
+            }
+
+    elif rol == "Sanidad":
         paginas = [p_dash_sanidad]
         
     elif rol == "Logistica":

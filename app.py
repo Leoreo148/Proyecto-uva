@@ -71,11 +71,11 @@ else:
     
     # 1. Definir TODAS las páginas (rutas limpias, íconos separados)
     p_sanidad = st.Page("modulos/1_Evaluacion_Sanitaria.py", title="Evaluación Sanitaria", icon="📝")
-    p_mosca = st.Page("modulos/1_Monitoreo_Mosca.py", title="Monitoreo Mosca", icon="🪰")
+    p_mosca = st.Page("modulos/1_Monitoreo_Mosca_Fruta.py", title="Monitoreo Mosca", icon="🪰")
     p_fenologia = st.Page("modulos/1_Evaluacion_Fenologica.py", title="Evaluación Fenológica", icon="🌱")
     p_baya = st.Page("modulos/1_Diametro_Baya.py", title="Diámetro Baya", icon="🍇")
     p_raleo = st.Page("modulos/1_Control_Raleo.py", title="Control Raleo", icon="✂️")
-    p_tractor = st.Page("modulos/2_Gestion_Tractor.py", title="Gestión Tractor", icon="🚜")
+    p_tractor = st.Page("modulos/2_Gestión_de_Aplicación_y_Horas.py", title="Gestión Tractor", icon="🚜")
     
     # (Tus futuros dashboards que crearemos)
     # p_dash_sanidad = st.Page("modulos/3_📊_Dashboard_Sanidad.py", title="Dashboard Sanidad", icon="📊")

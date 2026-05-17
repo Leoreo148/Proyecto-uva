@@ -1,173 +1,81 @@
 import streamlit as st
-import pandas as pd
-import plotly.express as px
-from datetime import datetime, date, timedelta
 from supabase import create_client
 
-# --- LIBRERÍAS PRO ---
-from streamlit_extras.metric_cards import style_metric_cards
-from streamlit_extras.stylable_container import stylable_container
+# --- CONFIGURACIÓN DE LA PÁGINA ---
+st.set_page_config(page_title="Project-uva - Acceso", page_icon="🔐", layout="centered")
 
-# --- 1. CONFIGURACIÓN E IDENTIDAD VISUAL ---
-st.set_page_config(page_title="Panel del Fundo - Dashboard", page_icon="📊", layout="wide")
-
-st.markdown("""
-    <style>
-    .stApp { background-color: #f8f9fa; }
-    div[data-testid="stMetric"] {
-        background-color: #ffffff;
-        border: 1px solid #e0e0e0;
-        padding: 15px;
-        border-radius: 10px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- 2. CONEXIÓN A SUPABASE ---
+# --- CONEXIÓN A SUPABASE ---
 @st.cache_resource
 def init_supabase():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
+    except Exception as e:
+        st.error(f"Error de configuración en secrets: {e}")
+        return None
 
 supabase = init_supabase()
 
-# --- 3. CARGA DE DATOS CENTRALIZADA ---
-@st.cache_data(ttl=300)
-def cargar_todo():
-    if not supabase: return {}
+# --- FUNCIÓN PARA VERIFICAR CREDENCIALES ---
+def verificar_usuario(usuario, clave):
+    if not supabase:
+        return None
+    try:
+        # Consultamos en la tabla Usuarios de Supabase
+        res = supabase.table("Usuarios").select("*").eq("Usuario", usuario).eq("Clave", clave).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0]  # Retorna el diccionario con los datos del usuario encontrado
+        return None
+    except Exception as e:
+        st.error(f"Error al consultar la base de datos: {e}")
+        return None
+
+# --- INICIALIZAR VARIABLES DE SESIÓN ---
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+    st.session_state["usuario"] = None
+    st.session_state["rol"] = None
+    st.session_state["nombre"] = None
+
+# --- INTERFAZ DE LOGEO ---
+if not st.session_state["autenticado"]:
+    st.markdown("<h1 style='text-align: center;'>🍇 Sistema de Control - Fundo</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: gray;'>Ingrese sus credenciales para desbloquear los módulos</p>", unsafe_allow_html=True)
     
-    # Tablas necesarias para el resumen
-    tablas = ["Productos", "Ingresos", "Salidas", "Registro_Horas_Tractor", "Maquinaria", "Ordenes_de_Trabajo"]
-    dfs = {}
-    for t in tablas:
-        try:
-            res = supabase.table(t).select("*").execute()
-            dfs[t] = pd.DataFrame(res.data)
-        except:
-            dfs[t] = pd.DataFrame()
-    return dfs
-
-data = cargar_todo()
-
-# --- 4. CEREBRO MATEMÁTICO (STOCK Y COSTOS) ---
-def procesar_kardex_dashboard(dfs):
-    df_p = dfs.get("Productos", pd.DataFrame())
-    df_i = dfs.get("Ingresos", pd.DataFrame())
-    df_s = dfs.get("Salidas", pd.DataFrame())
-    
-    if df_i.empty: return pd.DataFrame()
-
-    if not df_s.empty:
-        gastado = df_s.groupby('Ingreso_ID')['Cantidad_Usada'].sum().reset_index()
-        df_balance = pd.merge(df_i, gastado, left_on='id', right_on='Ingreso_ID', how='left').fillna({'Cantidad_Usada': 0})
-        df_balance['Stock_Lote'] = df_balance['Cantidad_Ingresada'] - df_balance['Cantidad_Usada']
-    else:
-        df_balance = df_i.copy()
-        df_balance['Stock_Lote'] = df_balance['Cantidad_Ingresada']
-
-    df_final = pd.merge(df_balance, df_p, left_on='Codigo_Producto', right_on='Codigo', how='left')
-    df_final['Valorizado_PEN'] = df_final['Stock_Lote'] * df_final['Precio_Unitario_PEN'].fillna(0)
-    
-    # Limpieza de fechas para evitar el bug del número negativo
-    hoy = pd.Timestamp(date.today())
-    df_final['Venc_Date'] = pd.to_datetime(df_final['Fecha_Vencimiento'], errors='coerce')
-    df_final['Dias_para_Vencer'] = (df_final['Venc_Date'] - hoy).dt.days
-    df_final.loc[df_final['Venc_Date'].isnull() | (df_final['Venc_Date'].dt.year < 2000), 'Dias_para_Vencer'] = 999
-    
-    return df_final
-
-df_kardex = procesar_kardex_dashboard(data)
-
-# --- 5. CABECERA PRINCIPAL ---
-with stylable_container(key="title_panel", css_styles="{ background-color: #1e3d33; color: white; padding: 1.5rem; border-radius: 1rem; }"):
-    st.title("📊 Dashboard General del Fundo")
-    st.write(f"Resumen operativo y financiero actualizado al {datetime.now().strftime('%d/%m/%Y')}")
-
-# --- 6. KPIs (MÉTRICAS CLAVE) ---
-st.write("")
-m1, m2, m3, m4 = st.columns(4)
-style_metric_cards(border_left_color="#1e3d33")
-
-if not df_kardex.empty:
-    m1.metric("💰 Valor Almacén", f"S/ {df_kardex['Valorizado_PEN'].sum():,.2f}")
-    m2.metric("⚠️ Lotes por Vencer", len(df_kardex[(df_kardex['Dias_para_Vencer'] < 30) & (df_kardex['Stock_Lote'] > 0)]))
-
-df_h = data.get("Registro_Horas_Tractor", pd.DataFrame())
-if not df_h.empty:
-    h7 = pd.to_datetime(df_h['Fecha']).dt.date >= (date.today() - timedelta(days=7))
-    m3.metric("🚜 Horas Tractor (7d)", f"{df_h[h7]['Total_Horas'].sum():,.1f} h")
-
-df_ot = data.get("Ordenes_de_Trabajo", pd.DataFrame())
-if not df_ot.empty:
-    pendientes = len(df_ot[df_ot['Status'] != 'Aplicada en Campo'])
-    m4.metric("📝 Órdenes en Curso", pendientes)
-
-# --- 7. GRÁFICOS ---
-st.divider()
-c1, c2 = st.columns(2)
-
-with c1:
-    with st.container(border=True):
-        st.subheader("📦 Inversión por Categoría")
-        if not df_kardex.empty:
-            df_pie = df_kardex.groupby('Tipo_Accion')['Valorizado_PEN'].sum().reset_index()
-            fig_pie = px.pie(df_pie, values='Valorizado_PEN', names='Tipo_Accion', hole=0.4,
-                             color_discrete_sequence=px.colors.qualitative.Prism)
-            st.plotly_chart(fig_pie, use_container_width=True)
-
-with c2:
-    with st.container(border=True):
-        st.subheader("📉 Consumo de Insumos (Top 10)")
-        df_s = data.get("Salidas", pd.DataFrame())
-        df_i = data.get("Ingresos", pd.DataFrame())
-        df_p = data.get("Productos", pd.DataFrame())
-        if not df_s.empty and not df_i.empty:
-            df_merge = pd.merge(df_s, df_i[['id', 'Codigo_Producto']], left_on='Ingreso_ID', right_on='id')
-            df_merge = pd.merge(df_merge, df_p[['Codigo', 'Producto']], left_on='Codigo_Producto', right_on='Codigo')
-            top_insumos = df_merge.groupby('Producto')['Cantidad_Usada'].sum().sort_values(ascending=False).head(10).reset_index()
-            fig_bar = px.bar(top_insumos, x='Cantidad_Usada', y='Producto', orientation='h', 
-                             color_discrete_sequence=['#2ecc71'])
-            st.plotly_chart(fig_bar, use_container_width=True)
-
-st.info("👈 Usa la barra lateral para navegar entre el Inventario, Mezclas y Gestión de Campo.")
-
-# --- 8. ANÁLISIS FINANCIERO DE CAMPO (COSTO POR LOTE) ---
-st.divider()
-st.subheader("🗺️ Inversión Acumulada por Cuartel / Sector")
-
-df_ot = data.get("Ordenes_de_Trabajo", pd.DataFrame())
-
-if not df_ot.empty and 'Datos_Tecnicos' in df_ot.columns:
-    # Filtramos solo las órdenes que ya se aplicaron y gastaron
-    df_ot_fin = df_ot[df_ot['Status'] == 'Aplicada en Campo'].copy()
-    
-    if not df_ot_fin.empty:
-        # Función para extraer el costo del JSON oculto
-        def extraer_costo(json_data):
-            if isinstance(json_data, dict):
-                return json_data.get('Costo_Estimado_Total', 0.0)
-            return 0.0
-            
-        df_ot_fin['Costo_Total'] = df_ot_fin['Datos_Tecnicos'].apply(extraer_costo)
+    with st.form("formulario_login"):
+        user_input = st.text_input("Usuario de Campo:", placeholder="Ej: sanidad")
+        pin_input = st.text_input("PIN de Acceso (4 dígitos):", type="password", placeholder="****")
         
-        # Agrupamos todo el dinero gastado por cada sector
-        costo_por_sector = df_ot_fin.groupby('Sector_Aplicacion')['Costo_Total'].sum().reset_index()
-        costo_por_sector = costo_por_sector.sort_values(by='Costo_Total', ascending=False)
+        btn_ingresar = st.form_submit_button("🔓 Desbloquear Sistema")
         
-        # Creamos el gráfico de barras para la gerencia
-        fig_sectores = px.bar(
-            costo_por_sector, 
-            x='Sector_Aplicacion', 
-            y='Costo_Total', 
-            text_auto='.2s',
-            color='Costo_Total', 
-            color_continuous_scale='Greens',
-            labels={'Sector_Aplicacion': 'Sector / Lote', 'Costo_Total': 'Inversión Total (S/)'}
-        )
-        fig_sectores.update_traces(textfont_size=12, textangle=0, textposition="outside", cliponaxis=False)
-        st.plotly_chart(fig_sectores, use_container_width=True)
-    else:
-        st.info("Aún no hay aplicaciones finalizadas en campo para calcular los costos por sector.")
+        if btn_ingresar:
+            if user_input and pin_input:
+                # Limpiamos espacios y convertimos el usuario a minúsculas para evitar fallos de tipeo
+                datos_usuario = verificar_usuario(user_input.strip().lower(), pin_input.strip())
+                
+                if datos_usuario:
+                    st.session_state["autenticado"] = True
+                    st.session_state["usuario"] = datos_usuario["Usuario"]
+                    st.session_state["rol"] = datos_usuario["Rol"]
+                    st.session_state["nombre"] = datos_usuario["Nombre_Completo"]
+                    st.success(f"¡Acceso concedido! Bienvenido, {datos_usuario['Nombre_Completo']}.")
+                    st.rerun()
+                else:
+                    st.error("Usuario o PIN incorrectos. Verifique los datos.")
+            else:
+                st.warning("Por favor, rellene ambos campos.")
 else:
-    st.info("No se encontraron registros de órdenes de trabajo.")
+    # Vista que aparece cuando ya iniciaron sesión correctamente
+    st.markdown(f"# 🎉 ¡Bienvenido al sistema, {st.session_state['nombre']}!")
+    st.subheader(f"Tu perfil activo es: **{st.session_state['rol']}**")
+    st.write("Las credenciales se han validado correctamente con la base de datos central de Supabase.")
+    st.info("👈 Ahora puedes usar la barra lateral para navegar de forma segura por los módulos de tu área de trabajo.")
+    
+    st.write("")
+    if st.button("🔒 Cerrar Sesión"):
+        st.session_state["autenticado"] = False
+        st.session_state["usuario"] = None
+        st.session_state["rol"] = None
+        st.session_state["nombre"] = None
+        st.rerun()

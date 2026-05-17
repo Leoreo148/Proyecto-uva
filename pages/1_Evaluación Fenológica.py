@@ -3,11 +3,13 @@ import pandas as pd
 from datetime import datetime
 import json
 from io import BytesIO
-
-# --- LIBRERÍAS PARA LA CONEXIÓN A SUPABASE ---
 from supabase import create_client, Client
-# NOTA: La librería streamlit_local_storage es un componente personalizado.
 from streamlit_local_storage import LocalStorage
+
+# 🚨 CANDADO DE SEGURIDAD (Colocar al inicio de la página, justo debajo de los imports)
+if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
+    st.warning("⚠️ Por favor, inicie sesión en la página principal antes de acceder a este módulo.")
+    st.stop() # Frena la ejecución del resto del código de golpe
 
 # --- Configuración de la Página ---
 st.set_page_config(page_title="Evaluación Fenológica", page_icon="🌱", layout="wide")

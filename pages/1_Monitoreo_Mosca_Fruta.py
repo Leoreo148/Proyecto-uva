@@ -4,6 +4,11 @@ from datetime import datetime, date
 from io import BytesIO
 from supabase import create_client
 
+# 🚨 CANDADO DE SEGURIDAD (Colocar al inicio de la página, justo debajo de los imports)
+if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
+    st.warning("⚠️ Por favor, inicie sesión en la página principal antes de acceder a este módulo.")
+    st.stop() # Frena la ejecución del resto del código de golpe
+
 # --- 1. CONFIGURACIÓN MÓVIL ---
 st.set_page_config(page_title="Monitoreo de Mosca", page_icon="🪰", layout="wide")
 

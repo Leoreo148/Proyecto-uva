@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from io import BytesIO
+from supabase import create_client, Client
 
-# --- LIBRERías PARA LA CONEXIÓN A SUPABASE ---
 from supabase import create_client, Client
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---

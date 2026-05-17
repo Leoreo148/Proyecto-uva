@@ -4,12 +4,15 @@ from datetime import datetime, date
 import numpy as np
 from supabase import create_client
 import io
-
-# --- LIBRERÍAS PRO ---
 from st_aggrid import AgGrid, GridOptionsBuilder, ColumnsAutoSizeMode, GridUpdateMode, JsCode
 from streamlit_extras.metric_cards import style_metric_cards
 from streamlit_extras.stylable_container import stylable_container
 
+# 🚨 CANDADO DE SEGURIDAD (Colocar al inicio de la página, justo debajo de los imports)
+if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
+    st.warning("⚠️ Por favor, inicie sesión en la página principal antes de acceder a este módulo.")
+    st.stop() # Frena la ejecución del resto del código de golpe
+    
 # --- 1. CONFIGURACIÓN E IDENTIDAD VISUAL ---
 st.set_page_config(page_title="Kardex & Inventario Maestro", page_icon="📦", layout="wide")
 

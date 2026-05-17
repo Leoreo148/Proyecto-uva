@@ -3,6 +3,11 @@ import pandas as pd
 from supabase import create_client
 from datetime import datetime
 
+# 🚨 CANDADO DE SEGURIDAD (Colocar al inicio de la página, justo debajo de los imports)
+if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
+    st.warning("⚠️ Por favor, inicie sesión en la página principal antes de acceder a este módulo.")
+    st.stop() # Frena la ejecución del resto del código de golpe
+    
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="Carga Masiva Pro", page_icon="🚀", layout="wide")
 st.title("🚀 Migración Maestra de Datos (Build 9.8 - Auditoría Total)")

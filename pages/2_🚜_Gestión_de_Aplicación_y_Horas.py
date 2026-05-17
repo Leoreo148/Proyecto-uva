@@ -2,9 +2,12 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date
 from supabase import create_client
-
-# --- LIBRERÍAS PRO ---
 from streamlit_extras.stylable_container import stylable_container
+
+# 🚨 CANDADO DE SEGURIDAD (Colocar al inicio de la página, justo debajo de los imports)
+if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
+    st.warning("⚠️ Por favor, inicie sesión en la página principal antes de acceder a este módulo.")
+    st.stop() # Frena la ejecución del resto del código de golpe
 
 # --- 1. CONFIGURACIÓN E IDENTIDAD VISUAL ---
 st.set_page_config(page_title="Tablero del Tractorista", page_icon="🚜", layout="wide")

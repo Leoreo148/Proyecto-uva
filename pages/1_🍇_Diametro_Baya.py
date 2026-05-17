@@ -5,14 +5,13 @@ import json
 from io import BytesIO
 import plotly.express as px
 import numpy as np
+from supabase import create_client, Client
+from streamlit_local_storage import LocalStorage
+
 # 🚨 CANDADO DE SEGURIDAD (Colocar al inicio de la página, justo debajo de los imports)
 if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
     st.warning("⚠️ Por favor, inicie sesión en la página principal antes de acceder a este módulo.")
     st.stop() # Frena la ejecución del resto del código de golpe
-
-# --- LIBRERÍAS PARA LA CONEXIÓN A SUPABASE ---
-from supabase import create_client, Client
-from streamlit_local_storage import LocalStorage
 
 # --- Configuración de la Página ---
 st.set_page_config(page_title="Diámetro de Baya", page_icon="🍇", layout="wide")

@@ -97,9 +97,7 @@ else:
     p_dash_finanzas = st.Page("modulos/5_Dashboard_Finanzas.py", title="Dashboard Finanzas", icon="💵")
     p_rend_raleo = st.Page("modulos/5_Rendimiento_Raleo.py", title="Rendimiento Raleo", icon="📈")
     
-    # El nuevo espacio para el Ingeniero en Jefe (Segundo)
     p_dash_general = st.Page("modulos/6_Dashboard_General.py", title="Dashboard General Fundo", icon="🏢")
-    
     p_carga_masiva = st.Page("modulos/99_Carga_Masiva.py", title="Carga Masiva", icon="🚀")
 
     # 2. Armar el menú inteligente y en ruteo por cada Rol

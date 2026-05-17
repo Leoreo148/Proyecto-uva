@@ -66,16 +66,54 @@ if not st.session_state["autenticado"]:
             else:
                 st.warning("Por favor, rellene ambos campos.")
 else:
-    # Vista que aparece cuando ya iniciaron sesión correctamente
-    st.markdown(f"# 🎉 ¡Bienvenido al sistema, {st.session_state['nombre']}!")
-    st.subheader(f"Tu perfil activo es: **{st.session_state['rol']}**")
-    st.write("Las credenciales se han validado correctamente con la base de datos central de Supabase.")
-    st.info("👈 Ahora puedes usar la barra lateral para navegar de forma segura por los módulos de tu área de trabajo.")
+    # --- VISTA CUANDO EL USUARIO YA INICIÓ SESIÓN ---
+    rol = st.session_state["rol"]
     
-    st.write("")
-    if st.button("🔒 Cerrar Sesión"):
-        st.session_state["autenticado"] = False
-        st.session_state["usuario"] = None
-        st.session_state["rol"] = None
-        st.session_state["nombre"] = None
-        st.rerun()
+    # 1. Definir TODAS las páginas de la app (apuntando a la nueva carpeta 'modulos')
+    # Nota: Asegúrate de que los nombres de archivo aquí coincidan exactamente con los tuyos
+    p_sanidad = st.Page("modulos/1_📝_Evaluacion_Sanitaria.py", title="Evaluación Sanitaria", icon="📝")
+    p_mosca = st.Page("modulos/1_🪰_Monitoreo_Mosca_Fruta.py", title="Monitoreo Mosca", icon="🪰")
+    p_fenologia = st.Page("modulos/1_🌱_Evaluacion_Fenologica.py", title="Evaluación Fenológica", icon="🌱")
+    p_baya = st.Page("modulos/1_🍇_Diametro_Baya.py", title="Diámetro Baya", icon="🍇")
+    p_raleo = st.Page("modulos/1_✂️_Control_Raleo.py", title="Control Raleo", icon="✂️")
+    p_tractor = st.Page("modulos/2_🚜_Gestion_Aplicacion_Horas.py", title="Gestión Tractor", icon="🚜")
+    
+    # (Tus futuros dashboards que crearemos)
+    # p_dash_sanidad = st.Page("modulos/3_📊_Dashboard_Sanidad.py", title="Dashboard Sanidad", icon="📊")
+    # p_dash_finanzas = st.Page("modulos/5_💵_Dashboard_Finanzas.py", title="Finanzas y Costos", icon="💵")
+    # p_rendimiento = st.Page("modulos/5_📈_Rendimiento_Raleo.py", title="Planillas Raleo", icon="📈")
+
+    # 2. Armar el menú personalizado según el Rol de Supabase
+    if rol == "Sanidad":
+        # José solo ve sus módulos, lo demás ni siquiera existe para él
+        paginas = [p_sanidad, p_mosca, p_fenologia, p_baya] # Agrega aquí p_dash_sanidad cuando lo crees
+        
+    elif rol == "Admin":
+        # Segundo (El Jefe) ve todo, y encima se lo agrupamos por categorías bonitas
+        paginas = {
+            "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo],
+            "Maquinaria": [p_tractor],
+            # "Jefatura": [p_dash_sanidad, p_dash_finanzas, p_rendimiento]
+        }
+        
+    elif rol == "Evaluador":
+        # El Empleado A solo ve recolectores de datos
+        paginas = [p_sanidad, p_mosca, p_fenologia, p_baya]
+        
+    else:
+        # Por seguridad, si hay un rol raro, no ve nada
+        paginas = []
+
+    # 3. Lanzar la barra lateral dinámica y el botón de Cerrar Sesión
+    with st.sidebar:
+        st.markdown(f"👤 **{st.session_state['nombre']}**")
+        st.markdown(f"🏷️ Puesto: *{rol}*")
+        if st.button("🔒 Cerrar Sesión", use_container_width=True):
+            st.session_state["autenticado"] = False
+            st.rerun()
+
+    if paginas:
+        menu = st.navigation(paginas)
+        menu.run()
+    else:
+        st.warning("No tienes módulos asignados. Contacta al administrador.")

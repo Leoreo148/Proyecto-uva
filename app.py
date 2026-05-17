@@ -80,7 +80,7 @@ else:
     rol = st.session_state["rol"]
     
     # 1. Definición de páginas apuntando exactamente a tus archivos físicos
-    p_raleo = st.Page("modulos/1_ Control_Raleo.py", title="Control Raleo", icon="✂️")
+    p_raleo = st.Page("modulos/1_Control_Raleo.py", title="Control Raleo", icon="✂️")
     p_baya = st.Page("modulos/1_Diametro_Baya.py", title="Diámetro Baya", icon="🍇")
     p_fenologia = st.Page("modulos/1_Evaluación Fenológica.py", title="Evaluación Fenológica", icon="🌱")
     p_sanidad = st.Page("modulos/1_Evaluacion_Sanitaria.py", title="Evaluación Sanitaria", icon="📝")

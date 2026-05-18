@@ -270,34 +270,36 @@ with tab3:
             st.markdown(f"""
             <div style='background-color:#ffffff; padding:15px; border-radius:8px; border-left:4px solid #2ecc71; margin-bottom:10px; box-shadow:0 1px 3px rgba(0,0,0,0.1);'>
                 <b>OT: {ot['ID_Orden_Personalizado']}</b> | 📍 Sector: {ot['Sector_Aplicacion']} ({ha_uso} Ha) <br>
-                💵 <b>Costo Total: S/ {c_ot:,.2f}</b>  👉 (<i>S/ {c_ha:,.2f} por Hectárea</i>)
-            </div>
-            """, unsafe_allow_html=True)
+                💵 <b>Costo Total: S/ {c_ot:,.2f}</b> (<i>S/ {c_ha:,.2f} por Hectárea</i>)
+            </div>
+            """, unsafe_allow_html=True)
+            
+# --- NUEVO: HISTORIAL ESPECÍFICO (VISTA DE HORMIGA) ---
+    st.divider()
+    st.subheader("🔍 Trazabilidad Detallada de Salidas (Kardex Físico)")
+    
+    if not df_sal.empty and 'Fecha_Aplicacion' in df_sal.columns:
+        # Cruzamos Salidas -> Ingresos (por ID) -> Productos (por Código)
+        df_sal_det = pd.merge(df_sal, df_ing[['id', 'Codigo_Lote', 'Codigo_Producto']], left_on='Ingreso_ID', right_on='id', how='left')
+        df_sal_det = pd.merge(df_sal_det, df_prod[['Codigo', 'Producto', 'Unidad']], left_on='Codigo_Producto', right_on='Codigo', how='left')
+        
+        # Filtramos las columnas que le sirven al almacenero para auditoría
+        cols_mostrar = ['Fecha_Aplicacion', 'Producto', 'Codigo_Lote', 'Cantidad_Usada', 'Unidad', 'Sector_Destino', 'Responsable', 'Labor']
+        cols_existentes = [c for c in cols_mostrar if c in df_sal_det.columns]
+        
+        df_mostrar_salidas = df_sal_det[cols_existentes].sort_values(by='Fecha_Aplicacion', ascending=False)
+        
+        st.dataframe(df_mostrar_salidas, use_container_width=True, hide_index=True)
+        
+        # Botón de descarga para archivo de Excel/CSV
+        csv_salidas = df_mostrar_salidas.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Descargar Historial de Salidas",
+            data=csv_salidas,
+            file_name=f"Salidas_Trazabilidad_{date.today()}.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("No hay registros detallados de salidas recientes en la base de datos.")
 
-            # --- NUEVO: HISTORIAL ESPECÍFICO (VISTA DE HORMIGA) ---
-        st.divider()
-        st.subheader("🔍 Trazabilidad Detallada de Salidas (Kardex Físico)")
-        
-        if not df_sal.empty and 'Fecha_Aplicacion' in df_sal.columns:
-            # Cruzamos Salidas -> Ingresos (por ID) -> Productos (por Código)
-            df_sal_det = pd.merge(df_sal, df_ing[['id', 'Codigo_Lote', 'Codigo_Producto']], left_on='Ingreso_ID', right_on='id', how='left')
-            df_sal_det = pd.merge(df_sal_det, df_prod[['Codigo', 'Producto', 'Unidad']], left_on='Codigo_Producto', right_on='Codigo', how='left')
-            
-            # Filtramos las columnas que le sirven al almacenero para auditoría
-            cols_mostrar = ['Fecha_Aplicacion', 'Producto', 'Codigo_Lote', 'Cantidad_Usada', 'Unidad', 'Sector_Destino', 'Responsable', 'Labor']
-            cols_existentes = [c for c in cols_mostrar if c in df_sal_det.columns]
-            
-            df_mostrar_salidas = df_sal_det[cols_existentes].sort_values(by='Fecha_Aplicacion', ascending=False)
-            
-            st.dataframe(df_mostrar_salidas, use_container_width=True, hide_index=True)
-            
-            # Botón de descarga para archivo de Excel/CSV
-            csv_salidas = df_mostrar_salidas.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Descargar Historial de Salidas",
-                data=csv_salidas,
-                file_name=f"Salidas_Trazabilidad_{date.today()}.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("No hay registros detallados de salidas recientes en la base de datos.")
+            

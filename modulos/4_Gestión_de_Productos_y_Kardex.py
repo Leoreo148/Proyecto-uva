@@ -51,8 +51,8 @@ def cargar_todo():
     if not supabase: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     
     p = supabase.table('Productos').select("*").order('Producto').execute()
-    # 💡 AÑADIDO: Traemos el Estado_Registro de la tabla Ingresos
-    i = supabase.table('Ingresos').select("id, Codigo_Producto, Codigo_Lote, Cantidad_Ingresada, Precio_Unitario_PEN, Fecha_Vencimiento, Proveedor, Factura, Observaciones, Estado_Registro").execute()
+    # 💡 AÑADIDO: Traemos campos logísticos extra para auditoría
+    i = supabase.table('Ingresos').select("id, Codigo_Producto, Codigo_Lote, Cantidad_Ingresada, Precio_Unitario_PEN, Fecha_Vencimiento, Proveedor, Factura, Observaciones, Estado_Registro, Guia_Remision, Responsable").execute()
     s = supabase.table('Salidas').select("Ingreso_ID, Cantidad_Usada").execute()
     
     return pd.DataFrame(p.data), pd.DataFrame(i.data), pd.DataFrame(s.data)
@@ -129,9 +129,9 @@ else:
 with stylable_container(key="green_panel", css_styles="{ background-color: #1e3d33; color: white; padding: 1.5rem; border-radius: 1rem; }"):
     st.subheader("📦 Gestión Maestra de Inventario")
     
+    # Fila 1: Filtros principales
     c0, c1, c2, c3 = st.columns([1.5, 2, 2, 2])
     with c0:
-        # 💡 NUEVO FILTRO: Ocultar Archivados
         st.write("")
         ocultar_archivados = st.checkbox("Ocultar Archivados", value=True)
     with c1:
@@ -140,11 +140,33 @@ with stylable_container(key="green_panel", css_styles="{ background-color: #1e3d
         tipos_limpios = sorted([str(t) for t in df_kardex.get('Tipo_Accion', []).unique() if t and str(t) not in ['0', 'nan', 'None']])
         filtro_tipo = st.selectbox("Categoría:", ["Todos"] + tipos_limpios)
     with c3:
-        cols_detalle = ['Estado_Registro', 'Proveedor', 'Factura', 'Precio_Unitario_PEN', 'Observaciones']
-        mostrar_extras = st.multiselect("⚙️ Columnas extra:", options=cols_detalle, default=['Estado_Registro'])
+        filtro_abc = st.selectbox("Clase ABC:", ["Todos", "A (Crítico)", "B (Intermedio)", "C (Rutina)"])
+
+    # Fila 2: Filtros Avanzados y KPIs
+    with st.expander("🛠️ Filtros Avanzados y Auditoría Logística"):
+        ca1, ca2, ca3, ca4 = st.columns(4)
+        
+        # Obtenemos listas limpias para los selectores si existen en el DF
+        provs = ["Todos"] + sorted(df_kardex['Proveedor'].dropna().unique().tolist()) if 'Proveedor' in df_kardex.columns else ["Todos"]
+        resps = ["Todos"] + sorted(df_kardex['Responsable'].dropna().unique().tolist()) if 'Responsable' in df_kardex.columns else ["Todos"]
+        
+        f_prov = ca1.selectbox("Proveedor", provs)
+        f_resp = ca2.selectbox("Responsable Recepción", resps)
+        f_fact = ca3.text_input("N° Factura", placeholder="Buscar factura...")
+        f_guia = ca4.text_input("Guía Remisión", placeholder="Buscar guía...")
+        
+        st.markdown("**Filtros por KPIs (Alertas):**")
+        kpi1, kpi2 = st.columns(2)
+        filtro_kpi_stock = kpi1.checkbox("🚨 Mostrar SOLO Stock Crítico (< Mínimo)")
+        filtro_kpi_venc = kpi2.checkbox("⏳ Mostrar SOLO Próximos a Vencer (< 15 días)")
+        
+    # Columnas Extra
+    cols_detalle = ['Estado_Registro', 'Proveedor', 'Factura', 'Guia_Remision', 'Responsable', 'Precio_Unitario_PEN', 'Observaciones']
+    mostrar_extras = st.multiselect("⚙️ Mostrar columnas extra en la tabla:", options=cols_detalle, default=['Estado_Registro'])
 
 # Aplicar Filtros
 if not df_kardex.empty:
+    # 1. Filtros Básicos
     if ocultar_archivados and 'Activo' in df_kardex.columns:
         df_kardex = df_kardex[df_kardex['Activo'] == True]
     if busqueda:
@@ -152,6 +174,24 @@ if not df_kardex.empty:
         df_kardex = df_kardex[mask]
     if filtro_tipo != "Todos":
         df_kardex = df_kardex[df_kardex['Tipo_Accion'] == filtro_tipo]
+    if filtro_abc != "Todos" and 'Clase_ABC' in df_kardex.columns:
+        df_kardex = df_kardex[df_kardex['Clase_ABC'] == filtro_abc]
+
+    # 2. Filtros Avanzados (Logística)
+    if f_prov != "Todos" and 'Proveedor' in df_kardex.columns:
+        df_kardex = df_kardex[df_kardex['Proveedor'] == f_prov]
+    if f_resp != "Todos" and 'Responsable' in df_kardex.columns:
+        df_kardex = df_kardex[df_kardex['Responsable'] == f_resp]
+    if f_fact and 'Factura' in df_kardex.columns:
+        df_kardex = df_kardex[df_kardex['Factura'].astype(str).str.contains(f_fact, case=False, na=False)]
+    if f_guia and 'Guia_Remision' in df_kardex.columns:
+        df_kardex = df_kardex[df_kardex['Guia_Remision'].astype(str).str.contains(f_guia, case=False, na=False)]
+
+    # 3. Filtros KPIs
+    if filtro_kpi_stock and 'Stock_Lote' in df_kardex.columns and 'Stock_Minimo' in df_kardex.columns:
+        df_kardex = df_kardex[df_kardex['Stock_Lote'] < df_kardex['Stock_Minimo']]
+    if filtro_kpi_venc and 'Dias_para_Vencer' in df_kardex.columns:
+        df_kardex = df_kardex[df_kardex['Dias_para_Vencer'] < 15]
 
 # --- 6. MÉTRICAS A PRUEBA DE BALAS ---
 st.write("")

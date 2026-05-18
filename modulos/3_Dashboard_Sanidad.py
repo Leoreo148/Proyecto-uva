@@ -86,9 +86,10 @@ hoy = date.today()
 f_inicio = st.sidebar.date_input("Fecha Inicio", hoy - timedelta(days=30))
 f_fin = st.sidebar.date_input("Fecha Fin", hoy)
 
-sectores_disp = ['Todos'] + sorted(list(set(df_mosca['Sector'].tolist() + (df_plagas['Sector'].tolist() if not df_plagas.empty else []))))
-f_sector = st.sidebar.selectbox("Sector", sectores_disp)
-
+sectores_disp = ['Todos'] + sorted(list(set(
+    (df_mosca['Sector'].tolist() if not df_mosca.empty else []) + 
+    (df_plagas['Sector'].tolist() if not df_plagas.empty else [])
+)))
 # Aplicar filtros
 if not df_mosca.empty:
     mask_m = (df_mosca['Fecha'] >= f_inicio) & (df_mosca['Fecha'] <= f_fin)

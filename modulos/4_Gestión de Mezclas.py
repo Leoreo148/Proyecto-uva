@@ -274,7 +274,51 @@ with tab3:
             </div>
             """, unsafe_allow_html=True)
             
-# --- NUEVO: HISTORIAL ESPECÍFICO (VISTA DE HORMIGA) ---
+# ==========================================
+# TAB 3: HISTORIAL Y KPIs DE COSTOS (Finanzas)
+# ==========================================
+with tab3:
+    st.subheader("Auditoría Financiera de Aplicaciones en Campo")
+    finalizadas = df_ord[df_ord['Status'] == 'Finalizada'] if not df_ord.empty else pd.DataFrame()
+    
+    if finalizadas.empty:
+        st.info("Aún no hay órdenes finalizadas para mostrar estadísticas.")
+    else:
+        # Recuperamos los costos desde el JSONB 'Datos_Tecnicos'
+        costos_totales = []
+        hectareas_totales = 0
+        
+        for _, ot in finalizadas.iterrows():
+            if ot.get('Datos_Tecnicos'):
+                costos_totales.append(ot['Datos_Tecnicos'].get('Costo_Estimado_Total', 0))
+            hectareas_totales += float(ot.get('Volumen_Hectarea', 0))
+            
+        inversion_global = sum(costos_totales)
+        promedio_global_ha = inversion_global / hectareas_totales if hectareas_totales > 0 else 0
+
+        # Tarjetas de KPI
+        k1, k2, k3 = st.columns(3)
+        k1.metric("💰 Inversión Total en Químicos", f"S/ {inversion_global:,.2f}")
+        k2.metric("📉 Costo Promedio General / Ha", f"S/ {promedio_global_ha:,.2f}")
+        k3.metric("🚜 Hectáreas Totales Tratadas", f"{hectareas_totales:,.1f} Ha")
+
+        st.divider()
+        st.write("### Desglose por Orden de Trabajo")
+        
+        for _, ot in finalizadas.iterrows():
+            dt = ot.get('Datos_Tecnicos', {})
+            c_ot = dt.get('Costo_Estimado_Total', 0)
+            c_ha = dt.get('Costo_Por_Ha', 0)
+            ha_uso = ot.get('Volumen_Hectarea', 0)
+            
+            st.markdown(f"""
+            <div style='background-color:#ffffff; padding:15px; border-radius:8px; border-left:4px solid #2ecc71; margin-bottom:10px; box-shadow:0 1px 3px rgba(0,0,0,0.1);'>
+                <b>OT: {ot['ID_Orden_Personalizado']}</b> | 📍 Sector: {ot['Sector_Aplicacion']} ({ha_uso} Ha) <br>
+                💵 <b>Costo Total: S/ {c_ot:,.2f}</b>  👉 (<i>S/ {c_ha:,.2f} por Hectárea</i>)
+            </div>
+            """, unsafe_allow_html=True)
+
+    # --- NUEVO: HISTORIAL ESPECÍFICO (VISTA DE HORMIGA) ---
     st.divider()
     st.subheader("🔍 Trazabilidad Detallada de Salidas (Kardex Físico)")
     
@@ -301,5 +345,4 @@ with tab3:
         )
     else:
         st.info("No hay registros detallados de salidas recientes en la base de datos.")
-
             

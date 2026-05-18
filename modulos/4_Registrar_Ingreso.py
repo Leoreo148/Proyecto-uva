@@ -13,7 +13,7 @@ if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
     st.stop()
 
 # Aquí bloqueamos a José de Sanidad o a Edgar de Costos
-if st.session_state["rol"] not in ["Admin", "Logistica"]:
+if st.session_state["rol"] not in ["Admin", "Logistica","Programador"]:
     st.error("🚫 Acceso denegado. Este módulo es exclusivo para el área de Almacén y Mezclas (Miguel).")
     st.stop()
 

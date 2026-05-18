@@ -195,18 +195,17 @@ if not df_kardex.empty:
 
 # --- 6. MÉTRICAS A PRUEBA DE BALAS ---
 st.write("")
-m1, m2, m3, m4 = st.columns(4)
+
+# 💡 NUEVO: Control de Tipo de Cambio en la misma fila de métricas
+c_tc, m1, m2, m3, m4 = st.columns([1.5, 2, 1.5, 1.5, 1.5])
+tc_usd = c_tc.number_input("💵 Tipo de Cambio (S/)", min_value=3.00, max_value=4.50, value=3.75, step=0.01)
+
 style_metric_cards(background_color="#ffffff", border_left_color="#1e3d33")
 
-val_total = df_kardex['Valorizado_PEN'].sum() if 'Valorizado_PEN' in df_kardex.columns else 0.0
-m1.metric("Valorización (S/)", f"S/ {val_total:,.2f}")
+val_total_pen = df_kardex['Valorizado_PEN'].sum() if 'Valorizado_PEN' in df_kardex.columns else 0.0
+val_total_usd = val_total_pen / tc_usd if tc_usd > 0 else 0.0
 
-n_alertas = len(df_kardex[df_kardex['Stock_Lote'] < df_kardex['Stock_Minimo']]) if 'Stock_Lote' in df_kardex.columns and 'Stock_Minimo' in df_kardex.columns else 0
-m2.metric("Alertas Stock", n_alertas)
-
-n_venc = len(df_kardex[df_kardex['Dias_para_Vencer'] < 15]) if 'Dias_para_Vencer' in df_kardex.columns else 0
-m3.metric("Vencimientos <15d", n_venc)
-m4.metric("Lotes en Vista", len(df_kardex) if not df_kardex.empty else 0)
+m1.metric("Valorización (PEN / USD)", f"S/ {val_total_pen:,.2f}", f"${val_total_usd:,.2f}", delta_color="off")
 
 # --- 7. AG-GRID ---
 if not df_kardex.empty:

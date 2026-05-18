@@ -73,8 +73,25 @@ else:
             # --- DATOS QUE EL TRACTORISTA DEBE LEER ---
             st.markdown(f'<div class="receta-box"><b>🧪 MEZCLA AUTORIZADA:</b> {", ".join([f"{i['p']} ({i['c']})" for i in tarea.get('Receta_Mezcla_Lotes', [])])}</div>', unsafe_allow_html=True)
             
-            instrucciones = tarea.get('Observaciones_Aplicacion', 'Sin instrucciones especiales.')
-            st.markdown(f'<div class="instrucciones-box"><b>📝 PARÁMETROS DEL INGENIERO:</b><br>{instrucciones}</div>', unsafe_allow_html=True)
+            # 💡 NUEVO: Desempaquetamos la configuración de la máquina del JSON de Datos Técnicos
+            vol_ha = tarea.get('Volumen_Hectarea', 'N/A')
+            marcha = tarea.get('Marcha', 'N/A')
+            presion = tarea.get('Presion_Bar', 'N/A')
+            metodo = tarea.get('Tipo_Aplicacion', 'N/A')
+            boquillas = tarea.get('Color_Boquilla', 'N/A')
+            
+            st.markdown(f"""
+                <div class="instrucciones-box">
+                    <b>📝 CONFIGURACIÓN DEL TRACTOR (Mandato del Ingeniero):</b><br>
+                    • <b>Método:</b> {metodo}<br>
+                    • <b>Marcha:</b> {marcha} &nbsp;|&nbsp; <b>Presión:</b> {presion} Bar<br>
+                    • <b>Volumen/Ha:</b> {vol_ha} Lts/Ha &nbsp;|&nbsp; <b>Boquillas:</b> {boquillas}
+                </div>
+            """, unsafe_allow_html=True)
+            
+            instrucciones_extra = tarea.get('Observaciones_Aplicacion', '')
+            if instrucciones_extra:
+                st.info(f"**Nota del Ingeniero:** {instrucciones_extra}")
             
             st.write("---")
             st.write("✅ **Rellena los datos físicos al terminar la labor:**")

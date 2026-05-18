@@ -38,8 +38,8 @@ def cargar_catalogos():
     maq = supabase.table('Maquinaria').select("id, nombre").execute()
     prod = supabase.table('Productos').select("Codigo, Producto, Unidad").execute()
     ing = supabase.table('Ingresos').select("id, Codigo_Producto, Codigo_Lote, Cantidad_Ingresada, Precio_Unitario_PEN").execute()
-    sal = supabase.table('Salidas').select("Ingreso_ID, Cantidad_Usada").execute()
-    ord_ = supabase.table('Ordenes_de_Trabajo').select("*").order('created_at', desc=True).execute()
+    sal = supabase.table('Salidas').select("*").execute()
+    ord_ = supabase.table('Ordenes_de_Trabajo').select("*").order('created_at', desc=True).execute()
 
     return pd.DataFrame(pers.data), pd.DataFrame(maq.data), pd.DataFrame(prod.data), pd.DataFrame(ing.data), pd.DataFrame(sal.data), pd.DataFrame(ord_.data)
 

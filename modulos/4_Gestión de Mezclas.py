@@ -261,17 +261,27 @@ with tab3:
         st.write("### Desglose por Orden de Trabajo")
         
         for _, ot in finalizadas.iterrows():
-            dt = ot.get('Datos_Tecnicos', {})
+            dt = ot.get('Datos_Tecnicos', {}) if isinstance(ot.get('Datos_Tecnicos'), dict) else {}
             c_ot = dt.get('Costo_Estimado_Total', 0)
             c_ha = dt.get('Costo_Por_Ha', 0)
             ha_uso = ot.get('Volumen_Hectarea', 0)
+            metodo = dt.get('Metodo', '')
             
-            st.markdown(f"""
-            <div style='background-color:#ffffff; padding:15px; border-radius:8px; border-left:4px solid #2ecc71; margin-bottom:10px; box-shadow:0 1px 3px rgba(0,0,0,0.1);'>
-                <b>OT: {ot['ID_Orden_Personalizado']}</b> | 📍 Sector: {ot['Sector_Aplicacion']} ({ha_uso} Ha) <br>
-                💵 <b>Costo Total: S/ {c_ot:,.2f}</b>  👉 (<i>S/ {c_ha:,.2f} por Hectárea</i>)
-            </div>
-            """, unsafe_allow_html=True)
+            with st.expander(f"✅ OT: {ot.get('ID_Orden_Personalizado')} | Sector: {ot.get('Sector_Aplicacion')} | 💵 S/ {c_ot:,.2f}"):
+                st.markdown(f"**🎯 Objetivo:** {ot.get('Objetivo', 'N/A')}")
+                
+                c_t1, c_t2 = st.columns(2)
+                if metodo == "Foliar" or str(ot.get('Tipo_Aplicacion')) in ["Nebulizado (Turbo)", "Pulverizado", "Barras", "Mochila"]:
+                    c_t1.markdown(f"🚜 **Método:** {ot.get('Tipo_Aplicacion')}<br>⚙️ **Marcha:** {ot.get('Marcha', 0)} | **Presión:** {ot.get('Presion_Bar', 0)} Bar", unsafe_allow_html=True)
+                    c_t2.markdown(f"🔫 **Boquillas:** {ot.get('Color_Boquilla', 'N/A')}<br>📏 **Área Tratada:** {ha_uso} Ha", unsafe_allow_html=True)
+                else: # Fertirriego
+                    c_t1.markdown(f"💧 **Método:** Fertirriego<br>🚰 **Caseta:** {dt.get('Caseta', 'N/A')}<br>⏱️ **Tiempo Inyección:** {dt.get('Tiempo_Min', 0)} min", unsafe_allow_html=True)
+                    c_t2.markdown(f"🧪 **pH:** {dt.get('pH', 0)} | **CE:** {dt.get('CE', 0)}<br>📏 **Área Tratada:** {ha_uso} Ha", unsafe_allow_html=True)
+                
+                if ot.get('Receta_Mezcla_Lotes'):
+                    st.write("**📦 Receta Despachada:**")
+                    df_receta = pd.DataFrame(ot['Receta_Mezcla_Lotes'])
+                    st.dataframe(df_receta[['p', 'l', 'c']].rename(columns={'p':'Producto', 'l':'Lote', 'c':'Cantidad'}), hide_index=True, use_container_width=True)
 
     # --- NUEVO: HISTORIAL ESPECÍFICO (VISTA DE HORMIGA) ---
     st.divider()
@@ -300,4 +310,4 @@ with tab3:
         )
     else:
         st.info("No hay registros detallados de salidas recientes en la base de datos.")
-            
+           

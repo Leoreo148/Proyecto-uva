@@ -37,7 +37,7 @@ supabase = init_supabase()
 # --- 3. EXTRACCIÓN Y PROCESAMIENTO DE DATOS ---
 @st.cache_data(ttl=60)
 def cargar_datos_sanidad():
-    if not supabase: return pd.DataFrame(), pd.DataFrame()
+    if not supabase: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     
     try:
         # 1. Monitoreo de Mosca
@@ -50,29 +50,46 @@ def cargar_datos_sanidad():
         res_san = supabase.table('Evaluaciones_Sanitarias').select("*").execute()
         df_san_raw = pd.DataFrame(res_san.data)
         
-        # PROCESAMIENTO MÁGICO: Desempaquetar el JSON de plagas
         plagas_records = []
+        enfermedades_records = []
+        
         if not df_san_raw.empty:
             for _, row in df_san_raw.iterrows():
                 fecha = pd.to_datetime(row['Fecha']).date()
                 sector = row['Sector']
                 evaluador = row.get('Evaluador', 'N/A')
-                datos_p = row.get('Datos_Plagas', [])
                 
+                # Desempaquetar Plagas
+                datos_p = row.get('Datos_Plagas', [])
                 if isinstance(datos_p, list):
                     for planta in datos_p:
                         plagas_records.append({
-                            'Fecha': fecha,
-                            'Sector': sector,
-                            'Evaluador': evaluador,
+                            'Fecha': fecha, 'Sector': sector, 'Evaluador': evaluador,
                             'TRIPS': float(planta.get('TRIPS', 0)),
                             'M_BLANCA': float(planta.get('M.BLANCA', 0)),
                             'A_ROJA': float(planta.get('A.ROJA', 0)),
                             'COCHINILLA': float(planta.get('COCHINILLA', 0))
                         })
+                
+                # Desempaquetar Enfermedades
+                datos_e = row.get('Datos_Enfermedades', [])
+                if isinstance(datos_e, list):
+                    for planta in datos_e:
+                        enfermedades_records.append({
+                            'Fecha': fecha, 'Sector': sector, 'Evaluador': evaluador,
+                            'OIDIO': float(planta.get('OIDIO %', 0)),
+                            'MILDIU': float(planta.get('MILDIU %', 0)),
+                            'BOTRYTIS': float(planta.get('BOTRYTIS', 0))
+                        })
         
-        df_plagas = pd.DataFrame(plagas_records)
-        return df_mosca, df_plagas
+        return df_mosca, pd.DataFrame(plagas_records), pd.DataFrame(enfermedades_records)
+
+    except Exception as e:
+        st.error(f"Error cargando datos: {e}")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+
+df_mosca, df_plagas, df_enfermedades = cargar_datos_sanidad()
 
     except Exception as e:
         st.error(f"Error cargando datos: {e}")
@@ -105,111 +122,71 @@ if not df_plagas.empty:
 else:
     df_plagas_f = pd.DataFrame()
 
-# --- 5. CABECERA Y KPIs ---
-st.title("📊 Dashboard de Presión Sanitaria")
-st.write("Monitoreo de umbrales para la toma de decisiones en aplicaciones fitosanitarias.")
+# --- 5. INTERFAZ POR PANELES DE CONTROL ---
+tab_mosca, tab_plagas, tab_enfermedades = st.tabs(["🪰 PANEL MOSCAS", "🐛 PANEL PLAGAS", "🍄 PANEL ENFERMEDADES"])
 
-m1, m2, m3, m4 = st.columns(4)
-style_metric_cards(background_color="#ffffff", border_left_color="#e74c3c")
-
-# KPI 1: Mosca
-tot_mosca = df_mosca_f['Ceratitis_capitata'].sum() if not df_mosca_f.empty else 0
-m1.metric("🪰 Capturas Ceratitis", f"{tot_mosca}")
-
-# KPI 2: Sector más afectado mosca
-peor_sector_mosca = df_mosca_f.groupby('Sector')['Ceratitis_capitata'].sum().idxmax() if tot_mosca > 0 else "Ninguno"
-m2.metric("📍 Lote Crítico Mosca", peor_sector_mosca)
-
-# KPI 3 y 4: Plagas Vid
-if not df_plagas_f.empty:
-    prom_trips = df_plagas_f['TRIPS'].mean()
-    prom_aroja = df_plagas_f['A_ROJA'].mean()
-else:
-    prom_trips, prom_aroja = 0, 0
-
-m3.metric("🐛 Promedio Trips/Planta", f"{prom_trips:.1f}")
-m4.metric("🕷️ Promedio Arañita/Planta", f"{prom_aroja:.1f}")
-
-st.divider()
-
-# --- 6. ANÁLISIS DE MOSCA DE LA FRUTA (SENASA) ---
-st.subheader("🪰 Monitoreo de Mosca de la Fruta")
-
-c_mosca1, c_mosca2 = st.columns([2, 1])
-
-with c_mosca1:
+# ==========================================
+# PANEL 1: MOSCAS DE LA FRUTA
+# ==========================================
+with tab_mosca:
+    st.header("Análisis de Mosca de la Fruta")
     if not df_mosca_f.empty:
-        # Agrupamos por fecha
-        df_m_trend = df_mosca_f.groupby('Fecha')[['Ceratitis_capitata', 'Anastrepha_fraterculus']].sum().reset_index()
+        # Selector específico de tipo de mosca
+        tipo_mosca = st.selectbox("Seleccione la especie de Mosca:", ['Ceratitis_capitata', 'Anastrepha_fraterculus', 'Anastrepha_distinta'])
         
-        fig_mosca = go.Figure()
-        fig_mosca.add_trace(go.Scatter(x=df_m_trend['Fecha'], y=df_m_trend['Ceratitis_capitata'], mode='lines+markers', name='C. Capitata', line=dict(color='#e74c3c', width=3)))
-        fig_mosca.add_trace(go.Scatter(x=df_m_trend['Fecha'], y=df_m_trend['Anastrepha_fraterculus'], mode='lines+markers', name='A. Fraterculus', line=dict(color='#f39c12', width=2)))
-        
-        # UMBRAL DE ACCIÓN (Línea roja) - Modificable para tesis
-        UMBRAL_MTD = 5 # Ejemplo: 5 capturas
-        fig_mosca.add_hline(y=UMBRAL_MTD, line_dash="dot", line_color="red", annotation_text="Umbral de Alerta", annotation_position="top left")
-        
-        fig_mosca.update_layout(title="Dinámica Poblacional de Mosca", xaxis_title="Fecha", yaxis_title="Individuos Capturados", hovermode="x unified")
-        st.plotly_chart(fig_mosca, use_container_width=True)
+        # 🎯 CÁLCULO DEL LOTE CRÍTICO EN TIEMPO REAL
+        ranking_mosca = df_mosca_f.groupby('Sector')[tipo_mosca].sum().reset_index()
+        if not ranking_mosca.empty and ranking_mosca[tipo_mosca].sum() > 0:
+            lote_critico = ranking_mosca.sort_values(by=tipo_mosca, ascending=False).iloc[0]
+            st.error(f"🚨 **LOTE CRÍTICO PARA {tipo_mosca.upper()}:** Sector **{lote_critico['Sector']}** con **{int(lote_critico[tipo_mosca])}** capturas acumuladas.")
+        else:
+            st.success(f"✅ No se registran capturas de {tipo_mosca} en el periodo seleccionado.")
+            
+        # Aquí puedes colocar tus gráficos de tendencia filtrados por la especie elegida
     else:
-        st.info("No hay datos de mosca de la fruta en este rango.")
+        st.info("No hay datos de trampas de mosca en este rango de fechas.")
 
-with c_mosca2:
-    st.write("**Alertas de Sectores (Capturas Totales)**")
-    if not df_mosca_f.empty:
-        df_m_sect = df_mosca_f.groupby('Sector')[['Ceratitis_capitata', 'Anastrepha_fraterculus']].sum().reset_index()
-        df_m_sect['Total'] = df_m_sect['Ceratitis_capitata'] + df_m_sect['Anastrepha_fraterculus']
-        df_m_sect = df_m_sect[df_m_sect['Total'] > 0].sort_values(by='Total', ascending=False)
+# ==========================================
+# PANEL 2: PLAGAS (TRIPS, ARAÑITA, ETC)
+# ==========================================
+with tab_plagas:
+    st.header("Control de Focos de Plagas")
+    if not df_plagas_f.empty:
+        tipo_plaga = st.selectbox("Seleccione la Plaga a evaluar:", ['TRIPS', 'A_ROJA', 'M_BLANCA', 'COCHINILLA'])
         
-        for _, row in df_m_sect.iterrows():
-            if row['Total'] > UMBRAL_MTD:
-                st.markdown(f"<div class='alerta-box'><b>🚨 Sector {row['Sector']}</b>: {row['Total']} capturas (Supera Umbral)</div>", unsafe_allow_html=True)
+        # 🎯 CÁLCULO DEL LOTE CRÍTICO
+        ranking_plaga = df_plagas_f.groupby('Sector')[tipo_plaga].mean().reset_index()
+        if not ranking_plaga.empty and ranking_plaga[tipo_plaga].sum() > 0:
+            lote_critico_p = ranking_plaga.sort_values(by=tipo_plaga, ascending=False).iloc[0]
+            st.error(f"🚨 **LOTE CRÍTICO PARA {tipo_plaga}:** Sector **{lote_critico_p['Sector']}** con un promedio de **{lote_critico_p[tipo_plaga]:.2f}** individuos/planta.")
+        else:
+            st.success(f"✅ Todo limpio. No hay presión biológica de {tipo_plaga}.")
+    else:
+        st.info("No hay evaluaciones sanitarias de plagas en estas fechas.")
+
+# ==========================================
+# PANEL 3: ENFERMEDADES (OIDIO, MILDIU, ETC)
+# ==========================================
+with tab_enfermedades:
+    st.header("Monitoreo Fitopatológico (Enfermedades)")
+    # Aplicamos filtro de fecha al nuevo dataframe de enfermedades
+    if not df_enfermedades.empty:
+        df_enf_f = df_enfermedades[(df_enfermedades['Fecha'] >= f_inicio) & (df_enfermedades['Fecha'] <= f_fin)]
+        if f_sector != 'Todos': df_enf_f = df_enf_f[df_enf_f['Sector'] == f_sector]
+        
+        if not df_enf_f.empty:
+            tipo_enf = st.selectbox("Seleccione la Enfermedad:", ['OIDIO', 'MILDIU', 'BOTRYTIS'])
+            
+            # 🎯 CÁLCULO DEL LOTE CRÍTICO
+            ranking_enf = df_enf_f.groupby('Sector')[tipo_enf].mean().reset_index()
+            if not ranking_enf.empty and ranking_enf[tipo_enf].sum() > 0:
+                lote_critico_e = ranking_enf.sort_values(by=tipo_enf, ascending=False).iloc[0]
+                # Modificamos el texto si es severidad (%) o conteo directo
+                unidad = "% de severidad" if tipo_enf in ['OIDIO', 'MILDIU'] else "grado de avance"
+                st.error(f"🍄 **LOTE CRÍTICO PARA {tipo_enf}:** Sector **{lote_critico_e['Sector']}** con **{lote_critico_e[tipo_enf]:.2f}{unidad}** promedio.")
             else:
-                st.markdown(f"✅ **Sector {row['Sector']}**: {row['Total']} capturas")
+                st.success(f"☀️ Condiciones óptimas. No se detectan síntomas de {tipo_enf}.")
+        else:
+            st.info("No hay evaluaciones fitopatológicas en el rango seleccionado.")
     else:
-        st.write("Sin alertas.")
-
-st.divider()
-
-# --- 7. ANÁLISIS DE PLAGAS EN HOJAS/RACIMOS ---
-st.subheader("🍇 Incidencia Promedio de Plagas por Planta")
-
-if not df_plagas_f.empty:
-    c_p1, c_p2 = st.columns([1, 2])
-    
-    # Agrupar datos por sector para mostrar promedios
-    df_p_sect = df_plagas_f.groupby('Sector')[['TRIPS', 'M_BLANCA', 'A_ROJA', 'COCHINILLA']].mean().reset_index()
-    
-    with c_p1:
-        st.write("**Selecciona la plaga a evaluar:**")
-        plaga_sel = st.radio("Plaga:", ['TRIPS', 'A_ROJA', 'M_BLANCA', 'COCHINILLA'], horizontal=True)
-        
-        st.write("Resumen Promedio General:")
-        st.dataframe(df_p_sect[['Sector', plaga_sel]].sort_values(by=plaga_sel, ascending=False).style.format({plaga_sel: "{:.2f}"}), use_container_width=True, hide_index=True)
-
-    with c_p2:
-        # Gráfico de barras por sector
-        fig_plagas = px.bar(
-            df_p_sect, x='Sector', y=plaga_sel, 
-            title=f"Nivel de Infestación Promedio: {plaga_sel}",
-            text_auto='.2f', color=plaga_sel, color_continuous_scale="Reds"
-        )
-        
-        # Umbral sugerido
-        umbrales_sugeridos = {'TRIPS': 2.0, 'A_ROJA': 1.5, 'M_BLANCA': 1.0, 'COCHINILLA': 0.5}
-        umbral_actual = umbrales_sugeridos.get(plaga_sel, 1.0)
-        
-        fig_plagas.add_hline(y=umbral_actual, line_dash="dash", line_color="black", annotation_text=f"Umbral de Aplicación ({umbral_actual})")
-        
-        st.plotly_chart(fig_plagas, use_container_width=True)
-
-    # Tendencia temporal
-    st.write(f"**Evolución temporal de {plaga_sel}**")
-    df_p_trend = df_plagas_f.groupby(['Fecha', 'Sector'])[plaga_sel].mean().reset_index()
-    fig_p_trend = px.line(df_p_trend, x='Fecha', y=plaga_sel, color='Sector', markers=True)
-    fig_p_trend.add_hline(y=umbral_actual, line_dash="dash", line_color="black")
-    st.plotly_chart(fig_p_trend, use_container_width=True)
-
-else:
-    st.info("No hay evaluaciones de plagas registradas en este periodo de tiempo.")
+        st.info("Base de datos de enfermedades vacía.")

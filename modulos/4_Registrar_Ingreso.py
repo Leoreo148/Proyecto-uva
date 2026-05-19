@@ -147,7 +147,7 @@ def modal_crear_producto():
                     st.error(f"Error (¿Código duplicado?): {e}")
             else:
                 st.warning("⚠️ Código y Nombre son obligatorios.")
-
+                
 # FORMULARIO DE REGISTRO ORIGINAL (Intacto)
 with st.form("form_registro", clear_on_submit=True):
     st.markdown("##### 📝 Información del Producto")

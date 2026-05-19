@@ -94,26 +94,59 @@ df_p = get_products()
 def modal_crear_producto():
     st.write("Crea el 'molde' del producto antes de ingresarlo al almacén.")
     with st.form("form_crear_maestro"):
-        c_mod1, c_mod2 = st.columns(2)
-        n_cod = c_mod1.text_input("Código (Ej: A260)", help="Debe ser único")
-        n_nom = c_mod2.text_input("Nombre del Producto")
+        st.markdown("**1. Datos Generales**")
+        c_mod1, c_mod2, c_mod3 = st.columns([1.5, 2, 1.5])
+        n_cod = c_mod1.text_input("Código (Ej: A260)*", help="Debe ser único")
+        n_nom = c_mod2.text_input("Nombre Comercial*")
+        n_marca = c_mod3.text_input("Marca / Laboratorio")
         
-        c_mod3, c_mod4 = st.columns(2)
-        n_uni = c_mod3.selectbox("Unidad de Medida", ["001", "002"])
-        n_tipo = c_mod4.selectbox("Categoría", ["Fungicida y Bactericida", "Insecticida y Acaricida", "Fertilizante", "Agroquímicos", "Herbicida", "Otro"])
+        # --- NUEVO: Ingrediente Activo Inteligente ---
+        n_ingrediente = st.text_input("Ingrediente(s) Activo(s)", placeholder="Ej: cymoxanil, mancozeb", help="Si tiene más de uno, sepáralos con comas.")
+        
+        st.markdown("**2. Clasificación Técnica**")
+        c_mod4, c_mod5, c_mod6 = st.columns(3)
+        
+        # Categorías exactas del Excel
+        CATEGORIAS = ["Insecticida", "Acaricida", "Fungicida", "Herbicida", "Coadyuvante", "Regulador de pH", "Nematicida", "Foliar", "Fertilizante", "Otro"]
+        n_tipo = c_mod4.selectbox("Categoría", CATEGORIAS)
+        
+        # Formulaciones comunes
+        FORMULACIONES = ["Concentrado Soluble (SL)", "Concentrado Emulsionable (EC)", "Suspensión Concentrada (SC)", "Polvo Mojable (WP)", "Gránulos Dispersables (WG)", "Otro"]
+        n_form = c_mod5.selectbox("Formulación", FORMULACIONES)
+        
+        n_uni = c_mod6.selectbox("Unidad Base", ["L", "Kg", "Gal", "Saco"])
+        
+        st.markdown("**3. Seguridad y Documentación**")
+        c_mod7, c_mod8 = st.columns(2)
+        n_banda = c_mod7.selectbox("Banda Toxicológica", ["Verde (Ligeramente Tóxico)", "Azul (Moderadamente Tóxico)", "Amarillo (Altamente Tóxico)", "Rojo (Extremadamente Tóxico)", "No Aplica"])
+        n_ficha = c_mod8.text_input("URL Ficha Técnica", placeholder="https://link-al-pdf.com...")
         
         if st.form_submit_button("Guardar en Catálogo Maestro", use_container_width=True):
             if n_cod and n_nom:
                 try:
-                    nuevo_prod = {"Codigo": n_cod.strip().upper(), "Producto": n_nom.strip().upper(), "Unidad": n_uni, "Tipo_Accion": n_tipo}
+                    # 💡 LÓGICA INTELIGENTE: Limpieza de texto para el Ingrediente Activo
+                    # Convierte "agua , MANCOZEB" en "Agua, Mancozeb"
+                    ingredientes_limpios = ", ".join([i.strip().capitalize() for i in n_ingrediente.split(",") if i.strip()]) if n_ingrediente else None
+                    
+                    nuevo_prod = {
+                        "Codigo": n_cod.strip().upper(), 
+                        "Producto": n_nom.strip().upper(), 
+                        "Unidad": n_uni, 
+                        "Tipo_Accion": n_tipo,
+                        "Marca": n_marca.strip().upper() if n_marca else None,
+                        "Ingrediente_Activo": ingredientes_limpios,
+                        "Formulacion": n_form,
+                        "Banda_Toxicologica": n_banda,
+                        "Ficha_Tecnica_URL": n_ficha.strip() if n_ficha else None
+                    }
                     supabase.table('Productos').insert(nuevo_prod).execute()
-                    st.success(f"¡{n_nom} agregado al catálogo!")
+                    st.success(f"¡{n_nom} agregado al catálogo con éxito!")
                     st.cache_data.clear()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error (¿Código duplicado?): {e}")
             else:
-                st.warning("Código y Nombre son obligatorios.")
+                st.warning("⚠️ Código y Nombre son obligatorios.")
 
 # FORMULARIO DE REGISTRO ORIGINAL (Intacto)
 with st.form("form_registro", clear_on_submit=True):
@@ -185,7 +218,7 @@ st.subheader("📋 Historial de Movimientos y Auditoría")
 df_hist = get_history()
 
 if not df_hist.empty:
-    cols_visibles = ['Estado_Registro', 'Fecha_Recepcion', 'Producto', 'Codigo_Lote', 'Cantidad_Ingresada', 'Precio_Unitario_PEN', 'Factura', 'Responsable', 'Motivo_Anulacion']
+    cols_visibles = ['Estado_Registro', 'Fecha_Recepcion', 'Proveedor', 'Producto', 'Codigo_Lote', 'Cantidad_Ingresada', 'Precio_Unitario_PEN', 'Factura', 'Responsable', 'Motivo_Anulacion']
     cols_reales = [c for c in cols_visibles if c in df_hist.columns]
     
     gb = GridOptionsBuilder.from_dataframe(df_hist[cols_reales])

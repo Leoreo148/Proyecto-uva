@@ -36,7 +36,10 @@ supabase = init_supabase()
 def cargar_catalogos():
     pers = supabase.table('Personal').select("id, nombre_completo").eq('activo', True).execute()
     maq = supabase.table('Maquinaria').select("id, nombre").execute()
-    prod = supabase.table('Productos').select("Codigo, Producto, Unidad").execute()
+    
+    # 💡 NUEVO: Traemos la Banda Toxicológica, Ficha e Ingrediente Activo
+    prod = supabase.table('Productos').select("Codigo, Producto, Unidad, Banda_Toxicologica, Ficha_Tecnica_URL, Ingrediente_Activo").execute()
+    
     ing = supabase.table('Ingresos').select("id, Codigo_Producto, Codigo_Lote, Cantidad_Ingresada, Precio_Unitario_PEN").execute()
     sal = supabase.table('Salidas').select("*").execute()
     ord_ = supabase.table('Ordenes_de_Trabajo').select("*").order('created_at', desc=True).execute()
@@ -145,13 +148,15 @@ with tab1:
                         costo_insumo = row['Cantidad_Total'] * precio_unitario
                         costo_total_mezcla += costo_insumo
                         
+                        # 💡 NUEVO: Adjuntamos la banda toxicológica para advertir al almacén
                         receta_final.append({
                             "id": int(info['id']), 
                             "p": info['Producto'], 
                             "l": info['Codigo_Lote'], 
                             "c": row['Cantidad_Total'],
                             "precio_u": precio_unitario,
-                            "costo_total": costo_insumo
+                            "costo_total": costo_insumo,
+                            "banda": str(info.get('Banda_Toxicologica', 'No Aplica'))
                         })
 
                     # Empaquetamos los costos dentro del diccionario de datos extra que ya definimos
@@ -199,7 +204,17 @@ with tab2:
                 
                 # Formateamos el dataframe del JSON para que se vea limpio
                 df_receta = pd.DataFrame(ot['Receta_Mezcla_Lotes'])
-                col_d1.dataframe(df_receta[['p', 'l', 'c']].rename(columns={'p':'Producto', 'l':'Lote', 'c':'Cantidad(L/Kg)'}), hide_index=True)
+                
+                # 💡 FIX PROTECCIÓN: Por si hay Órdenes de Trabajo antiguas sin la columna 'banda'
+                if 'banda' not in df_receta.columns: df_receta['banda'] = 'N/A'
+                
+                col_d1.dataframe(df_receta[['p', 'l', 'c', 'banda']].rename(columns={'p':'Producto', 'l':'Lote', 'c':'Cantidad', 'banda':'Toxicidad'}), hide_index=True)
+                
+                # 🚨 NUEVO: Sistema de Alerta de Seguridad Laboral
+                if df_receta['banda'].str.contains('Rojo|Amarillo', na=False).any():
+                    col_d1.error("☣️ **ALERTA DE SEGURIDAD:** Mezcla de alta toxicidad. Obligatorio despachar **Equipo de Protección Personal (EPP)** completo (Traje, respirador, guantes) al aplicador.")
+                elif df_receta['banda'].str.contains('Azul', na=False).any():
+                    col_d1.warning("⚠️ **PRECAUCIÓN:** Mezcla moderadamente tóxica. Despachar mascarilla y guantes.")
                 
                 with col_d2:
                     st.markdown("**Firma de Salida Logística**")
@@ -290,10 +305,12 @@ with tab3:
     if not df_sal.empty and 'Fecha_Aplicacion' in df_sal.columns:
         # Cruzamos Salidas -> Ingresos (por ID) -> Productos (por Código)
         df_sal_det = pd.merge(df_sal, df_ing[['id', 'Codigo_Lote', 'Codigo_Producto']], left_on='Ingreso_ID', right_on='id', how='left')
-        df_sal_det = pd.merge(df_sal_det, df_prod[['Codigo', 'Producto', 'Unidad']], left_on='Codigo_Producto', right_on='Codigo', how='left')
         
-        # Filtramos las columnas que le sirven al almacenero para auditoría
-        cols_mostrar = ['Fecha_Aplicacion', 'Producto', 'Codigo_Lote', 'Cantidad_Usada', 'Unidad', 'Sector_Destino', 'Responsable', 'Labor']
+        # 💡 NUEVO: Traemos el Ingrediente Activo y la Banda a la auditoría final
+        df_sal_det = pd.merge(df_sal_det, df_prod[['Codigo', 'Producto', 'Unidad', 'Ingrediente_Activo', 'Banda_Toxicologica']], left_on='Codigo_Producto', right_on='Codigo', how='left')
+        
+        # Filtramos las columnas que le sirven al almacenero y certificador
+        cols_mostrar = ['Fecha_Aplicacion', 'Producto', 'Ingrediente_Activo', 'Codigo_Lote', 'Cantidad_Usada', 'Unidad', 'Banda_Toxicologica', 'Sector_Destino', 'Responsable', 'Labor']
         cols_existentes = [c for c in cols_mostrar if c in df_sal_det.columns]
         
         df_mostrar_salidas = df_sal_det[cols_existentes].sort_values(by='Fecha_Aplicacion', ascending=False)

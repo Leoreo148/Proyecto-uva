@@ -106,10 +106,10 @@ def modal_crear_producto():
         st.markdown("**2. Clasificación Técnica**")
         c_mod4, c_mod5, c_mod6 = st.columns(3)
         
-        # Categorías exactas del Excel
-        CATEGORIAS = ["Insecticida", "Acaricida", "Fungicida", "Herbicida", "Coadyuvante", "Regulador de pH", "Nematicida", "Foliar", "Fertilizante", "Otro"]
-        n_tipo = c_mod4.selectbox("Categoría", CATEGORIAS)
-        
+        # 💡 NUEVO: Añadimos Bactericida y Defoliante, y usamos multiselect
+        CATEGORIAS = ["Insecticida", "Acaricida", "Fungicida", "Bactericida", "Herbicida", "Defoliante", "Coadyuvante", "Regulador de pH", "Nematicida", "Foliar", "Fertilizante", "Otro"]
+        n_tipo = c_mod4.multiselect("Categoría (Puede elegir varias)", CATEGORIAS, placeholder="Ej: Insecticida, Acaricida")
+                  
         # Formulaciones comunes
         FORMULACIONES = ["Concentrado Soluble (SL)", "Concentrado Emulsionable (EC)", "Suspensión Concentrada (SC)", "Polvo Mojable (WP)", "Gránulos Dispersables (WG)", "Otro"]
         n_form = c_mod5.selectbox("Formulación", FORMULACIONES)
@@ -132,7 +132,7 @@ def modal_crear_producto():
                         "Codigo": n_cod.strip().upper(), 
                         "Producto": n_nom.strip().upper(), 
                         "Unidad": n_uni, 
-                        "Tipo_Accion": n_tipo,
+                        "Tipo_Accion": ", ".join(n_tipo) if n_tipo else "Otro",
                         "Marca": n_marca.strip().upper() if n_marca else None,
                         "Ingrediente_Activo": ingredientes_limpios,
                         "Formulacion": n_form,

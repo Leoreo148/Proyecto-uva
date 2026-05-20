@@ -160,9 +160,13 @@ with stylable_container(key="green_panel", css_styles="{ background-color: #1e3d
         filtro_kpi_stock = kpi1.checkbox("🚨 Mostrar SOLO Stock Crítico (< Mínimo)")
         filtro_kpi_venc = kpi2.checkbox("⏳ Mostrar SOLO Próximos a Vencer (< 15 días)")
         
-    # Columnas Extra
-    cols_detalle = ['Estado_Registro', 'Proveedor', 'Factura', 'Guia_Remision', 'Responsable', 'Precio_Unitario_PEN', 'Observaciones']
-    mostrar_extras = st.multiselect("⚙️ Mostrar columnas extra en la tabla:", options=cols_detalle, default=['Estado_Registro'])
+    # Columnas Extra (Ahora incluye las de agronomía)
+    cols_detalle = [
+        'Estado_Registro', 'Proveedor', 'Factura', 'Guia_Remision', 'Responsable', 
+        'Precio_Unitario_PEN', 'Observaciones', 
+        'Ingrediente_Activo', 'Marca', 'Formulacion', 'Banda_Toxicologica', 'Ficha_Tecnica_URL'
+    ]
+    mostrar_extras = st.multiselect("⚙️ Mostrar columnas extra en la tabla:", options=cols_detalle, default=['Estado_Registro', 'Ingrediente_Activo'])
 
 # Aplicar Filtros
 if not df_kardex.empty:
@@ -273,20 +277,29 @@ if not df_kardex.empty:
             st.cache_data.clear()
             st.rerun()
         
-        # 3. PANEL DE OBSERVACIONES (Con el Fix del "None")
+        # 3. PANEL DE OBSERVACIONES Y SEGURIDAD
         with c_acc3:
             with stylable_container("obs", css_styles="{ background-color: #e8f4fd; padding: 10px; border-radius: 8px; border: 1px solid #b3d7ff;}"):
                 if len(selected_records) == 1:
+                    row_data = selected_records[0]
                     # Filtro Anti-None
-                    obs_raw = str(selected_records[0].get('Observaciones', ''))
-                    if obs_raw.strip() == '' or obs_raw == 'None' or obs_raw == 'nan':
-                        obs_clean = "Sin notas."
-                    else:
-                        obs_clean = obs_raw
-                        
+                    obs_raw = str(row_data.get('Observaciones', ''))
+                    obs_clean = "Sin notas." if obs_raw.strip() == '' or obs_raw in ['None', 'nan'] else obs_raw
+                    
                     st.write(f"**💡 Observaciones del Lote:** {obs_clean}")
+                    
+                    # --- NUEVO: Indicadores de Seguridad y Ficha Técnica ---
+                    c_seg1, c_seg2 = st.columns(2)
+                    banda = str(row_data.get('Banda_Toxicologica', 'N/A'))
+                    ficha_url = str(row_data.get('Ficha_Tecnica_URL', ''))
+                    
+                    if banda and banda not in ['nan', 'None', 'N/A']:
+                        c_seg1.markdown(f"**☣️ Toxicidad:** {banda}")
+                        
+                    if ficha_url.startswith('http'):
+                        c_seg2.markdown(f"[📄 Abrir Ficha Técnica]({ficha_url})", help="Haz clic para ver la hoja de seguridad del fabricante.")
                 else:
-                    st.write("**💡 Observaciones:** Selecciona solo 1 producto para ver sus notas específicas.")
+                    st.write("**💡 Detalles:** Selecciona solo 1 producto para ver sus notas específicas y ficha técnica.")
 
 # --- 9. DIÁLOGOS DE GESTIÓN ---
 if st.session_state.editing_product_id:
@@ -298,33 +311,67 @@ if st.session_state.editing_product_id:
         
         @st.dialog("✏️ Editar Maestro")
         def show_edit_dialog(p):
-            # LA CAJA DEL FORMULARIO
             with st.form("form_ed"):
                 st.write(f"Editando: **{p['Producto']}**")
-                col_a, col_b = st.columns(2)
-                n_nombre = col_a.text_input("Nombre", value=p['Producto'])
-                n_min = col_b.number_input("Mínimo", value=float(p.get('Stock_Minimo', 0)))
-                n_car = col_a.number_input("Carencia", value=int(p.get('Periodo_Carencia_Dias', 0)))
-                n_tipo = col_b.selectbox("Tipo", ["Insecticida", "Fungicida", "Herbicida", "Fertilizante", "Regulador", "Agroquímicos", "N/A"])
-                n_inc = st.text_area("Incompatibilidades", value=p.get('Incompatible_Con', ''))
                 
-                # Único botón permitido dentro del form
+                # Fila 1
+                col_a, col_b = st.columns(2)
+                n_nombre = col_a.text_input("Nombre Comercial", value=str(p.get('Producto', '')))
+                n_marca = col_b.text_input("Marca / Laboratorio", value=str(p.get('Marca', '')) if pd.notna(p.get('Marca')) else '')
+                
+                # Fila 2
+                n_ing = st.text_input("Ingrediente Activo", value=str(p.get('Ingrediente_Activo', '')) if pd.notna(p.get('Ingrediente_Activo')) else '')
+                
+                # Fila 3
+                c1, c2, c3 = st.columns(3)
+                n_min = c1.number_input("Stock Mínimo", value=float(p.get('Stock_Minimo', 0)))
+                n_car = c2.number_input("Carencia (Días)", value=int(p.get('Periodo_Carencia_Dias', 0)))
+                
+                CATEGORIAS = ["Insecticida", "Acaricida", "Fungicida", "Herbicida", "Coadyuvante", "Regulador de pH", "Nematicida", "Foliar", "Fertilizante", "Otro", "N/A"]
+                tipo_actual = str(p.get('Tipo_Accion', 'N/A'))
+                idx_tipo = CATEGORIAS.index(tipo_actual) if tipo_actual in CATEGORIAS else 10
+                n_tipo = c3.selectbox("Categoría", CATEGORIAS, index=idx_tipo)
+                
+                # Fila 4
+                c4, c5 = st.columns(2)
+                FORMULACIONES = ["Concentrado Soluble (SL)", "Concentrado Emulsionable (EC)", "Suspensión Concentrada (SC)", "Polvo Mojable (WP)", "Gránulos Dispersables (WG)", "Otro"]
+                form_actual = str(p.get('Formulacion', 'Otro'))
+                idx_form = FORMULACIONES.index(form_actual) if form_actual in FORMULACIONES else 5
+                n_form = c4.selectbox("Formulación", FORMULACIONES, index=idx_form)
+                
+                BANDAS = ["Verde (Ligeramente Tóxico)", "Azul (Moderadamente Tóxico)", "Amarillo (Altamente Tóxico)", "Rojo (Extremadamente Tóxico)", "No Aplica"]
+                banda_actual = str(p.get('Banda_Toxicologica', 'No Aplica'))
+                idx_banda = BANDAS.index(banda_actual) if banda_actual in BANDAS else 4
+                n_banda = c5.selectbox("Banda Toxicológica", BANDAS, index=idx_banda)
+                
+                # Fila 5
+                n_ficha = st.text_input("URL Ficha Técnica", value=str(p.get('Ficha_Tecnica_URL', '')) if pd.notna(p.get('Ficha_Tecnica_URL')) else '')
+                n_inc = st.text_area("Incompatibilidades", value=str(p.get('Incompatible_Con', '')) if pd.notna(p.get('Incompatible_Con')) else '')
+                
                 submit = st.form_submit_button("Guardar Cambios")
                 
                 if submit:
+                    # Aplicamos el filtro .capitalize() también al editar
+                    ing_limpios = ", ".join([i.strip().capitalize() for i in n_ing.split(",") if i.strip()]) if n_ing else None
+                    
                     data_upd = {
-                        "Producto": n_nombre, 
+                        "Producto": n_nombre.strip().upper(),
+                        "Marca": n_marca.strip().upper() if n_marca else None,
+                        "Ingrediente_Activo": ing_limpios,
                         "Stock_Minimo": n_min, 
                         "Periodo_Carencia_Dias": n_car, 
-                        "Tipo_Accion": n_tipo, 
-                        "Incompatible_Con": n_inc
+                        "Tipo_Accion": n_tipo,
+                        "Formulacion": n_form,
+                        "Banda_Toxicologica": n_banda,
+                        "Ficha_Tecnica_URL": n_ficha.strip() if n_ficha else None,
+                        "Incompatible_Con": n_inc.strip() if n_inc else None
                     }
                     supabase.table('Productos').update(data_upd).eq('id', p['id']).execute()
                     st.session_state.editing_product_id = None
                     st.cache_data.clear()
                     st.rerun()
             
-            # 🛑 EL FIX: El botón normal va AFUERA del bloque 'with st.form', pero dentro del diálogo
+            # Botón de cancelar fuera del form
             if st.button("❌ Cancelar Edición"):
                 st.session_state.editing_product_id = None
                 st.rerun()

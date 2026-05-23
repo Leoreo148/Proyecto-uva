@@ -189,53 +189,52 @@ with tab1:
                     st.rerun()
 
 # ==========================================
-# TAB 2: ALMACÉN Y DESPACHO (La Firma Digital)
+# TAB 2: ALMACÉN Y DESPACHO
 # ==========================================
 with tab2:
-    st.subheader("Órdenes por Despachar al Tractor")
+    st.subheader("Órdenes por Despachar a Campo")
     pendientes = df_ord[df_ord['Status'] == 'En Preparación'] if not df_ord.empty else pd.DataFrame()
     
     if pendientes.empty:
-        st.info("No hay mezclas pendientes. El ingeniero no ha programado nada nuevo.")
+        st.info("No hay órdenes pendientes.")
     else:
         for _, ot in pendientes.iterrows():
-            with st.expander(f"📦 {ot['ID_Orden_Personalizado']} | Sector: {ot['Sector_Aplicacion']} | 🎯 {ot['Objetivo']}"):
+            dt = ot.get('Datos_Tecnicos', {}) if isinstance(ot.get('Datos_Tecnicos'), dict) else {}
+            
+            with st.expander(f"📦 {ot['ID_Orden_Personalizado']} | Parcela: {ot['Sector_Aplicacion']} | {dt.get('Categoria','')} N°{dt.get('Nro_App',1)}"):
                 col_d1, col_d2 = st.columns([3, 1])
                 
-                # Formateamos el dataframe del JSON para que se vea limpio
                 df_receta = pd.DataFrame(ot['Receta_Mezcla_Lotes'])
                 
-                # 💡 FIX PROTECCIÓN: Por si hay Órdenes de Trabajo antiguas sin la columna 'banda'
-                if 'banda' not in df_receta.columns: df_receta['banda'] = 'N/A'
-                
-                col_d1.dataframe(df_receta[['p', 'l', 'c', 'banda']].rename(columns={'p':'Producto', 'l':'Lote', 'c':'Cantidad', 'banda':'Toxicidad'}), hide_index=True)
-                
-                # 🚨 NUEVO: Sistema de Alerta de Seguridad Laboral
-                if df_receta['banda'].str.contains('Rojo|Amarillo', na=False).any():
-                    col_d1.error("☣️ **ALERTA DE SEGURIDAD:** Mezcla de alta toxicidad. Obligatorio despachar **Equipo de Protección Personal (EPP)** completo (Traje, respirador, guantes) al aplicador.")
-                elif df_receta['banda'].str.contains('Azul', na=False).any():
-                    col_d1.warning("⚠️ **PRECAUCIÓN:** Mezcla moderadamente tóxica. Despachar mascarilla y guantes.")
+                # 💡 Creamos una columna visual para indicarle al almacenero el orden estricto (1, 2, 3...)
+                df_receta.insert(0, 'Paso', range(1, 1 + len(df_receta)))                
+                col_d1.markdown("🧪 **Orden Estricto de Mezcla en Tanque:**")
+                col_d1.dataframe(df_receta[['Paso', 'p', 'l', 'c']].rename(columns={'p':'Producto', 'l':'Lote', 'c':'Cantidad'}), hide_index=True, use_container_width=True)
                 
                 with col_d2:
                     st.markdown("**Firma de Salida Logística**")
-                    # AUDITORÍA: Almacenero obligatorio
-                    resp_alm = st.text_input("Nombre Responsable Almacén*", key=f"resp_{ot['id']}", placeholder="Ej: Carlos M.")
+                    resp_alm = st.text_input("Nombre Responsable*", key=f"resp_{ot['id']}", placeholder="Ej: Miguel")
                     
-                    if st.button("✅ Confirmar y Descargar Stock", key=f"btn_{ot['id']}", type="primary"):
+                    if st.button("✅ Confirmar Salida", key=f"btn_{ot['id']}", type="primary"):
                         if resp_alm.strip():
                             batch_salidas = []
                             for insumo in ot['Receta_Mezcla_Lotes']:
+                                # Mapeo exacto al nuevo SQL diseñado para tu amigo
                                 batch_salidas.append({
                                     "Fecha_Aplicacion": ot['Fecha_Programada'],
                                     "Ingreso_ID": insumo['id'],
                                     "Cantidad_Usada": insumo['c'],
-                                    "Sector_Destino": ot['Sector_Aplicacion'],
-                                    "Objetivo_Tratamiento": ot['Objetivo'],
+                                    "Parcela_Destino": ot['Sector_Aplicacion'],
+                                    "Corte_Campana": dt.get('Corte', ''),
+                                    "Fase_Cultivo": dt.get('Fase', ''),
+                                    "Categoria_Labor": dt.get('Categoria', ''),
+                                    "Nro_Aplicacion": dt.get('Nro_App', 1),
+                                    "Metodo_Aplicacion": dt.get('Metodo', ''),
+                                    "Volumen_Agua_Lts": dt.get('Agua_Lts', 0.0),
                                     "Responsable": resp_alm,
-                                    "Labor": "Aplicación OT"
+                                    "Observacion_Dosis": dt.get('Obs_Dosis', '')
                                 })
                             
-                            # Transacción doble: Quita stock y cambia estado
                             supabase.table('Salidas').insert(batch_salidas).execute()
                             supabase.table('Ordenes_de_Trabajo').update({"Status": "Finalizada"}).eq('id', ot['id']).execute()
                             
@@ -243,7 +242,8 @@ with tab2:
                             st.cache_data.clear()
                             st.rerun()
                         else:
-                            st.error("⚠️ La firma del responsable es obligatoria por auditoría.")          
+                            st.error("⚠️ La firma es obligatoria.")   
+                            
 # ==========================================
 # TAB 3: HISTORIAL Y KPIs DE COSTOS (Finanzas)
 # ==========================================

@@ -38,8 +38,7 @@ def cargar_catalogos():
     maq = supabase.table('Maquinaria').select("id, nombre").execute()
     
     # 💡 NUEVO: Traemos la Banda Toxicológica, Ficha e Ingrediente Activo
-    prod = supabase.table('Productos').select("Codigo, Producto, Unidad, Banda_Toxicologica, Ficha_Tecnica_URL, Ingrediente_Activo").execute()
-    
+    prod = supabase.table('Productos').select("Codigo, Producto, Unidad, Banda_Toxicologica, Ficha_Tecnica_URL, Ingrediente_Activo, Formulacion, Tipo_Accion").execute()
     ing = supabase.table('Ingresos').select("id, Codigo_Producto, Codigo_Lote, Cantidad_Ingresada, Precio_Unitario_PEN").execute()
     sal = supabase.table('Salidas').select("*").execute()
     ord_ = supabase.table('Ordenes_de_Trabajo').select("*").order('created_at', desc=True).execute()
@@ -57,6 +56,29 @@ def obtener_fefo(df_p, df_i, df_s):
     return pd.merge(df_res[df_res['Stock_Actual'] > 0], df_p, left_on='Codigo_Producto', right_on='Codigo')
 
 df_stock = obtener_fefo(df_prod, df_ing, df_sal)
+
+# --- 🧠 MOTOR INTELIGENTE DE ORDEN DE MEZCLA EN TANQUE ---
+def calcular_orden_mezcla(formulacion, categoria):
+    form = str(formulacion).upper() if pd.notna(formulacion) else ""
+    cat = str(categoria).upper() if pd.notna(categoria) else ""
+
+    if "REGULADOR DE PH" in cat: return 1
+    if "WSB" in form or "HIDROSOLUBLE" in form: return 2
+    if "SG" in form: return 3
+    if "WG" in form or "DISPERSABLE" in form: return 4
+    if "WP" in form or "MOJABLE" in form: return 5
+    if "SC" in form or "SUSPENSIÓN CONCENTRADA" in form: return 6
+    if "CS" in form or "ENCAPSULADA" in form: return 7
+    if "SE" in form or "SUSPOEMULSIÓN" in form: return 8
+    if "OD" in form or "OLEOSA" in form: return 9
+    if "EW" in form or "ACUOSA" in form: return 10
+    if "EC" in form or "EMULSIONABLE" in form: return 11
+    if "COADYUVANTE" in cat or "MOJANTE" in form or "SURFACTANTE" in form: return 12
+    if "SL" in form or "LIQUIDO SOLUBLE" in form: return 13
+    if "FOLIAR" in cat or "ABONO" in cat: return 14
+    if "ANTIDERIVA" in form: return 15
+    
+    return 99 # Si no tiene formulación, va al final del tanque por seguridad
 
 # --- 4. INTERFAZ PRINCIPAL ---
 st.title("⚗️ Centro de Mezclas y Auditoría Técnica")
@@ -148,7 +170,10 @@ with tab1:
                         costo_insumo = row['Cantidad_Total'] * precio_unitario
                         costo_total_mezcla += costo_insumo
                         
-                        # 💡 NUEVO: Adjuntamos la banda toxicológica para advertir al almacén
+                        # 💡 MOTOR DE MEZCLA: Evaluamos qué orden le toca
+                        rango_mezcla = calcular_orden_mezcla(info.get('Formulacion', ''), info.get('Tipo_Accion', ''))
+                        
+                        # 💡 Mantenemos la banda toxicológica Y agregamos el paso_orden temporal
                         receta_final.append({
                             "id": int(info['id']), 
                             "p": info['Producto'], 
@@ -156,8 +181,12 @@ with tab1:
                             "c": row['Cantidad_Total'],
                             "precio_u": precio_unitario,
                             "costo_total": costo_insumo,
-                            "banda": str(info.get('Banda_Toxicologica', 'No Aplica'))
+                            "banda": str(info.get('Banda_Toxicologica', 'No Aplica')),
+                            "paso_orden": rango_mezcla 
                         })
+
+                    # 💡 MAGIA PURA: Ordenamos la receta completa basándonos en el paso (del 1 al 15)
+                    receta_final = sorted(receta_final, key=lambda x: x['paso_orden'])
 
                     # Empaquetamos los costos dentro del diccionario de datos extra que ya definimos
                     datos_extra_json["Costo_Estimado_Total"] = costo_total_mezcla
@@ -172,7 +201,7 @@ with tab1:
                         "Fecha_Programada": str(f_prog),
                         "Sector_Aplicacion": sec_dest,
                         "Objetivo": obj_app,
-                        "Receta_Mezcla_Lotes": receta_final,
+                        "Receta_Mezcla_Lotes": receta_final, # ¡Aquí ya viaja perfectamente ordenada!
                         "Volumen_Hectarea": ha_dest,
                         "Marcha": int(marcha),
                         "Presion_Bar": float(presion),
@@ -180,7 +209,7 @@ with tab1:
                         "Color_Boquilla": config_barras,
                         "maquinaria_id": int(maq_id) if maq_id else None,
                         "operador_id": int(oper_id) if oper_id else None,
-                        "Datos_Tecnicos": datos_extra_json # Aquí viaja si es fertirriego o foliar limpiamente
+                        "Datos_Tecnicos": datos_extra_json 
                     }
                     
                     supabase.table('Ordenes_de_Trabajo').insert(ot_data).execute()
@@ -219,7 +248,6 @@ with tab2:
                         if resp_alm.strip():
                             batch_salidas = []
                             for insumo in ot['Receta_Mezcla_Lotes']:
-                                # Mapeo exacto al nuevo SQL diseñado para tu amigo
                                 batch_salidas.append({
                                     "Fecha_Aplicacion": ot['Fecha_Programada'],
                                     "Ingreso_ID": insumo['id'],

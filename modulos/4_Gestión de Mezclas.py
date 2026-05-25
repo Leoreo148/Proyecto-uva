@@ -248,29 +248,35 @@ with tab2:
                         if resp_alm.strip():
                             batch_salidas = []
                             for insumo in ot['Receta_Mezcla_Lotes']:
-                                batch_salidas.append({
-                                    "Fecha_Aplicacion": ot['Fecha_Programada'],
+                                # 💡 FIX ARQUITECTÓNICO: Mapeo limpio. Solo enviamos lo que existe.
+                                salida_dict = {
+                                    "Fecha_Aplicacion": ot.get('Fecha_Programada'),
                                     "Ingreso_ID": insumo['id'],
                                     "Cantidad_Usada": insumo['c'],
-                                    "Parcela_Destino": ot['Sector_Aplicacion'],
-                                    "Corte_Campana": dt.get('Corte', ''),
-                                    "Fase_Cultivo": dt.get('Fase', ''),
-                                    "Categoria_Labor": dt.get('Categoria', ''),
-                                    "Nro_Aplicacion": dt.get('Nro_App', 1),
-                                    "Metodo_Aplicacion": dt.get('Metodo', ''),
-                                    "Volumen_Agua_Lts": dt.get('Agua_Lts', 0.0),
                                     "Responsable": resp_alm,
-                                    "Observacion_Dosis": dt.get('Obs_Dosis', '')
-                                })
+                                    "Metodo_Aplicacion": dt.get('Metodo', ''),
+                                    
+                                    # ⚠️ REVISIÓN OBLIGATORIA EN TU SUPABASE:
+                                    # Las claves de la izquierda deben ser IDÉNTICAS al nombre de la columna en Supabase.
+                                    # Si tu tabla aún conserva el nombre viejo, cámbialo aquí a "Parcela_Destino" o "Categoria_Labor".
+                                    "Sector_Destino": ot.get('Sector_Aplicacion', ''),
+                                    "Labor": ot.get('Objetivo', '')
+                                }
+                                batch_salidas.append(salida_dict)
                             
-                            supabase.table('Salidas').insert(batch_salidas).execute()
-                            supabase.table('Ordenes_de_Trabajo').update({"Status": "Finalizada"}).eq('id', ot['id']).execute()
-                            
-                            st.success("Despacho exitoso. Kardex actualizado.")
-                            st.cache_data.clear()
-                            st.rerun()
+                            # 🛡️ Blindamos la ejecución con un bloque Try/Except
+                            try:
+                                supabase.table('Salidas').insert(batch_salidas).execute()
+                                supabase.table('Ordenes_de_Trabajo').update({"Status": "Finalizada"}).eq('id', ot['id']).execute()
+                                
+                                st.success("✅ Despacho exitoso. Kardex actualizado.")
+                                st.cache_data.clear()
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ API Error: Los nombres de las columnas en Python no coinciden con Supabase. Revisa tu base de datos: {e}")
+                                
                         else:
-                            st.error("⚠️ La firma es obligatoria.")   
+                            st.error("⚠️ La firma es obligatoria para la trazabilidad.")
                             
 # ==========================================
 # TAB 3: HISTORIAL Y KPIs DE COSTOS (Finanzas)

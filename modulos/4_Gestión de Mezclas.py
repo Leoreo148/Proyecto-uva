@@ -254,11 +254,6 @@ with tab2:
                                     "Ingreso_ID": insumo['id'],
                                     "Cantidad_Usada": insumo['c'],
                                     "Responsable": resp_alm,
-                                    "Metodo_Aplicacion": dt.get('Metodo', ''),
-                                    
-                                    # ⚠️ REVISIÓN OBLIGATORIA EN TU SUPABASE:
-                                    # Las claves de la izquierda deben ser IDÉNTICAS al nombre de la columna en Supabase.
-                                    # Si tu tabla aún conserva el nombre viejo, cámbialo aquí a "Parcela_Destino" o "Categoria_Labor".
                                     "Sector_Destino": ot.get('Sector_Aplicacion', ''),
                                     "Labor": ot.get('Objetivo', '')
                                 }

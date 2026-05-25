@@ -62,7 +62,7 @@ else:
         nombre_objetivo = tarea.get('Objetivo', "General")
         
         # 💡 SOLO MOSTRAMOS TAREAS FOLARES/MAQUINARIA AL TRACTORISTA
-        tipo_app = tarea.get('Tipo_Aplicacion', '')
+        tipo_app = str(tarea.get('Tipo_Aplicacion', '')) # 💡 FIX: Forzamos a que sea String
         if "Fertirriego" in tipo_app:
             continue # Saltamos las de riego, esas van para el casetero
             

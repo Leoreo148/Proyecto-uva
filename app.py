@@ -97,7 +97,7 @@ else:
     # NUEVO MÓDULO DE COSECHA
     p_cosecha = st.Page("modulos/5_Gestión_de_Cosecha.py", title="Control de Cosecha", icon="🍇")
     
-    # NUEVO CENTRO FINANCIERO Finanzas (Reemplaza al dashboard vacío)
+    # NUEVO CENTRO FINANCIERO
     p_dash_finanzas = st.Page("modulos/6_Dashboard_Finanzas.py", title="Dashboard Finanzas", icon="💵")
     p_rend_raleo = st.Page("modulos/5_Rendimiento_Raleo.py", title="Rendimiento Raleo", icon="📈")
     p_dash_general = st.Page("modulos/6_Dashboard_General.py", title="Dashboard General Fundo", icon="🏢")
@@ -110,7 +110,7 @@ else:
             "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo, p_cosecha],
             "Logística y Almacén": [p_kardex, p_ingreso, p_mezclas],
             "Maquinaria": [p_tractor],
-            "Reportes y Finanzas": [p_cosecha, p_dash_finanzas, p_rend_raleo, p_dash_sanidad],
+            "Reportes y Finanzas": [p_dash_finanzas, p_rend_raleo, p_dash_sanidad], # 💡 FIX: Eliminado p_cosecha duplicado aquí
             "Mantenimiento BD": [p_carga_masiva]
         }
 
@@ -118,11 +118,9 @@ else:
         paginas = [p_dash_sanidad]
         
     elif rol == "Logistica":
-        # Miguel ahora también ve el control de Cosecha para registrar la fruta que entra al centro de acopio
         paginas = [p_kardex, p_ingreso, p_mezclas, p_cosecha]
         
     elif rol == "Finanzas":
-        # Don Edgar ahora lee el nuevo Dashboard Financiero conectado a los sueldos del personal
         paginas = [p_dash_finanzas, p_rend_raleo, p_kardex]
         
     elif rol == "Evaluador":
@@ -134,7 +132,7 @@ else:
             "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo, p_cosecha],
             "Logística y Almacén": [p_kardex, p_ingreso, p_mezclas],
             "Maquinaria": [p_tractor],
-            "Reportes y Finanzas": [p_cosecha, p_dash_finanzas, p_rend_raleo, p_dash_sanidad],
+            "Reportes y Finanzas": [p_dash_finanzas, p_rend_raleo, p_dash_sanidad], # 💡 FIX: Eliminado p_cosecha duplicado aquí
             "Mantenimiento": [p_carga_masiva]
         }
     else:

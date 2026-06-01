@@ -97,8 +97,8 @@ else:
     # 🍇 NUEVO MÓDULO DE COSECHA
     p_cosecha = st.Page("modulos/5_Gestión_de_Cosecha.py", title="Control de Cosecha", icon="🍇")
     
-    # 💰 NUEVO CENTRO FINANCIERO OPTIMIZADO (Reemplaza al dashboard vacío)
-    p_dash_finanzas = st.Page("modulos/6_Dashboard_Financiero.py", title="Dashboard Finanzas", icon="💵")
+    # 💰 NUEVO CENTRO FINANCIERO Finanzas (Reemplaza al dashboard vacío)
+    p_dash_finanzas = st.Page("modulos/6_Dashboard_Finanzas.py", title="Dashboard Finanzas", icon="💵")
     p_rend_raleo = st.Page("modulos/5_Rendimiento_Raleo.py", title="Rendimiento Raleo", icon="📈")
     
     p_dash_general = st.Page("modulos/6_Dashboard_General.py", title="Dashboard General Fundo", icon="🏢")

@@ -94,13 +94,12 @@ else:
     p_kardex = st.Page("modulos/4_Gestión_de_Productos_y_Kardex.py", title="Productos y Kardex", icon="📦")
     p_ingreso = st.Page("modulos/4_Registrar_Ingreso.py", title="Registrar Ingreso", icon="✅")
     
-    # 🍇 NUEVO MÓDULO DE COSECHA
+    # NUEVO MÓDULO DE COSECHA
     p_cosecha = st.Page("modulos/5_Gestión_de_Cosecha.py", title="Control de Cosecha", icon="🍇")
     
-    # 💰 NUEVO CENTRO FINANCIERO Finanzas (Reemplaza al dashboard vacío)
+    # NUEVO CENTRO FINANCIERO Finanzas (Reemplaza al dashboard vacío)
     p_dash_finanzas = st.Page("modulos/6_Dashboard_Finanzas.py", title="Dashboard Finanzas", icon="💵")
     p_rend_raleo = st.Page("modulos/5_Rendimiento_Raleo.py", title="Rendimiento Raleo", icon="📈")
-    
     p_dash_general = st.Page("modulos/6_Dashboard_General.py", title="Dashboard General Fundo", icon="🏢")
     p_carga_masiva = st.Page("modulos/99_Carga_Masiva.py", title="Carga Masiva", icon="🚀")
 
@@ -111,7 +110,7 @@ else:
             "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo, p_cosecha],
             "Logística y Almacén": [p_kardex, p_ingreso, p_mezclas],
             "Maquinaria": [p_tractor],
-            "Reportes y Finanzas": [p_dash_finanzas, p_rend_raleo, p_dash_sanidad],
+            "Reportes y Finanzas": [p_cosecha, p_dash_finanzas, p_rend_raleo, p_dash_sanidad],
             "Mantenimiento BD": [p_carga_masiva]
         }
 
@@ -135,7 +134,7 @@ else:
             "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo, p_cosecha],
             "Logística y Almacén": [p_kardex, p_ingreso, p_mezclas],
             "Maquinaria": [p_tractor],
-            "Reportes y Finanzas": [p_dash_finanzas, p_rend_raleo, p_dash_sanidad],
+            "Reportes y Finanzas": [p_cosecha, p_dash_finanzas, p_rend_raleo, p_dash_sanidad],
             "Mantenimiento": [p_carga_masiva]
         }
     else:

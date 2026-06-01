@@ -94,7 +94,11 @@ else:
     p_kardex = st.Page("modulos/4_Gestión_de_Productos_y_Kardex.py", title="Productos y Kardex", icon="📦")
     p_ingreso = st.Page("modulos/4_Registrar_Ingreso.py", title="Registrar Ingreso", icon="✅")
     
-    p_dash_finanzas = st.Page("modulos/5_Dashboard_Finanzas.py", title="Dashboard Finanzas", icon="💵")
+    # 🍇 NUEVO MÓDULO DE COSECHA
+    p_cosecha = st.Page("modulos/5_Gestión_de_Cosecha.py", title="Control de Cosecha", icon="🍇")
+    
+    # 💰 NUEVO CENTRO FINANCIERO OPTIMIZADO (Reemplaza al dashboard vacío)
+    p_dash_finanzas = st.Page("modulos/6_Dashboard_Financiero.py", title="Dashboard Finanzas", icon="💵")
     p_rend_raleo = st.Page("modulos/5_Rendimiento_Raleo.py", title="Rendimiento Raleo", icon="📈")
     
     p_dash_general = st.Page("modulos/6_Dashboard_General.py", title="Dashboard General Fundo", icon="🏢")
@@ -102,35 +106,33 @@ else:
 
     # 2. Armar el menú inteligente y en ruteo por cada Rol
     if rol == "Programador":
-        # TÚ ves absolutamente todo, incluyendo los módulos de mantenimiento "peligrosos"
         paginas = {
             "Control Central": [p_dash_general],
-            "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo],
+            "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo, p_cosecha],
             "Logística y Almacén": [p_kardex, p_ingreso, p_mezclas],
             "Maquinaria": [p_tractor],
             "Reportes y Finanzas": [p_dash_finanzas, p_rend_raleo, p_dash_sanidad],
-            "Mantenimiento BD": [p_carga_masiva] # <-- Esto es exclusivo tuyo
-            }
+            "Mantenimiento BD": [p_carga_masiva]
+        }
 
     elif rol == "Sanidad":
         paginas = [p_dash_sanidad]
         
     elif rol == "Logistica":
-        # Miguel (mezclas) ahora ve exclusivamente el control de almacenes y mezclas
-        paginas = [p_kardex, p_ingreso, p_mezclas]
+        # Miguel ahora también ve el control de Cosecha para registrar la fruta que entra al centro de acopio
+        paginas = [p_kardex, p_ingreso, p_mezclas, p_cosecha]
         
     elif rol == "Finanzas":
-        # Edgar (costos) ve los balances monetarios y el inventario para auditorías
+        # Don Edgar ahora lee el nuevo Dashboard Financiero conectado a los sueldos del personal
         paginas = [p_dash_finanzas, p_rend_raleo, p_kardex]
         
     elif rol == "Evaluador":
         paginas = [p_sanidad, p_mosca, p_fenologia, p_baya]
         
     elif rol == "Admin":
-        # El Ingeniero Segundo ve absolutamente todo organizado por departamentos
         paginas = {
             "Control Central": [p_dash_general],
-            "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo],
+            "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo, p_cosecha],
             "Logística y Almacén": [p_kardex, p_ingreso, p_mezclas],
             "Maquinaria": [p_tractor],
             "Reportes y Finanzas": [p_dash_finanzas, p_rend_raleo, p_dash_sanidad],

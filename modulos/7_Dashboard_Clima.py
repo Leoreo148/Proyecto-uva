@@ -114,7 +114,7 @@ if df_clima is not None and not df_clima.empty:
     
     # Línea roja para peligro de estrés
     fig1.add_hline(y=35, line_dash="dot", line_color="red", annotation_text="Peligro Estrés (>35°C)")
-    fig1.add_vline(x=datetime.now(), line_dash="dash", line_color="green", annotation_text="AHORA")
+    fig1.add_vline(x=datetime.now().strftime("%Y-%m-%d %H:%M"), line_dash="dash", line_color="green")
     
     st.plotly_chart(fig1, use_container_width=True)
     

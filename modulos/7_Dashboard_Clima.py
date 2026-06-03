@@ -67,11 +67,39 @@ if df_clima.empty:
 if df_clima is not None and not df_clima.empty:
     st.caption(f"📍 Origen de la información: {origen_datos}")
     
+    # --- FILTROS DE FECHA (Ojo de Halcón / Hormiga) ---
+    st.markdown("### 🔎 Filtro de Tiempo")
+    
+    fecha_minima = df_clima["fecha_hora"].min().date()
+    fecha_maxima = df_clima["fecha_hora"].max().date()
+    
+    rango_fechas = st.date_input(
+        "Selecciona el rango de fechas para analizar (puedes seleccionar un solo día o varios meses):",
+        value=(fecha_minima, fecha_maxima),
+        min_value=fecha_minima,
+        max_value=fecha_maxima
+    )
+    
+    # Procesar el filtro
+    if len(rango_fechas) == 2:
+        fecha_inicio, fecha_fin = rango_fechas
+        mask = (df_clima['fecha_hora'].dt.date >= fecha_inicio) & (df_clima['fecha_hora'].dt.date <= fecha_fin)
+        df_filtrado = df_clima.loc[mask]
+    else:
+        # Si el usuario solo seleccionó un día (no un rango de dos días)
+        fecha_inicio = rango_fechas[0]
+        mask = df_clima['fecha_hora'].dt.date == fecha_inicio
+        df_filtrado = df_clima.loc[mask]
+        
+    if df_filtrado.empty:
+        st.warning("No hay datos en el rango de fechas seleccionado.")
+        st.stop()
+    
     # --- METRICAS ACTUALES ---
     df_actual = df_clima[df_clima["fecha_hora"] <= datetime.now()].iloc[-1]
     
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Temperatura Actual", f"{df_actual['temp_out']} °C")
+    col1.metric("Temperatura Actual (Última Medición)", f"{df_actual['temp_out']} °C")
     col2.metric("Humedad Relativa", f"{df_actual['hum_out']} %")
     col3.metric("Velocidad Viento", f"{df_actual['viento_vel']} km/h")
     col4.metric("Radiación Solar", f"{df_actual.get('radiacion_solar', 0)} W/m²")
@@ -79,9 +107,9 @@ if df_clima is not None and not df_clima.empty:
     st.markdown("---")
     
     # --- ANALISIS AGRONÓMICO (UVA) ---
-    st.subheader("🍇 Análisis de Impacto en Planta (Últimos 14 días)")
+    st.subheader("🍇 Análisis de Impacto en Planta (Periodo Seleccionado)")
     
-    df_pasado = df_clima[df_clima["fecha_hora"] < datetime.now()]
+    df_pasado = df_filtrado[df_filtrado["fecha_hora"] < datetime.now()]
     
     # Horas frío (Temp < 7°C, aunque para algunas uvas se usa < 10°C)
     horas_frio = len(df_pasado[df_pasado["temp_out"] < 7.2])
@@ -108,7 +136,7 @@ if df_clima is not None and not df_clima.empty:
     
     # --- GRÁFICOS ---
     st.subheader("📈 Evolución de Temperatura y Humedad")
-    fig1 = px.line(df_clima, x="fecha_hora", y=["temp_out", "hum_out"], 
+    fig1 = px.line(df_filtrado, x="fecha_hora", y=["temp_out", "hum_out"], 
                    labels={"value": "Medición", "variable": "Indicador"},
                    title="Temperatura (°C) y Humedad (%)")
     
@@ -118,9 +146,9 @@ if df_clima is not None and not df_clima.empty:
     
     st.plotly_chart(fig1, use_container_width=True)
     
-    if "radiacion_solar" in df_clima.columns:
+    if "radiacion_solar" in df_filtrado.columns:
         st.subheader("☀️ Radiación Solar (W/m²)")
-        fig2 = px.area(df_clima, x="fecha_hora", y="radiacion_solar", color_discrete_sequence=["orange"])
+        fig2 = px.area(df_filtrado, x="fecha_hora", y="radiacion_solar", color_discrete_sequence=["orange"])
         st.plotly_chart(fig2, use_container_width=True)
 
 else:

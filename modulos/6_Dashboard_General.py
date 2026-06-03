@@ -58,6 +58,7 @@ def cargar_datos_maestros():
     df_raleo = fetch_table('Control_Raleo')
     df_ots = fetch_table('Ordenes_de_Trabajo')
     df_diam = fetch_table('Diametro_Baya')
+    df_clima = fetch_table('Clima')
     
     # Procesamiento básico si hay datos
     if not df_mosca.empty: df_mosca['Fecha'] = pd.to_datetime(df_mosca['Fecha'])
@@ -65,9 +66,9 @@ def cargar_datos_maestros():
     if not df_ots.empty: df_ots['Fecha_Programada'] = pd.to_datetime(df_ots['Fecha_Programada'])
     if not df_diam.empty: df_diam['Fecha'] = pd.to_datetime(df_diam['Fecha'])
     
-    return df_mosca, df_raleo, df_ots, df_diam
+    return df_mosca, df_raleo, df_ots, df_diam, df_clima
 
-df_mosca, df_raleo, df_ots, df_diam = cargar_datos_maestros()
+df_mosca, df_raleo, df_ots, df_diam, df_clima = cargar_datos_maestros()
 
 # --- 4. CÁLCULO DE KPIs ---
 TARIFA_POR_RACIMO = 0.07
@@ -105,12 +106,19 @@ if not df_diam.empty:
     if not cols_numericas.empty:
         promedio_baya_global = df_ultimo_diam[cols_numericas].mean().mean()
 
+# KPI Clima
+temp_actual = "N/A"
+if not df_clima.empty:
+    df_clima['fecha_hora'] = pd.to_datetime(df_clima['fecha_hora'])
+    ultimo_clima = df_clima.sort_values(by='fecha_hora', ascending=False).iloc[0]
+    temp_actual = f"{ultimo_clima['temp_out']} °C"
+
 # --- 5. INTERFAZ TÁCTICA ---
 st.title("🏢 Panel de Control Estratégico")
 st.write(f"Resumen operativo y financiero actualizado al **{datetime.now().strftime('%d/%m/%Y %H:%M')}**")
 
 # FILA 1: TARJETAS DE MÉTRICAS (KPIs)
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
     st.markdown(f"""
@@ -141,6 +149,14 @@ with col4:
         <div class="kpi-card kpi-amarillo">
             <h4 style="margin:0; color:#7f8c8d; font-size:14px;">📏 Calibre Promedio Actual</h4>
             <h2 style="margin:0; color:#2c3e50;">{promedio_baya_global:.2f} <span style="font-size:14px;">mm</span></h2>
+        </div>
+    """, unsafe_allow_html=True)
+
+with col5:
+    st.markdown(f"""
+        <div class="kpi-card" style="border-left-color: #9b59b6;">
+            <h4 style="margin:0; color:#7f8c8d; font-size:14px;">🌤️ Temp. Fundo</h4>
+            <h2 style="margin:0; color:#2c3e50;">{temp_actual}</h2>
         </div>
     """, unsafe_allow_html=True)
 

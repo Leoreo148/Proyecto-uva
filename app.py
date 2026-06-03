@@ -102,11 +102,12 @@ else:
     p_rend_raleo = st.Page("modulos/5_Rendimiento_Raleo.py", title="Rendimiento Raleo", icon="📈")
     p_dash_general = st.Page("modulos/6_Dashboard_General.py", title="Dashboard General Fundo", icon="🏢")
     p_carga_masiva = st.Page("modulos/99_Carga_Masiva.py", title="Carga Masiva", icon="🚀")
+    p_clima = st.Page("modulos/7_Dashboard_Clima.py", title="Estación Meteorológica", icon="🌤️")
 
     # 2. Armar el menú inteligente y en ruteo por cada Rol
     if rol == "Programador":
         paginas = {
-            "Control Central": [p_dash_general],
+            "Control Central": [p_dash_general, p_clima],
             "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo, p_cosecha],
             "Logística y Almacén": [p_kardex, p_ingreso, p_mezclas],
             "Maquinaria": [p_tractor],
@@ -115,7 +116,7 @@ else:
         }
 
     elif rol == "Sanidad":
-        paginas = [p_dash_sanidad]
+        paginas = [p_dash_sanidad, p_clima]
         
     elif rol == "Logistica":
         paginas = [p_kardex, p_ingreso, p_mezclas, p_cosecha]
@@ -128,7 +129,7 @@ else:
         
     elif rol == "Admin":
         paginas = {
-            "Control Central": [p_dash_general],
+            "Control Central": [p_dash_general, p_clima],
             "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo, p_cosecha],
             "Logística y Almacén": [p_kardex, p_ingreso, p_mezclas],
             "Maquinaria": [p_tractor],

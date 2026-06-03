@@ -155,20 +155,17 @@ def generar_kardex(df_p, df_i, df_s):
     # --- KPIs derivados ---
     PERIODO_DIAS = 180  # Ventana de cálculo: últimos 6 meses
 
-    # Rotación = Total salidas / Stock actual (cuántas veces se "giró" el inventario)
-    df_por_producto['Rotacion'] = np.where(
-        df_por_producto['Stock_Total'] > 0,
-        (df_por_producto['Total_Salidas'] / df_por_producto['Stock_Total']).round(2),
-        np.nan
-    )
-
-    # Días de Cobertura = Stock actual / consumo diario promedio
+    # ✅ División segura: reemplazamos 0 con NaN ANTES de dividir.
+    # np.where evalúa ambas ramas siempre, por eso no podemos usarlo con divisiones.
+    stock_safe   = df_por_producto['Stock_Total'].replace(0, np.nan)
     consumo_diario = df_por_producto['Total_Salidas'] / PERIODO_DIAS
-    df_por_producto['Dias_Cobertura'] = np.where(
-        consumo_diario > 0,
-        (df_por_producto['Stock_Total'] / consumo_diario).round(0).astype('Int64'),
-        pd.NA   # Sin consumo = cobertura indefinida
-    )
+    consumo_safe = consumo_diario.replace(0, np.nan)
+
+    # Rotación = Total salidas / Stock actual  (NaN si sin stock)
+    df_por_producto['Rotacion'] = (df_por_producto['Total_Salidas'] / stock_safe).round(2)
+
+    # Días de Cobertura = Stock actual / consumo diario  (NaN si sin consumo)
+    df_por_producto['Dias_Cobertura'] = (df_por_producto['Stock_Total'] / consumo_safe).round(0)
 
     # Stock Muerto = tiene stock pero 0 salidas registradas
     df_por_producto['Stock_Muerto'] = (

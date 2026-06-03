@@ -289,7 +289,10 @@ with tab2:
 # ==========================================
 with tab3:
     st.subheader("Auditoría Financiera de Aplicaciones en Campo")
-    finalizadas = df_ord[df_ord['Status'] == 'Finalizada'] if not df_ord.empty else pd.DataFrame()
+    # ✅ FIX CRÍTICO: Incluir "Aplicada en Campo" para que las órdenes no desaparezcan del historial
+    # cuando el tractorista las cierra. Ambos estados representan una orden completada.
+    estados_completados = ['Finalizada', 'Aplicada en Campo']
+    finalizadas = df_ord[df_ord['Status'].isin(estados_completados)] if not df_ord.empty else pd.DataFrame()
     
     if finalizadas.empty:
         st.info("Aún no hay órdenes finalizadas para mostrar estadísticas.")

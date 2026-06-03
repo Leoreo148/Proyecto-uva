@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import math
 from supabase import create_client
 from datetime import datetime
 
@@ -154,7 +155,20 @@ for col in (FECHAS_OPT if "FECHAS_OPT" in dir() else []):
         # NaT → None (no eliminamos la fila)
         df_mig[col] = df_mig[col].where(df_mig[col].notna(), None)
 
-# Escudo Anti-NaN → None para Supabase
+# ✅ Escudo Anti-NaN ultra robusto: convierte CUALQUIER nan/NaN/None a None de Python
+# Esto cubre floats, strings 'nan', 'NaT', etc.
+def limpiar_nan(valor):
+    if valor is None:
+        return None
+    if isinstance(valor, float) and math.isnan(valor):
+        return None
+    if isinstance(valor, str) and valor.strip().lower() in ('nan', 'nat', 'none', ''):
+        return None
+    return valor
+
+def limpiar_registro(record: dict) -> dict:
+    return {k: limpiar_nan(v) for k, v in record.items()}
+
 df_mig = df_mig.astype(object).where(pd.notnull(df_mig), None)
 
 # Ingrediente activo: capitalizar bonito si existe
@@ -186,7 +200,7 @@ with col_info:
 # ─────────────────────────────────────────────
 st.divider()
 if st.button(f"🚀 Iniciar Importación a '{TARGET_TABLE}'", type="primary", use_container_width=True):
-    data_dict    = df_mig.to_dict(orient="records")
+    data_dict    = [limpiar_registro(r) for r in df_mig.to_dict(orient="records")]
     progress     = st.progress(0)
     status_text  = st.empty()
     insertados   = 0

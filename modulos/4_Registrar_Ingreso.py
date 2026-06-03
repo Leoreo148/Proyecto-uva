@@ -119,11 +119,11 @@ def modal_crear_producto():
         CATEGORIAS = ["Insecticida", "Acaricida", "Fungicida", "Bactericida", "Herbicida", "Defoliante",
                       "Coadyuvante", "Regulador de pH", "Nematicida", "Foliar", "Fertilizante", "Otro"]
         n_tipo = c_mod4.multiselect("Categoría", CATEGORIAS, placeholder="Ej: Insecticida")
-        FORMULACIONES = ["Reguladores de pH", "Bolsas hidrosolubles (WSB)", "Gránulos solubles (SG)",
-                         "Gránulos dispersables (WG)", "Polvos mojables (WP)", "Suspensiones concentradas (SC)",
-                         "Suspensiones encapsuladas (CS)", "Suspoemulsiones (SE)", "Suspensiones concentradas oleosas (OD)",
-                         "Emulsiones acuosas (EW)", "Emulsiones concentradas (EC)", "Surfactantes / mojantes",
-                         "Líquidos solubles (SL)", "Abonos foliares", "Líquidos antideriva"]
+        FORMULACIONES = ["pH — Reguladores de pH", "WSB — Bolsas hidrosolubles", "SG  — Gránulos solubles",
+                         "WG  — Gránulos dispersables", "WP  — Polvos mojables", "SC  — Suspensiones concentradas",
+                         "CS  — Suspensiones encapsuladas", "SE  — Suspoemulsiones", "OD  — Suspensiones concentradas oleosas",
+                         "EW  — Emulsiones acuosas", "EC  — Emulsiones concentradas", "SL  — Líquidos solubles",
+                         "Surfactante / Mojante", "Abono foliar", "Antideriva"]
         n_form = c_mod5.selectbox("Formulación", FORMULACIONES)
         n_uni = c_mod6.selectbox("Unidad Base", ["L", "Kg", "Gal", "Saco"])
 

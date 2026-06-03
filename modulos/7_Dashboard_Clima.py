@@ -35,9 +35,9 @@ def obtener_datos_clima_supabase():
 
 @st.cache_data(ttl=3600)
 def obtener_datos_clima_satelite():
-    # Coordenadas aproximadas (Puedes cambiarlas a las exactas de tu fundo)
-    lat = -5.19 # Piura, Peru (ejemplo)
-    lon = -80.62
+    # Coordenadas exactas del Fundo (Pacanguilla)
+    lat = -7.156903
+    lon = -79.445073
     
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,shortwave_radiation&past_days=14&forecast_days=3&timezone=auto"
     

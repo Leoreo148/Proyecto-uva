@@ -217,7 +217,7 @@ with stylable_container(key="green_panel", css_styles="{ background-color: #1e3d
                                           help="Solo funciona si configuras el Stock Mínimo en cada producto (editar producto maestro)")
         filtro_kpi_venc  = kpi2.checkbox("⏳ Por Vencer (< 15 días)",
                                           help="Solo alerta lotes que aún tienen stock real, no lotes vacíos")
-        filtro_kpi_muerto= kpi3.checkbox("💀 Stock Muerto (sin salidas)",
+        filtro_kpi_muerto= kpi3.checkbox("Stock Muerto (sin salidas)",
                                           help="Productos con stock pero sin ninguna salida registrada")
 
     cols_detalle  = ['Ingrediente_Activo', 'Marca', 'Formulacion', 'Banda_Toxicologica',

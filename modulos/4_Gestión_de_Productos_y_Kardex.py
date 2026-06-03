@@ -281,7 +281,7 @@ if not df_vista.empty:
         if row['Stock_Total'] <= 0:                                              return "🔴 Sin Stock"
         if row.get('Stock_Minimo', 0) > 0 and row['Stock_Total'] < row['Stock_Minimo']: return "🟡 Stock Bajo"
         if row['Prox_Vencimiento'] < 15:                                         return "⏳ Por Vencer"
-        if row.get('Stock_Muerto', False):                                       return "💀 Sin Movimiento"
+        if row.get('Stock_Muerto', False):                                       return "Sin Movimiento"
         return "🟢 OK"
 
     df_vista = df_vista.copy()

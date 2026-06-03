@@ -120,7 +120,16 @@ def generar_kardex(df_p, df_i, df_s):
     else:
         salidas_por_prod = pd.DataFrame(columns=['Codigo', 'Total_Salidas'])
 
-    # Vista agrupada por PRODUCTO
+    # ✅ Calculamos Prox_Vencimiento FUERA del groupby para evitar el KeyError de índices
+    # Solo contamos lotes que aún tienen stock real (evita falsas alarmas de lotes vacíos)
+    venc_con_stock = (
+        df_lotes_con_stock.groupby('Codigo')['Dias_para_Vencer']
+        .min()
+        .reset_index()
+        .rename(columns={'Dias_para_Vencer': 'Prox_Vencimiento'})
+    )
+
+    # Vista agrupada por PRODUCTO (sin Prox_Vencimiento por ahora)
     df_por_producto = (
         df_lotes.groupby(['Codigo', 'Producto', 'Unidad', 'Tipo_Accion', 'Stock_Minimo', 'Activo',
                           'Ingrediente_Activo', 'Marca', 'Formulacion', 'Banda_Toxicologica', 'Ficha_Tecnica_URL'],
@@ -129,13 +138,15 @@ def generar_kardex(df_p, df_i, df_s):
             Stock_Total    =('Stock_Lote',    'sum'),
             Valorizado_PEN =('Valorizado_PEN', 'sum'),
             N_Lotes        =('Codigo_Lote',    'count'),
-            # ✅ FIX: vencimiento solo de lotes con stock > 0
-            Prox_Vencimiento=('Dias_para_Vencer',
-                              lambda x: df_lotes_con_stock.loc[x.index, 'Dias_para_Vencer'].min()
-                              if len(df_lotes_con_stock.loc[x.index]) > 0 else 999),
         )
         .reset_index()
     )
+
+    # Incorporamos Prox_Vencimiento limpio (999 = sin vencimiento próximo)
+    df_por_producto = pd.merge(df_por_producto, venc_con_stock, on='Codigo', how='left')
+    df_por_producto['Prox_Vencimiento'] = df_por_producto['Prox_Vencimiento'].fillna(999).astype(int)
+
+
 
     # Unir Total_Salidas
     df_por_producto = pd.merge(df_por_producto, salidas_por_prod, on='Codigo', how='left')

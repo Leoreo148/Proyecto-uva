@@ -83,7 +83,7 @@ def generar_kardex(df_p, df_i, df_s):
     df_i['Estado_Registro'] = df_i['Estado_Registro'].fillna('Completo 🟢')
 
     if not df_s.empty:
-        gastado   = df_s.groupby('Ingreso_ID')['Cantidad_Usada'].sum().reset_index()
+        gastado    = df_s.groupby('Ingreso_ID')['Cantidad_Usada'].sum().reset_index()
         df_balance = pd.merge(df_i, gastado, left_on='id', right_on='Ingreso_ID', how='left').fillna({'Cantidad_Usada': 0})
     else:
         df_balance = df_i.copy()
@@ -96,25 +96,74 @@ def generar_kardex(df_p, df_i, df_s):
     df_lotes['Stock_Lote']          = df_lotes['Stock_Lote'].fillna(0.0)
     df_lotes['Precio_Unitario_PEN'] = pd.to_numeric(df_lotes.get('Precio_Unitario_PEN', 0), errors='coerce').fillna(0.0)
     df_lotes['Valorizado_PEN']      = df_lotes['Stock_Lote'] * df_lotes['Precio_Unitario_PEN']
+    df_lotes['Cantidad_Usada']      = df_lotes['Cantidad_Usada'].fillna(0.0)
 
     hoy = pd.Timestamp(date.today())
     df_lotes['Venc_Date']        = pd.to_datetime(df_lotes.get('Fecha_Vencimiento'), errors='coerce')
     df_lotes['Dias_para_Vencer'] = (df_lotes['Venc_Date'] - hoy).dt.days
     df_lotes.loc[df_lotes['Venc_Date'].isnull() | (df_lotes['Venc_Date'].dt.year < 2000), 'Dias_para_Vencer'] = 999
 
-    # ✅ MEJORA 3: Vista agrupada por PRODUCTO (sin duplicados)
+    # ✅ FIX: Prox_Vencimiento solo sobre lotes con stock real (evita falsas alarmas)
+    df_lotes_con_stock = df_lotes[df_lotes['Stock_Lote'] > 0].copy()
+
+    # --- KPI: Salidas por producto para Rotación y Días de Cobertura ---
+    # Cruzamos Salidas → Ingresos → Producto para saber cuánto se consumió de cada producto
+    if not df_s.empty and 'Ingreso_ID' in df_s.columns:
+        # Traemos el código de producto desde los ingresos
+        df_s_prod = pd.merge(
+            df_s[['Ingreso_ID', 'Cantidad_Usada']],
+            df_i[['id', 'Codigo_Producto']],
+            left_on='Ingreso_ID', right_on='id', how='left'
+        )
+        salidas_por_prod = df_s_prod.groupby('Codigo_Producto')['Cantidad_Usada'].sum().reset_index()
+        salidas_por_prod.columns = ['Codigo', 'Total_Salidas']
+    else:
+        salidas_por_prod = pd.DataFrame(columns=['Codigo', 'Total_Salidas'])
+
+    # Vista agrupada por PRODUCTO
     df_por_producto = (
         df_lotes.groupby(['Codigo', 'Producto', 'Unidad', 'Tipo_Accion', 'Stock_Minimo', 'Activo',
                           'Ingrediente_Activo', 'Marca', 'Formulacion', 'Banda_Toxicologica', 'Ficha_Tecnica_URL'],
                          dropna=False)
         .agg(
-            Stock_Total   =('Stock_Lote',       'sum'),
-            Valorizado_PEN=('Valorizado_PEN',    'sum'),
-            N_Lotes       =('Codigo_Lote',       'count'),
-            Prox_Vencimiento=('Dias_para_Vencer','min'),
+            Stock_Total    =('Stock_Lote',    'sum'),
+            Valorizado_PEN =('Valorizado_PEN', 'sum'),
+            N_Lotes        =('Codigo_Lote',    'count'),
+            # ✅ FIX: vencimiento solo de lotes con stock > 0
+            Prox_Vencimiento=('Dias_para_Vencer',
+                              lambda x: df_lotes_con_stock.loc[x.index, 'Dias_para_Vencer'].min()
+                              if len(df_lotes_con_stock.loc[x.index]) > 0 else 999),
         )
         .reset_index()
     )
+
+    # Unir Total_Salidas
+    df_por_producto = pd.merge(df_por_producto, salidas_por_prod, on='Codigo', how='left')
+    df_por_producto['Total_Salidas'] = df_por_producto['Total_Salidas'].fillna(0.0)
+
+    # --- KPIs derivados ---
+    PERIODO_DIAS = 180  # Ventana de cálculo: últimos 6 meses
+
+    # Rotación = Total salidas / Stock actual (cuántas veces se "giró" el inventario)
+    df_por_producto['Rotacion'] = np.where(
+        df_por_producto['Stock_Total'] > 0,
+        (df_por_producto['Total_Salidas'] / df_por_producto['Stock_Total']).round(2),
+        np.nan
+    )
+
+    # Días de Cobertura = Stock actual / consumo diario promedio
+    consumo_diario = df_por_producto['Total_Salidas'] / PERIODO_DIAS
+    df_por_producto['Dias_Cobertura'] = np.where(
+        consumo_diario > 0,
+        (df_por_producto['Stock_Total'] / consumo_diario).round(0).astype('Int64'),
+        pd.NA   # Sin consumo = cobertura indefinida
+    )
+
+    # Stock Muerto = tiene stock pero 0 salidas registradas
+    df_por_producto['Stock_Muerto'] = (
+        (df_por_producto['Stock_Total'] > 0) & (df_por_producto['Total_Salidas'] == 0)
+    )
+
     return df_lotes, df_por_producto
 
 
@@ -155,12 +204,18 @@ with stylable_container(key="green_panel", css_styles="{ background-color: #1e3d
         filtro_abc = st.selectbox("Clase ABC:", ["Todos", "A (Crítico)", "B (Intermedio)", "C (Rutina)", "Sin Stock"])
 
     with st.expander("🛠️ Filtros Avanzados y Alertas KPI"):
-        kpi1, kpi2 = st.columns(2)
-        filtro_kpi_stock = kpi1.checkbox("🚨 Mostrar SOLO Stock Crítico (< Mínimo)")
-        filtro_kpi_venc  = kpi2.checkbox("⏳ Mostrar SOLO Próximos a Vencer (< 15 días)")
+        kpi1, kpi2, kpi3 = st.columns(3)
+        filtro_kpi_stock = kpi1.checkbox("🚨 Stock Crítico (< Mínimo)",
+                                          help="Solo funciona si configuras el Stock Mínimo en cada producto (editar producto maestro)")
+        filtro_kpi_venc  = kpi2.checkbox("⏳ Por Vencer (< 15 días)",
+                                          help="Solo alerta lotes que aún tienen stock real, no lotes vacíos")
+        filtro_kpi_muerto= kpi3.checkbox("💀 Stock Muerto (sin salidas)",
+                                          help="Productos con stock pero sin ninguna salida registrada")
 
-    cols_detalle  = ['Ingrediente_Activo', 'Marca', 'Formulacion', 'Banda_Toxicologica', 'Ficha_Tecnica_URL', 'N_Lotes']
-    mostrar_extras = st.multiselect("⚙️ Columnas extra:", options=cols_detalle, default=['Ingrediente_Activo', 'N_Lotes'])
+    cols_detalle  = ['Ingrediente_Activo', 'Marca', 'Formulacion', 'Banda_Toxicologica',
+                     'Ficha_Tecnica_URL', 'N_Lotes', 'Total_Salidas', 'Rotacion', 'Dias_Cobertura']
+    mostrar_extras = st.multiselect("⚙️ Columnas extra:", options=cols_detalle,
+                                    default=['Ingrediente_Activo', 'N_Lotes', 'Dias_Cobertura'])
 
 # --- 6. APLICAR FILTROS ---
 df_vista = df_kardex.copy() if not df_kardex.empty else pd.DataFrame()
@@ -175,26 +230,38 @@ if not df_vista.empty:
         df_vista = df_vista[df_vista['Tipo_Accion'] == filtro_tipo]
     if filtro_abc != "Todos" and 'Clase_ABC' in df_vista.columns:
         df_vista = df_vista[df_vista['Clase_ABC'] == filtro_abc]
-    if filtro_kpi_stock:
-        df_vista = df_vista[df_vista['Stock_Total'] < df_vista['Stock_Minimo']]
+    if filtro_kpi_stock and 'Stock_Minimo' in df_vista.columns:
+        # Solo aplica cuando Stock_Minimo > 0, ignoramos productos sin mínimo configurado
+        df_vista = df_vista[(df_vista['Stock_Minimo'] > 0) & (df_vista['Stock_Total'] < df_vista['Stock_Minimo'])]
     if filtro_kpi_venc:
         df_vista = df_vista[df_vista['Prox_Vencimiento'] < 15]
+    if filtro_kpi_muerto and 'Stock_Muerto' in df_vista.columns:
+        df_vista = df_vista[df_vista['Stock_Muerto'] == True]
 
 # --- 7. MÉTRICAS ---
 st.write("")
-c_tc, m1, m2, m3 = st.columns([1.5, 2, 1.5, 1.5])
+c_tc, m1, m2, m3, m4, m5 = st.columns([1.2, 1.8, 1.2, 1.2, 1.2, 1.2])
 tc_usd = c_tc.number_input("💵 Tipo de Cambio (S/)", min_value=3.00, max_value=4.50, value=3.75, step=0.01)
 
 style_metric_cards(background_color="#ffffff", border_left_color="#1e3d33")
 
-val_pen = df_vista['Valorizado_PEN'].sum() if not df_vista.empty and 'Valorizado_PEN' in df_vista.columns else 0.0
-val_usd = val_pen / tc_usd if tc_usd > 0 else 0.0
-criticos = len(df_vista[df_vista['Stock_Total'] <= 0]) if not df_vista.empty and 'Stock_Total' in df_vista.columns else 0
-x_vencer = len(df_vista[df_vista['Prox_Vencimiento'] < 15]) if not df_vista.empty and 'Prox_Vencimiento' in df_vista.columns else 0
+val_pen    = df_vista['Valorizado_PEN'].sum()  if not df_vista.empty and 'Valorizado_PEN'    in df_vista.columns else 0.0
+val_usd    = val_pen / tc_usd if tc_usd > 0 else 0.0
+criticos   = len(df_vista[df_vista['Stock_Total'] <= 0])         if not df_vista.empty else 0
+# ✅ FIX: solo lotes con stock real
+x_vencer   = len(df_vista[df_vista['Prox_Vencimiento'] < 15])    if not df_vista.empty else 0
+muertos    = len(df_vista[df_vista['Stock_Muerto'] == True])      if not df_vista.empty and 'Stock_Muerto'    in df_vista.columns else 0
 
-m1.metric("Valorización (PEN / USD)", f"S/ {val_pen:,.2f}", f"${val_usd:,.2f}", delta_color="off")
-m2.metric("Sin Stock", f"{criticos} productos", delta_color="off")
-m3.metric("Próx. a Vencer (<15d)", f"{x_vencer} productos", delta_color="off")
+# Días de cobertura promedio (solo productos con consumo real)
+cob_valida = df_vista['Dias_Cobertura'].dropna() if not df_vista.empty and 'Dias_Cobertura' in df_vista.columns else pd.Series([])
+cob_prom   = int(cob_valida.median()) if len(cob_valida) > 0 else 0
+
+m1.metric("💰 Valorización",           f"S/ {val_pen:,.0f}",     f"${val_usd:,.0f} USD",   delta_color="off")
+m2.metric("🔴 Sin Stock",              f"{criticos} productos",  delta_color="off")
+m3.metric("⏳ Por Vencer (<15d)",      f"{x_vencer} productos",  delta_color="off")
+m4.metric("💀 Stock Muerto",           f"{muertos} productos",   delta_color="off")
+m5.metric("📅 Cobertura Mediana",      f"{cob_prom} días",
+          help="Días que dura el stock actual al ritmo de consumo actual (mediana de todos los productos con salidas)")
 
 # --- 8. TABLA PRINCIPAL (Vista por Producto) ---
 st.write("")
@@ -203,9 +270,10 @@ st.markdown("#### 📊 Inventario Consolidado por Producto")
 if not df_vista.empty:
     # Añadir columna de alerta visual
     def _alerta(row):
-        if row['Stock_Total'] <= 0:              return "🔴 Sin Stock"
-        if row['Stock_Total'] < row['Stock_Minimo']: return "🟡 Stock Bajo"
-        if row['Prox_Vencimiento'] < 15:         return "⏳ Por Vencer"
+        if row['Stock_Total'] <= 0:                                              return "🔴 Sin Stock"
+        if row.get('Stock_Minimo', 0) > 0 and row['Stock_Total'] < row['Stock_Minimo']: return "🟡 Stock Bajo"
+        if row['Prox_Vencimiento'] < 15:                                         return "⏳ Por Vencer"
+        if row.get('Stock_Muerto', False):                                       return "💀 Sin Movimiento"
         return "🟢 OK"
 
     df_vista = df_vista.copy()

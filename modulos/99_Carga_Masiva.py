@@ -171,6 +171,17 @@ def limpiar_registro(record: dict) -> dict:
 
 df_mig = df_mig.astype(object).where(pd.notnull(df_mig), None)
 
+# ✅ Deduplicar por la clave de upsert ANTES de enviar
+# Si el Excel tiene el mismo código dos veces (celdas fusionadas, duplicados),
+# PostgreSQL falla con "ON CONFLICT DO UPDATE command cannot affect row a second time".
+# Nos quedamos con la última aparición de cada código (la más completa).
+if UPSERT_CONFLICT and UPSERT_CONFLICT in df_mig.columns:
+    antes_dedup = len(df_mig)
+    df_mig = df_mig.drop_duplicates(subset=[UPSERT_CONFLICT], keep="last").reset_index(drop=True)
+    eliminados_dup = antes_dedup - len(df_mig)
+    if eliminados_dup > 0:
+        st.warning(f"⚠️ Se encontraron y eliminaron **{eliminados_dup} filas duplicadas** (mismo código). Se conservó la última aparición de cada una.")
+
 # Ingrediente activo: capitalizar bonito si existe
 if "Ingrediente_Activo" in df_mig.columns:
     df_mig["Ingrediente_Activo"] = df_mig["Ingrediente_Activo"].apply(

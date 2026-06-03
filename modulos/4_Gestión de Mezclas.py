@@ -147,9 +147,10 @@ with tab1:
 
             st.markdown('<div class="seccion-titulo">3. Receta de Insumos (Cálculo Automático)</div>', unsafe_allow_html=True)
             opciones_fefo = {f"{r['Producto']} - Lote: {r['Codigo_Lote']} (Sald: {r['Stock_Actual']} {r.get('Unidad','')} - S/{r['Precio_Unitario_PEN']:.2f})": r for _, r in df_stock.iterrows()}
-            
+
+            # ✅ MEJORA 1: Fila inicial vacía (None) para que el usuario elija conscientemente
             editor_receta = st.data_editor(
-                pd.DataFrame([{"Insumo": list(opciones_fefo.keys())[0], "Cantidad_Total": 0.0}]),
+                pd.DataFrame([{"Insumo": None, "Cantidad_Total": 0.0}]),
                 num_rows="dynamic",
                 column_config={
                     "Insumo": st.column_config.SelectboxColumn("Lote en Almacén", options=list(opciones_fefo.keys()), required=True),
@@ -158,13 +159,19 @@ with tab1:
             )
 
             if st.form_submit_button("📡 Enviar Orden Maestra a Almacén", type="primary"):
+                # ✅ Validar que el usuario haya seleccionado insumos reales (no filas vacías o con cantidad 0)
+                receta_valida = editor_receta.dropna(subset=['Insumo'])
+                receta_valida = receta_valida[receta_valida['Cantidad_Total'] > 0]
+
                 if ha_dest <= 0:
                     st.error("⚠️ Las hectáreas deben ser mayores a 0 para calcular costos.")
+                elif receta_valida.empty:
+                    st.error("⚠️ Debes agregar al menos un insumo con cantidad mayor a 0 en la receta.")
                 else:
                     costo_total_mezcla = 0
                     receta_final = []
                     
-                    for _, row in editor_receta.iterrows():
+                    for _, row in receta_valida.iterrows():
                         info = opciones_fefo[row['Insumo']]
                         precio_unitario = float(info.get('Precio_Unitario_PEN', 0))
                         costo_insumo = row['Cantidad_Total'] * precio_unitario
@@ -214,7 +221,8 @@ with tab1:
                     
                     supabase.table('Ordenes_de_Trabajo').insert(ot_data).execute()
                     st.success(f"✅ Orden enviada a Almacén. Inversión calculada: S/ {costo_total_mezcla:,.2f}")
-                    st.cache_data.clear()
+                    # ✅ MEJORA 3: Caché específica
+                    cargar_catalogos.clear()
                     st.rerun()
 
 # ==========================================
@@ -263,12 +271,15 @@ with tab2:
                             try:
                                 supabase.table('Salidas').insert(batch_salidas).execute()
                                 supabase.table('Ordenes_de_Trabajo').update({"Status": "Finalizada"}).eq('id', ot['id']).execute()
-                                
+
                                 st.success("✅ Despacho exitoso. Kardex actualizado.")
-                                st.cache_data.clear()
+                                # ✅ MEJORA 3: Caché específica
+                                cargar_catalogos.clear()
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"❌ API Error: Los nombres de las columnas en Python no coinciden con Supabase. Revisa tu base de datos: {e}")
+                                # ✅ MEJORA 2: Mensaje de error amigable para el operador
+                                st.error("❌ Hubo un problema al registrar el despacho. Por favor avisa al encargado del sistema para que revise la conexión con la base de datos.")
+                                st.caption(f"Detalle técnico: {e}")
                                 
                         else:
                             st.error("⚠️ La firma es obligatoria para la trazabilidad.")

@@ -141,61 +141,72 @@ with tab_mosca:
     st.header("Análisis de Mosca de la Fruta")
     
     if not df_mosca.empty:
-        # ✅ NUEVO: Selector de Modo de Análisis
+        # Selector de Modo de Análisis
         modo_analisis = st.radio("🔍 Modo de Visualización:", 
-                                 ["Semana/Mes (General Fundo)", "Análisis Detallado por Trampa (Sector específico)"], 
+                                 ["📊 Tendencia General (Usa el filtro lateral)", "🎯 Análisis de Trampas (Foco de Infección)"], 
                                  horizontal=True)
         
         tipo_mosca = st.selectbox("Seleccione la especie de Mosca:", ['Ceratitis_capitata', 'Anastrepha_fraterculus', 'Anastrepha_distinta'])
         
-        if modo_analisis == "Semana/Mes (General Fundo)":
-            st.info("💡 **Modo General:** Mostrando la tendencia de la mosca en todo el fundo (ignora el filtro lateral de sector).")
+        if modo_analisis == "📊 Tendencia General (Usa el filtro lateral)":
+            st.info(f"💡 **Modo Tendencia:** Mostrando evolución de **{f_sector}**. Cambia el sector en el menú de la izquierda.")
             
-            df_mosca_general = df_mosca[(df_mosca['Fecha'] >= f_inicio) & (df_mosca['Fecha'] <= f_fin)]
-            
-            if not df_mosca_general.empty:
-                # Ranking general
-                ranking_mosca = df_mosca_general.groupby('Sector')[tipo_mosca].sum().reset_index()
-                if not ranking_mosca.empty and ranking_mosca[tipo_mosca].sum() > 0:
-                    lote_critico = ranking_mosca.sort_values(by=tipo_mosca, ascending=False).iloc[0]
-                    st.markdown(f"""<div class="alerta-box-roja">
-                        🚨 <strong>LOTE CRÍTICO PARA {tipo_mosca.upper()}:</strong> Sector <strong>{lote_critico['Sector']}</strong> con <strong>{int(lote_critico[tipo_mosca])}</strong> capturas acumuladas en este periodo.
-                    </div>""", unsafe_allow_html=True)
+            # Usamos el dataframe filtrado globalmente (df_mosca_f) que ya obedece al sidebar
+            if not df_mosca_f.empty:
+                # Ranking general (si estamos viendo "Todos", mostramos cuál es el peor sector)
+                if f_sector == 'Todos':
+                    ranking_mosca = df_mosca_f.groupby('Sector')[tipo_mosca].sum().reset_index()
+                    if not ranking_mosca.empty and ranking_mosca[tipo_mosca].sum() > 0:
+                        lote_critico = ranking_mosca.sort_values(by=tipo_mosca, ascending=False).iloc[0]
+                        st.markdown(f"""<div class="alerta-box-roja">
+                            🚨 <strong>LOTE CRÍTICO PARA {tipo_mosca.upper()}:</strong> Sector <strong>{lote_critico['Sector']}</strong> con <strong>{int(lote_critico[tipo_mosca])}</strong> capturas acumuladas.
+                        </div>""", unsafe_allow_html=True)
                 
-                # Tendencia
-                df_m_trend = df_mosca_general.groupby('Fecha')[tipo_mosca].sum().reset_index()
+                # Tendencia (Una sola línea sumada)
+                df_m_trend = df_mosca_f.groupby('Fecha')[tipo_mosca].sum().reset_index()
                 fig_mosca = px.line(df_m_trend, x='Fecha', y=tipo_mosca, markers=True, 
-                                    title=f"Evolución Temporal Global de {tipo_mosca}")
+                                    title=f"Evolución Temporal de {tipo_mosca} en {f_sector}")
                 fig_mosca.add_hline(y=5, line_dash="dot", line_color="red", annotation_text="Umbral de Alerta")
                 fig_mosca.update_layout(height=350)
                 st.plotly_chart(fig_mosca, use_container_width=True)
             else:
-                st.warning("No hay datos de moscas en todo el fundo para estas fechas.")
+                st.warning(f"No hay datos de moscas para {f_sector} en estas fechas.")
                 
         else:
-            st.info("💡 **Modo Detallado:** Analice el comportamiento individual de cada trampa para encontrar focos locales (ej. cercanía a otros frutales).")
+            st.info("💡 **Análisis de Trampas:** Identifica rápidamente qué trampas exactas están atrayendo a la plaga en un sector específico.")
             
-            # Selector de sector específico (ignora 'Todos')
+            # Selector de sector específico (ignora 'Todos' porque analizar trampas de todo el fundo es un caos)
             sectores_reales = [s for s in sectores_disp if s != 'Todos']
             sector_trampas = st.selectbox("Seleccione el Sector a analizar:", sectores_reales)
             
             df_mosca_sector = df_mosca[(df_mosca['Fecha'] >= f_inicio) & (df_mosca['Fecha'] <= f_fin) & (df_mosca['Sector'] == sector_trampas)]
             
             if not df_mosca_sector.empty and 'Numero_Trampa' in df_mosca_sector.columns:
-                df_trampas_trend = df_mosca_sector.groupby(['Fecha', 'Numero_Trampa'])[tipo_mosca].sum().reset_index()
                 
-                # Gráfico de líneas (una por cada trampa)
-                fig_trampas = px.line(df_trampas_trend, x='Fecha', y=tipo_mosca, color='Numero_Trampa', markers=True,
-                                      title=f"Capturas por TRAMPA INDIVIDUAL en Sector {sector_trampas}")
-                fig_trampas.update_layout(height=400)
-                st.plotly_chart(fig_trampas, use_container_width=True)
-                
-                # Ranking de Trampas
-                st.write(f"**Ranking de Trampas Problemáticas en {sector_trampas}:**")
+                # Agrupamos el total de capturas por trampa en ese periodo
                 df_rank_t = df_mosca_sector.groupby('Numero_Trampa')[tipo_mosca].sum().reset_index().sort_values(by=tipo_mosca, ascending=False)
-                fig_rank_t = px.bar(df_rank_t, x='Numero_Trampa', y=tipo_mosca, color=tipo_mosca, color_continuous_scale="Reds")
-                fig_rank_t.update_layout(height=300)
-                st.plotly_chart(fig_rank_t, use_container_width=True)
+                df_rank_t = df_rank_t[df_rank_t[tipo_mosca] > 0] # Solo mostrar trampas con capturas
+                
+                if not df_rank_t.empty:
+                    st.write(f"### 🏆 Top Trampas Críticas en {sector_trampas}")
+                    # Tarjetas de resumen en lugar de gráfico de líneas caótico
+                    cols = st.columns(min(3, len(df_rank_t)))
+                    for i, (idx, row) in enumerate(df_rank_t.head(3).iterrows()):
+                        with cols[i]:
+                            st.metric(label=f"🚨 Trampa {row['Numero_Trampa']}", value=f"{int(row[tipo_mosca])} moscas")
+                    
+                    st.divider()
+                    st.write(f"**Distribución Horizontal de Capturas (Todas las trampas de {sector_trampas}):**")
+                    
+                    # Gráfico de barras horizontal para fácil lectura
+                    fig_rank_horiz = px.bar(df_rank_t.sort_values(by=tipo_mosca, ascending=True), 
+                                            x=tipo_mosca, y='Numero_Trampa', orientation='h',
+                                            text=tipo_mosca, color=tipo_mosca, color_continuous_scale="Reds")
+                    fig_rank_horiz.update_layout(height=100 + (len(df_rank_t) * 30), showlegend=False, 
+                                                 yaxis_type='category', yaxis_title="N° de Trampa", xaxis_title="Total Capturas")
+                    st.plotly_chart(fig_rank_horiz, use_container_width=True)
+                else:
+                    st.success(f"✅ ¡Excelente! Ninguna trampa en el sector {sector_trampas} tiene capturas de {tipo_mosca} en este periodo.")
             else:
                 st.warning(f"No hay registros de trampas para el sector {sector_trampas} en este rango de fechas.")
     else:

@@ -184,7 +184,7 @@ if registros_pendientes:
                     supabase.table('Diametro_Baya').insert(registros_pendientes).execute()
                     localS.setItem(LOCAL_STORAGE_KEY, json.dumps([]))
                     st.success("¡Sincronización completada!")
-                    st.cache_data.clear()
+                    cargar_diametro_supabase.clear()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error al guardar en Supabase: {e}. Sus datos locales están a salvo.")

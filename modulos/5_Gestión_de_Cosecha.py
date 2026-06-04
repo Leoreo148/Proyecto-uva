@@ -110,7 +110,6 @@ with tab_reg:
                 try:
                     supabase.table('Registro_Cosecha').insert(cosecha_data).execute()
                     st.success(f"✅ ¡Éxito! Lote del sector {sec_origen} guardado. Servidor calculó automáticamente el peso total.")
-                    st.cache_data.clear() # Limpiamos caché para actualizar el historial al instante
                 except Exception as e:
                     st.error(f"❌ Error al guardar en el servidor: {e}")
 

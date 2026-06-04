@@ -31,26 +31,60 @@ def init_supabase_connection():
 
 supabase = init_supabase_connection()
 
-# --- NUEVAS FUNCIONES ADAPTADAS PARA SUPABASE ---
+# --- MEMORIA LOCAL (COLA OFFLINE) ---
+if 'cola_raleo' not in st.session_state:
+    st.session_state.cola_raleo = []
+
+# --- FUNCIONES ---
 @st.cache_data(ttl=60)
 def cargar_raleo_supabase():
     """Carga el historial de raleo desde la tabla de Supabase."""
     if supabase:
         try:
             response = supabase.table('Control_Raleo').select("*").execute()
-            df = pd.DataFrame(response.data)
-            return df
-        except Exception as e:
-            st.error(f"Error al cargar los datos de Supabase: {e}")
+            return pd.DataFrame(response.data)
+        except Exception:
+            pass
     return pd.DataFrame()
 
 def to_excel(df):
+    from io import BytesIO
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Reporte_Raleo')
     return output.getvalue()
 
+def sync_raleo():
+    """Intenta subir la cola pendiente a Supabase."""
+    if not st.session_state.cola_raleo:
+        st.info("No hay jornadas pendientes de sincronizar.")
+        return
+    try:
+        with st.spinner("Subiendo datos a la nube..."):
+            supabase.table('Control_Raleo').insert(st.session_state.cola_raleo).execute()
+            n = len(st.session_state.cola_raleo)
+            st.session_state.cola_raleo = []
+            cargar_raleo_supabase.clear()
+            st.success(f"✅ ¡{n} registros sincronizados exitosamente!")
+            st.balloons()
+    except Exception as e:
+        st.error(f"❌ Sin conexión. Los datos siguen guardados en el dispositivo. ({e})")
+
 # --- INTERFAZ DE REGISTRO ---
+
+# BANNER OFFLINE: Aparece solo si hay datos pendientes
+if st.session_state.cola_raleo:
+    n_pendientes = len(st.session_state.cola_raleo)
+    st.markdown(f"""
+        <div style="background-color:#fff3cd; padding:15px; border-radius:10px; border:1px solid #ffc107; margin-bottom:15px;">
+            📴 <strong>{n_pendientes} registro(s) de raleo guardados sin conexión.</strong><br>
+            Presiona el botón cuando tengas internet para subirlos a la nube.
+        </div>
+    """, unsafe_allow_html=True)
+    if st.button("🔄 SINCRONIZAR AHORA CON LA NUBE", type="primary"):
+        sync_raleo()
+        st.rerun()
+
 with st.expander("➕ Registrar Nueva Cartilla de Raleo por Fila", expanded=True):
     st.subheader("1. Definir la Jornada y Evaluador")
     col1, col2, col3 = st.columns(3)
@@ -69,7 +103,6 @@ with st.expander("➕ Registrar Nueva Cartilla de Raleo por Fila", expanded=True
         [{"Nombre del Trabajador": "", "Número de Fila": None, "Racimos Reales (Conteo Final)": 0} for _ in range(15)]
     )
     
-    # 1. Candados Antierrores en la configuración de la tabla
     df_editada = st.data_editor(
         df_plantilla,
         num_rows="dynamic",
@@ -80,13 +113,12 @@ with st.expander("➕ Registrar Nueva Cartilla de Raleo por Fila", expanded=True
             "Racimos Reales (Conteo Final)": st.column_config.NumberColumn(
                 "N° de Racimos Reales", 
                 min_value=0, 
-                max_value=1000, # Límite biológicamente imposible para un humano en un turno
+                max_value=1000,
                 step=1
             )
         }
     )
 
-    # 2. Sumatorias en Tiempo Real (Auditoría visual)
     df_calculo_vivo = df_editada.dropna(subset=["Nombre del Trabajador"]).copy()
     df_calculo_vivo = df_calculo_vivo[df_calculo_vivo["Nombre del Trabajador"] != ""]
     
@@ -109,39 +141,32 @@ with st.expander("➕ Registrar Nueva Cartilla de Raleo por Fila", expanded=True
             df_final_jornada = df_final_jornada[df_final_jornada["Nombre del Trabajador"] != ""].copy()
             
             if not df_final_jornada.empty:
-                # Añadir los datos de la jornada a cada registro
                 df_final_jornada['Fecha'] = fecha_jornada.strftime("%Y-%m-%d")
                 df_final_jornada['Sector'] = sector_trabajado
                 df_final_jornada['Evaluador'] = evaluador
-                
-                # Calcular las tandas equivalentes
                 df_final_jornada['Tandas_Equivalentes'] = df_final_jornada['Racimos Reales (Conteo Final)'] / RACIMOS_POR_TANDA
-                
-                # Renombrar columnas para que coincidan con Supabase
                 df_final_jornada = df_final_jornada.rename(columns={
                     "Nombre del Trabajador": "Nombre_del_Trabajador",
                     "Número de Fila": "Numero_de_Fila",
                     "Racimos Reales (Conteo Final)": "Racimos_Reales"
                 })
-                
-                # --- CORRECCIÓN: Forzar el tipo de dato a entero ---
                 df_final_jornada['Numero_de_Fila'] = df_final_jornada['Numero_de_Fila'].astype(int)
                 df_final_jornada['Racimos_Reales'] = df_final_jornada['Racimos_Reales'].astype(int)
-                
-                # Seleccionar y reordenar las columnas finales
                 columnas_finales = ['Fecha', 'Sector', 'Evaluador', 'Numero_de_Fila', 'Nombre_del_Trabajador', 'Racimos_Reales', 'Tandas_Equivalentes']
-                df_para_insertar = df_final_jornada[columnas_finales]
+                registros = df_final_jornada[columnas_finales].to_dict(orient='records')
 
+                # ✅ OFFLINE-FIRST: Intentamos Supabase, si falla → cola local
                 try:
-                    registros_para_insertar = df_para_insertar.to_dict(orient='records')
-                    supabase.table('Control_Raleo').insert(registros_para_insertar).execute()
-                    st.success("¡Jornada de raleo guardada exitosamente en Supabase!")
-                    st.cache_data.clear()
+                    supabase.table('Control_Raleo').insert(registros).execute()
+                    cargar_raleo_supabase.clear()
+                    st.success("¡Jornada de raleo guardada en la nube! ☁️")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Error al guardar en Supabase: {e}")
+                    st.session_state.cola_raleo.extend(registros)
+                    st.warning(f"📴 Sin conexión. Jornada guardada en el dispositivo ({len(registros)} filas). Se subirá cuando vuelva el internet.")
             else:
                 st.warning("No se ingresaron datos de trabajadores.")
+
 
 # --- HISTORIAL Y DESCARGA ---
 st.divider()

@@ -47,7 +47,6 @@ def sync_mosca():
             st.session_state.cola_mosca = []
             st.success("¡Sincronización Exitosa!")
             st.balloons()
-            st.cache_data.clear()
     except Exception as e:
         st.error(f"Error de conexión: {e}. Los datos siguen guardados en el celular.")
 

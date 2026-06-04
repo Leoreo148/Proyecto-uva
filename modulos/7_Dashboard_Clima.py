@@ -289,7 +289,8 @@ fig_dpv.add_trace(go.Scatter(
 fig_dpv.add_hline(y=0.4,  line_dash="dot",  line_color="blue",   annotation_text="Límite húmedo (0.4)")
 fig_dpv.add_hline(y=1.6,  line_dash="dash", line_color="orange", annotation_text="Inicio estrés (1.6)")
 fig_dpv.add_hline(y=2.5,  line_dash="dot",  line_color="red",    annotation_text="Estrés severo (2.5)")
-fig_dpv.add_vline(x=datetime.now().strftime("%Y-%m-%d %H:%M"), line_dash="dash", line_color="green", annotation_text="AHORA")
+ahora_ms = datetime.now().timestamp() * 1000
+fig_dpv.add_vline(x=ahora_ms, line_dash="dash", line_color="green", annotation_text="AHORA")
 fig_dpv.update_layout(yaxis_title="DPV (kPa)", xaxis_title="Fecha/Hora", height=350)
 st.plotly_chart(fig_dpv, use_container_width=True)
 
@@ -300,7 +301,7 @@ with st.expander("📊 Ver gráfico Temperatura + Humedad (detalle)"):
                    title="Temperatura (°C) y Humedad Relativa (%)")
     fig1.add_hline(y=35, line_dash="dot", line_color="red",  annotation_text="Peligro Estrés (>35°C)")
     fig1.add_hline(y=80, line_dash="dot", line_color="blue", annotation_text="Riesgo Fúngico HR (>80%)")
-    fig1.add_vline(x=datetime.now().strftime("%Y-%m-%d %H:%M"), line_dash="dash", line_color="green")
+    fig1.add_vline(x=ahora_ms, line_dash="dash", line_color="green")
     st.plotly_chart(fig1, use_container_width=True)
 
 if "radiacion_solar" in df_filtrado.columns:

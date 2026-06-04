@@ -98,24 +98,55 @@ else:
             receta_str = ", ".join([f"{i['p']} ({i['c']})" for i in tarea.get('Receta_Mezcla_Lotes', [])])
             st.markdown(f'<div class="receta-box"><b>🧪 MEZCLA AUTORIZADA:</b> {receta_str}</div>', unsafe_allow_html=True)
 
-            vol_ha   = tarea.get('Volumen_Hectarea', 'N/A')
-            marcha   = tarea.get('Marcha', 'N/A')
-            presion  = tarea.get('Presion_Bar', 'N/A')
-            metodo   = tarea.get('Tipo_Aplicacion', 'N/A')
-            boquillas= tarea.get('Color_Boquilla', 'N/A')
+            # --- PARSEO DE INSTRUCCIONES DEL INGENIERO ---
+            # Extraemos la información que viene concatenada en 'Observaciones_Aplicacion'
+            inst_raw = str(tarea.get('Observaciones_Aplicacion', ''))
+            
+            # Valores por defecto en caso de que no existan las etiquetas
+            metodo = "N/A"
+            calibracion = "N/A"
+            agua = "N/A"
+            boquillas = "N/A"
+            obs_pura = "Sin notas adicionales."
+
+            # Parser manual simple basado en las etiquetas
+            import re
+            
+            def extract_tag(texto, tag_start, tag_end_list):
+                if tag_start in texto:
+                    start_idx = texto.find(tag_start) + len(tag_start)
+                    # Buscar cuál es la etiqueta de cierre que ocurre primero
+                    end_idxs = [texto.find(t, start_idx) for t in tag_end_list if texto.find(t, start_idx) != -1]
+                    end_idx = min(end_idxs) if end_idxs else len(texto)
+                    return texto[start_idx:end_idx].strip(' |').strip()
+                return "N/A"
+
+            if "[MÉTODO]:" in inst_raw:
+                metodo = extract_tag(inst_raw, "[MÉTODO]:", ["[AGUA]:", "[CALIBRACIÓN]:", "[BOQUILLAS]:", "[EQUIPO]:", "[OBSERVACIONES]:"])
+            if "[CALIBRACIÓN]:" in inst_raw:
+                calibracion = extract_tag(inst_raw, "[CALIBRACIÓN]:", ["[BOQUILLAS]:", "[EQUIPO]:", "[OBSERVACIONES]:"])
+            if "[AGUA]:" in inst_raw:
+                agua = extract_tag(inst_raw, "[AGUA]:", ["[CALIBRACIÓN]:", "[BOQUILLAS]:", "[EQUIPO]:", "[OBSERVACIONES]:"])
+            if "[BOQUILLAS]:" in inst_raw:
+                boquillas = extract_tag(inst_raw, "[BOQUILLAS]:", ["[EQUIPO]:", "[OBSERVACIONES]:"])
+            if "[OBSERVACIONES]:" in inst_raw:
+                obs_pura = inst_raw[inst_raw.find("[OBSERVACIONES]:") + len("[OBSERVACIONES]:"):].strip()
+            elif inst_raw and not any(tag in inst_raw for tag in ["[MÉTODO]:", "[CALIBRACIÓN]:", "[AGUA]:", "[BOQUILLAS]:", "[EQUIPO]:"]):
+                # Por si es un texto antiguo sin formato de etiquetas
+                obs_pura = inst_raw
 
             st.markdown(f"""
                 <div class="instrucciones-box">
-                    <b>📝 CONFIGURACIÓN DEL TRACTOR (Mandato del Ingeniero):</b><br>
-                    • <b>Método:</b> {metodo}<br>
-                    • <b>Marcha:</b> {marcha} &nbsp;|&nbsp; <b>Presión:</b> {presion} Bar<br>
-                    • <b>Volumen/Ha:</b> {vol_ha} Lts/Ha &nbsp;|&nbsp; <b>Boquillas:</b> {boquillas}
+                    <b>📝 CONFIGURACIÓN DEL TRACTOR (Mandato del Ingeniero):</b><br><br>
+                    🚜 <b>Método de Aplicación:</b> {metodo}<br>
+                    ⚙️ <b>Calibración:</b> {calibracion}<br>
+                    💧 <b>Manejo de Agua:</b> {agua}<br>
+                    🚰 <b>Boquillas:</b> {boquillas}
                 </div>
             """, unsafe_allow_html=True)
 
-            instrucciones_extra = tarea.get('Observaciones_Aplicacion', '')
-            if instrucciones_extra:
-                st.info(f"**Nota del Ingeniero:** {instrucciones_extra}")
+            if obs_pura and obs_pura != "Sin notas adicionales.":
+                st.info(f"**Nota del Ingeniero:** {obs_pura}")
 
             st.write("---")
             st.write("✅ **Rellena los datos físicos al terminar la labor:**")

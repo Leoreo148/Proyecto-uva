@@ -149,6 +149,79 @@ with cg2:
 
 st.divider()
 
+# --- ✅ NUEVO: COSTO POR HECTÁREA ---
+st.subheader("🌱 Costo de Maquinaria por Hectárea (por Sector)")
+
+# Áreas reales del fundo (en hectáreas) — ajustar según mediciones reales
+AREAS_SECTOR = {
+    'J1': 1.8, 'J2': 1.8, 'R1': 1.5, 'R2': 1.5,
+    'W1': 2.0, 'W2': 2.0, 'W3': 2.0,
+    'K1': 1.5, 'K2': 1.5, 'K3': 1.5
+}
+
+if 'Sector' in df_planilla.columns:
+    df_costo_sector = df_planilla.groupby('Sector').agg(
+        Costo_Total   =('Total_Pago_Labor', 'sum'),
+        Horas_Total   =('Total_Horas',      'sum'),
+        Jornadas      =('Fecha_date',       'nunique'),
+    ).reset_index()
+    
+    df_costo_sector['Hectareas'] = df_costo_sector['Sector'].map(AREAS_SECTOR).fillna(1.5)
+    df_costo_sector['Costo_por_Ha'] = (df_costo_sector['Costo_Total'] / df_costo_sector['Hectareas']).round(2)
+    df_costo_sector['Horas_por_Ha']  = (df_costo_sector['Horas_Total'] / df_costo_sector['Hectareas']).round(2)
+    
+    cha1, cha2 = st.columns(2)
+    with cha1:
+        fig_cpha = px.bar(
+            df_costo_sector.sort_values('Costo_por_Ha', ascending=True),
+            x='Costo_por_Ha', y='Sector', orientation='h',
+            text=df_costo_sector.sort_values('Costo_por_Ha', ascending=True)['Costo_por_Ha'].apply(lambda x: f"S/ {x:,.2f}"),
+            color='Costo_por_Ha', color_continuous_scale='RdYlGn_r',
+            title="Costo Maquinaria por Ha (S/)"
+        )
+        fig_cpha.update_layout(height=320, showlegend=False)
+        st.plotly_chart(fig_cpha, use_container_width=True)
+    
+    with cha2:
+        # ✅ NUEVO: Desglose por tipo de labor
+        if 'Labor_Realizada' in df_planilla.columns:
+            st.subheader("🎯 Desglose por Labor")
+            df_labor = df_planilla.groupby('Labor_Realizada')['Total_Pago_Labor'].sum().reset_index()
+            df_labor.columns = ['Labor', 'Costo_S']
+            fig_labor = px.pie(
+                df_labor, values='Costo_S', names='Labor',
+                title="¿En qué se gasta el dinero?", hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Prism
+            )
+            fig_labor.update_layout(height=320)
+            st.plotly_chart(fig_labor, use_container_width=True)
+    
+    # Tabla resumen Costo/Ha
+    with st.expander("📋 Ver tabla detallada Costo por Hectárea"):
+        df_costo_show = df_costo_sector[['Sector', 'Hectareas', 'Jornadas', 'Horas_Total', 'Costo_Total', 'Costo_por_Ha', 'Horas_por_Ha']].copy()
+        df_costo_show.columns = ['📍 Sector', '📐 Ha', '📅 Jornadas', '⏱️ Horas', '💵 Costo Total', '💰 S/Ha', '⏱️ Hrs/Ha']
+        st.dataframe(df_costo_show, use_container_width=True, hide_index=True,
+                     column_config={
+                         "💵 Costo Total": st.column_config.NumberColumn(format="S/ %.2f"),
+                         "💰 S/Ha":        st.column_config.NumberColumn(format="S/ %.2f"),
+                     })
+
+    # ✅ NUEVO: Alerta de desvío semanal
+    st.divider()
+    dias_periodo = (f_fin - f_inicio).days
+    if dias_periodo >= 14 and len(df_trend) >= 7:
+        mitad = len(df_trend) // 2
+        costo_primera_mitad = df_trend.iloc[:mitad]['Costo_S'].sum()
+        costo_segunda_mitad = df_trend.iloc[mitad:]['Costo_S'].sum()
+        if costo_primera_mitad > 0:
+            variacion = ((costo_segunda_mitad - costo_primera_mitad) / costo_primera_mitad) * 100
+            if variacion > 20:
+                st.warning(f"🔺 **Alerta de Gasto:** El costo de la segunda mitad del periodo es un **{variacion:.0f}% mayor** que la primera mitad. Verificar si hay horas extras o labores no planificadas.")
+            elif variacion < -20:
+                st.success(f"🔽 **Ahorro Detectado:** El costo bajó un **{abs(variacion):.0f}%** en la segunda mitad del periodo. ¡Buena eficiencia!")
+
+st.divider()
+
 # --- RESUMEN AGRUPADO ---
 st.subheader("📋 Resumen de Pagos por Trabajador")
 df_resumen = df_planilla.groupby('nombre_completo').agg(
@@ -168,7 +241,7 @@ st.dataframe(
     }
 )
 
-# ✅ NUEVO: Descarga Excel
+# Descarga Excel
 excel_data = to_excel_finanzas(df_resumen)
 st.download_button(
     label="📥 Descargar Planilla (Excel)",

@@ -11,7 +11,6 @@ if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
     st.warning("⚠️ Por favor, inicie sesión en la página principal.")
     st.stop()
 
-# Bloqueo: Solo Sanidad (José), Admin (Segundo) y Programador
 if st.session_state.get("rol") not in ["Admin", "Sanidad", "Programador", "prom"]:
     st.error("🚫 Acceso denegado. Módulo exclusivo para el área de Sanidad.")
     st.stop()
@@ -23,7 +22,9 @@ st.markdown("""
     <style>
     .stApp { background-color: #f4f7f6; }
     div[data-testid="stMetric"] { background-color: #ffffff; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
-    .alerta-box { background-color: #ffebee; border-left: 5px solid #f44336; padding: 10px; border-radius: 5px; margin-bottom:10px;}
+    .alerta-box-roja { background-color: #ffebee; border-left: 5px solid #f44336; padding: 12px 15px; border-radius: 5px; margin-bottom:10px; }
+    .alerta-box-verde { background-color: #e8f5e9; border-left: 5px solid #4caf50; padding: 12px 15px; border-radius: 5px; margin-bottom:10px; }
+    .alerta-box-amarilla { background-color: #fff8e1; border-left: 5px solid #ffc107; padding: 12px 15px; border-radius: 5px; margin-bottom:10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -34,7 +35,18 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- 3. EXTRACCIÓN Y PROCESAMIENTO DE DATOS ---
+# --- 3. UMBRALES DE ACCIÓN (líneas rojas agronómicas) ---
+UMBRALES = {
+    'TRIPS':      3.0,   # individuos/hoja promedio
+    'A_ROJA':     5.0,   # individuos/hoja promedio
+    'M_BLANCA':   4.0,   # individuos/hoja promedio
+    'COCHINILLA': 2.0,   # individuos/planta promedio
+    'OIDIO':     10.0,   # % de severidad promedio
+    'MILDIU':     5.0,   # % de severidad promedio
+    'BOTRYTIS':   3.0,   # grado de avance promedio
+}
+
+# --- 4. EXTRACCIÓN Y PROCESAMIENTO DE DATOS ---
 @st.cache_data(ttl=60)
 def cargar_datos_sanidad():
     if not supabase: return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -90,7 +102,7 @@ def cargar_datos_sanidad():
 
 df_mosca, df_plagas, df_enfermedades = cargar_datos_sanidad()
 
-# --- 4. FILTROS LATERALES ---
+# --- 5. FILTROS LATERALES ---
 st.sidebar.header("Filtros de Sanidad")
 hoy = date.today()
 f_inicio = st.sidebar.date_input("Fecha Inicio", hoy - timedelta(days=30))
@@ -103,23 +115,22 @@ sectores_disp = ['Todos'] + sorted(list(set(
 f_sector = st.sidebar.selectbox("Sector", sectores_disp)
 
 # Aplicar filtros temporales y de sector
-if not df_mosca.empty and 'Fecha' in df_mosca.columns:
-    mask_m = (df_mosca['Fecha'] >= f_inicio) & (df_mosca['Fecha'] <= f_fin)
-    df_mosca_f = df_mosca[mask_m]
-    if f_sector != 'Todos': df_mosca_f = df_mosca_f[df_mosca_f['Sector'] == f_sector]
-else:
-    df_mosca_f = pd.DataFrame()
+def filtrar_df(df, f_ini, f_fin, sector):
+    if df.empty or 'Fecha' not in df.columns:
+        return pd.DataFrame()
+    mask = (df['Fecha'] >= f_ini) & (df['Fecha'] <= f_fin)
+    df_f = df[mask]
+    if sector != 'Todos':
+        df_f = df_f[df_f['Sector'] == sector]
+    return df_f
 
-if not df_plagas.empty and 'Fecha' in df_plagas.columns:
-    mask_p = (df_plagas['Fecha'] >= f_inicio) & (df_plagas['Fecha'] <= f_fin)
-    df_plagas_f = df_plagas[mask_p]
-    if f_sector != 'Todos': df_plagas_f = df_plagas_f[df_plagas_f['Sector'] == f_sector]
-else:
-    df_plagas_f = pd.DataFrame()
+df_mosca_f = filtrar_df(df_mosca, f_inicio, f_fin, f_sector)
+df_plagas_f = filtrar_df(df_plagas, f_inicio, f_fin, f_sector)
+df_enf_f = filtrar_df(df_enfermedades, f_inicio, f_fin, f_sector)
 
-# --- 5. INTERFAZ PRINCIPAL ---
+# --- 6. INTERFAZ PRINCIPAL ---
 st.title("📊 Dashboard de Presión Sanitaria")
-st.write("Monitoreo focalizado y umbrales críticos para la toma de decisiones.")
+st.write("Monitoreo focalizado, umbrales de acción y tendencias históricas para la toma de decisiones.")
 
 tab_mosca, tab_plagas, tab_enfermedades = st.tabs(["🪰 PANEL MOSCAS", "🐛 PANEL PLAGAS", "🍄 PANEL ENFERMEDADES"])
 
@@ -135,15 +146,34 @@ with tab_mosca:
         ranking_mosca = df_mosca_f.groupby('Sector')[tipo_mosca].sum().reset_index()
         if not ranking_mosca.empty and ranking_mosca[tipo_mosca].sum() > 0:
             lote_critico = ranking_mosca.sort_values(by=tipo_mosca, ascending=False).iloc[0]
-            st.error(f"🚨 **LOTE CRÍTICO PARA {tipo_mosca.upper()}:** Sector **{lote_critico['Sector']}** con **{int(lote_critico[tipo_mosca])}** capturas acumuladas.")
+            st.markdown(f"""<div class="alerta-box-roja">
+                🚨 <strong>LOTE CRÍTICO PARA {tipo_mosca.upper()}:</strong> Sector <strong>{lote_critico['Sector']}</strong> con <strong>{int(lote_critico[tipo_mosca])}</strong> capturas acumuladas.
+            </div>""", unsafe_allow_html=True)
         else:
-            st.success(f"✅ No se registran capturas de {tipo_mosca} en el periodo seleccionado.")
+            st.markdown(f"""<div class="alerta-box-verde">
+                ✅ No se registran capturas de {tipo_mosca} en el periodo seleccionado.
+            </div>""", unsafe_allow_html=True)
             
-        # Gráfico descriptivo
+        # Gráfico temporal
         df_m_trend = df_mosca_f.groupby('Fecha')[tipo_mosca].sum().reset_index()
-        fig_mosca = px.line(df_m_trend, x='Fecha', y=tipo_mosca, markers=True, title=f"Evolución Temporal de {tipo_mosca}")
-        fig_mosca.add_hline(y=5, line_dash="dot", line_color="red", annotation_text="Umbral de Alerta")
+        fig_mosca = px.line(df_m_trend, x='Fecha', y=tipo_mosca, markers=True, 
+                            title=f"Evolución Temporal de {tipo_mosca}")
+        fig_mosca.add_hline(y=5, line_dash="dot", line_color="red", annotation_text="Umbral de Alerta (5)")
+        fig_mosca.update_layout(height=350)
         st.plotly_chart(fig_mosca, use_container_width=True)
+        
+        # ✅ NUEVO: Heatmap Sector × Fecha
+        with st.expander("🗺️ Mapa de Calor: Capturas por Sector y Fecha"):
+            df_heat_mosca = df_mosca_f.groupby(['Fecha', 'Sector'])[tipo_mosca].sum().reset_index()
+            if not df_heat_mosca.empty:
+                df_pivot_m = df_heat_mosca.pivot_table(index='Sector', columns='Fecha', values=tipo_mosca, fill_value=0)
+                fig_hm = px.imshow(
+                    df_pivot_m, aspect='auto', color_continuous_scale='YlOrRd',
+                    labels=dict(x='Fecha', y='Sector', color='Capturas'),
+                    title=f"Intensidad de {tipo_mosca} por Sector y Fecha"
+                )
+                fig_hm.update_layout(height=300)
+                st.plotly_chart(fig_hm, use_container_width=True)
     else:
         st.info("No hay datos de trampas de mosca en este rango de fechas.")
 
@@ -154,18 +184,73 @@ with tab_plagas:
     st.header("Control de Focos de Plagas")
     if not df_plagas_f.empty:
         tipo_plaga = st.selectbox("Seleccione la Plaga a evaluar:", ['TRIPS', 'A_ROJA', 'M_BLANCA', 'COCHINILLA'])
+        umbral_plaga = UMBRALES.get(tipo_plaga, 5.0)
         
         # Cálculo del Lote Crítico
         ranking_plaga = df_plagas_f.groupby('Sector')[tipo_plaga].mean().reset_index()
         if not ranking_plaga.empty and ranking_plaga[tipo_plaga].sum() > 0:
             lote_critico_p = ranking_plaga.sort_values(by=tipo_plaga, ascending=False).iloc[0]
-            st.error(f"🚨 **LOTE CRÍTICO PARA {tipo_plaga}:** Sector **{lote_critico_p['Sector']}** con un promedio de **{lote_critico_p[tipo_plaga]:.2f}** individuos/planta.")
+            valor_critico = lote_critico_p[tipo_plaga]
+            if valor_critico >= umbral_plaga:
+                st.markdown(f"""<div class="alerta-box-roja">
+                    🚨 <strong>ALERTA: {tipo_plaga}</strong> en Sector <strong>{lote_critico_p['Sector']}</strong> con <strong>{valor_critico:.2f}</strong> individuos/planta (Umbral: {umbral_plaga}).
+                    <br>👉 <em>Acción recomendada: Programar aplicación de control inmediata.</em>
+                </div>""", unsafe_allow_html=True)
+            else:
+                st.markdown(f"""<div class="alerta-box-amarilla">
+                    🟡 <strong>{tipo_plaga}</strong>: Sector <strong>{lote_critico_p['Sector']}</strong> con <strong>{valor_critico:.2f}</strong> individuos/planta. Por debajo del umbral ({umbral_plaga}).
+                </div>""", unsafe_allow_html=True)
         else:
-            st.success(f"✅ Todo limpio. No hay presión biológica de {tipo_plaga}.")
+            st.markdown(f"""<div class="alerta-box-verde">
+                ✅ Todo limpio. No hay presión biológica de {tipo_plaga}.
+            </div>""", unsafe_allow_html=True)
             
-        # Gráfico
-        fig_plagas = px.bar(ranking_plaga, x='Sector', y=tipo_plaga, title=f"Nivel de Infestación Promedio: {tipo_plaga}", color=tipo_plaga, color_continuous_scale="Reds")
-        st.plotly_chart(fig_plagas, use_container_width=True)
+        # ✅ NUEVO: Gráfico temporal de tendencia (reemplaza el bar chart estático)
+        cpl1, cpl2 = st.columns(2)
+        
+        with cpl1:
+            st.subheader("📈 Tendencia en el Tiempo")
+            df_plaga_trend = df_plagas_f.groupby('Fecha')[tipo_plaga].mean().reset_index()
+            fig_plaga_line = px.line(
+                df_plaga_trend, x='Fecha', y=tipo_plaga, markers=True,
+                title=f"Evolución Promedio de {tipo_plaga}",
+                color_discrete_sequence=['#e74c3c']
+            )
+            fig_plaga_line.add_hline(
+                y=umbral_plaga, line_dash="dot", line_color="red",
+                annotation_text=f"Umbral de Acción ({umbral_plaga})"
+            )
+            fig_plaga_line.update_layout(height=360)
+            st.plotly_chart(fig_plaga_line, use_container_width=True)
+        
+        with cpl2:
+            st.subheader("📊 Presión por Sector")
+            fig_plagas_bar = px.bar(
+                ranking_plaga.sort_values(tipo_plaga, ascending=True),
+                x=tipo_plaga, y='Sector', orientation='h',
+                title=f"Nivel Promedio por Sector: {tipo_plaga}",
+                color=tipo_plaga, color_continuous_scale="YlOrRd",
+                text=ranking_plaga.sort_values(tipo_plaga, ascending=True)[tipo_plaga].apply(lambda x: f"{x:.2f}")
+            )
+            fig_plagas_bar.add_vline(
+                x=umbral_plaga, line_dash="dash", line_color="red",
+                annotation_text="Umbral"
+            )
+            fig_plagas_bar.update_layout(height=360, showlegend=False)
+            st.plotly_chart(fig_plagas_bar, use_container_width=True)
+        
+        # ✅ NUEVO: Heatmap Sector × Fecha
+        with st.expander("🗺️ Mapa de Calor: Presión por Sector y Fecha"):
+            df_heat_p = df_plagas_f.groupby(['Fecha', 'Sector'])[tipo_plaga].mean().reset_index()
+            if not df_heat_p.empty:
+                df_pivot_p = df_heat_p.pivot_table(index='Sector', columns='Fecha', values=tipo_plaga, fill_value=0)
+                fig_hm_p = px.imshow(
+                    df_pivot_p, aspect='auto', color_continuous_scale='YlOrRd',
+                    labels=dict(x='Fecha', y='Sector', color='Promedio'),
+                    title=f"Mapa de Intensidad: {tipo_plaga}"
+                )
+                fig_hm_p.update_layout(height=300)
+                st.plotly_chart(fig_hm_p, use_container_width=True)
     else:
         st.info("No hay evaluaciones sanitarias de plagas en estas fechas.")
 
@@ -174,26 +259,75 @@ with tab_plagas:
 # ==========================================
 with tab_enfermedades:
     st.header("Monitoreo Fitopatológico (Enfermedades)")
-    if not df_enfermedades.empty:
-        df_enf_f = df_enfermedades[(df_enfermedades['Fecha'] >= f_inicio) & (df_enfermedades['Fecha'] <= f_fin)]
-        if f_sector != 'Todos': df_enf_f = df_enf_f[df_enf_f['Sector'] == f_sector]
+    if not df_enf_f.empty:
+        tipo_enf = st.selectbox("Seleccione la Enfermedad:", ['OIDIO', 'MILDIU', 'BOTRYTIS'])
+        umbral_enf = UMBRALES.get(tipo_enf, 5.0)
+        unidad = "% de severidad" if tipo_enf in ['OIDIO', 'MILDIU'] else "grado de avance"
         
-        if not df_enf_f.empty:
-            tipo_enf = st.selectbox("Seleccione la Enfermedad:", ['OIDIO', 'MILDIU', 'BOTRYTIS'])
-            
-            # Cálculo del Lote Crítico
-            ranking_enf = df_enf_f.groupby('Sector')[tipo_enf].mean().reset_index()
-            if not ranking_enf.empty and ranking_enf[tipo_enf].sum() > 0:
-                lote_critico_e = ranking_enf.sort_values(by=tipo_enf, ascending=False).iloc[0]
-                unidad = "% de severidad" if tipo_enf in ['OIDIO', 'MILDIU'] else " grado de avance"
-                st.error(f"🍄 **LOTE CRÍTICO PARA {tipo_enf}:** Sector **{lote_critico_e['Sector']}** con **{lote_critico_e[tipo_enf]:.2f}{unidad}** promedio.")
+        # Cálculo del Lote Crítico
+        ranking_enf = df_enf_f.groupby('Sector')[tipo_enf].mean().reset_index()
+        if not ranking_enf.empty and ranking_enf[tipo_enf].sum() > 0:
+            lote_critico_e = ranking_enf.sort_values(by=tipo_enf, ascending=False).iloc[0]
+            valor_critico_e = lote_critico_e[tipo_enf]
+            if valor_critico_e >= umbral_enf:
+                st.markdown(f"""<div class="alerta-box-roja">
+                    🍄 <strong>ALERTA: {tipo_enf}</strong> en Sector <strong>{lote_critico_e['Sector']}</strong> con <strong>{valor_critico_e:.2f} {unidad}</strong> (Umbral: {umbral_enf}).
+                    <br>👉 <em>Acción recomendada: Aplicación curativa/protectante urgente.</em>
+                </div>""", unsafe_allow_html=True)
             else:
-                st.success(f"☀️ Condiciones óptimas. No se detectan síntomas de {tipo_enf}.")
-                
-            # Gráfico
-            fig_enf = px.bar(ranking_enf, x='Sector', y=tipo_enf, title=f"Presión Promedio de {tipo_enf}", color=tipo_enf, color_continuous_scale="Purples")
-            st.plotly_chart(fig_enf, use_container_width=True)
+                st.markdown(f"""<div class="alerta-box-amarilla">
+                    🟡 <strong>{tipo_enf}</strong>: Sector <strong>{lote_critico_e['Sector']}</strong> con <strong>{valor_critico_e:.2f} {unidad}</strong>. Por debajo del umbral ({umbral_enf}).
+                </div>""", unsafe_allow_html=True)
         else:
-            st.info("No hay evaluaciones fitopatológicas en el rango seleccionado.")
+            st.markdown(f"""<div class="alerta-box-verde">
+                ☀️ Condiciones óptimas. No se detectan síntomas de {tipo_enf}.
+            </div>""", unsafe_allow_html=True)
+                
+        # ✅ NUEVO: Gráfico temporal + barras lado a lado
+        ce1, ce2 = st.columns(2)
+        
+        with ce1:
+            st.subheader("📈 Tendencia en el Tiempo")
+            df_enf_trend = df_enf_f.groupby('Fecha')[tipo_enf].mean().reset_index()
+            fig_enf_line = px.line(
+                df_enf_trend, x='Fecha', y=tipo_enf, markers=True,
+                title=f"Evolución de {tipo_enf} ({unidad})",
+                color_discrete_sequence=['#8e44ad']
+            )
+            fig_enf_line.add_hline(
+                y=umbral_enf, line_dash="dot", line_color="red",
+                annotation_text=f"Umbral de Acción ({umbral_enf})"
+            )
+            fig_enf_line.update_layout(height=360)
+            st.plotly_chart(fig_enf_line, use_container_width=True)
+        
+        with ce2:
+            st.subheader("📊 Presión por Sector")
+            fig_enf_bar = px.bar(
+                ranking_enf.sort_values(tipo_enf, ascending=True),
+                x=tipo_enf, y='Sector', orientation='h',
+                title=f"Nivel Promedio por Sector: {tipo_enf}",
+                color=tipo_enf, color_continuous_scale="Purples",
+                text=ranking_enf.sort_values(tipo_enf, ascending=True)[tipo_enf].apply(lambda x: f"{x:.2f}")
+            )
+            fig_enf_bar.add_vline(
+                x=umbral_enf, line_dash="dash", line_color="red",
+                annotation_text="Umbral"
+            )
+            fig_enf_bar.update_layout(height=360, showlegend=False)
+            st.plotly_chart(fig_enf_bar, use_container_width=True)
+        
+        # ✅ NUEVO: Heatmap Sector × Fecha
+        with st.expander("🗺️ Mapa de Calor: Presión por Sector y Fecha"):
+            df_heat_e = df_enf_f.groupby(['Fecha', 'Sector'])[tipo_enf].mean().reset_index()
+            if not df_heat_e.empty:
+                df_pivot_e = df_heat_e.pivot_table(index='Sector', columns='Fecha', values=tipo_enf, fill_value=0)
+                fig_hm_e = px.imshow(
+                    df_pivot_e, aspect='auto', color_continuous_scale='BuPu',
+                    labels=dict(x='Fecha', y='Sector', color=unidad),
+                    title=f"Mapa de Intensidad: {tipo_enf}"
+                )
+                fig_hm_e.update_layout(height=300)
+                st.plotly_chart(fig_hm_e, use_container_width=True)
     else:
-        st.info("Base de datos de enfermedades vacía.")
+        st.info("Base de datos de enfermedades vacía o sin datos en el rango seleccionado.")

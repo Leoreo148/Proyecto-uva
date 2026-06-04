@@ -5,19 +5,24 @@ import plotly.express as px
 from io import BytesIO
 from supabase import create_client, Client
 
-# 🚨 CANDADO DE SEGURIDAD (Colocar al inicio de la página, justo debajo de los imports)
+# 🚨 CANDADO DE SEGURIDAD
 if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
     st.warning("⚠️ Por favor, inicie sesión en la página principal antes de acceder a este módulo.")
-    st.stop() # Frena la ejecución del resto del código de golpe
+    st.stop()
+
+# ✅ RBAC: Solo Admin, Programador o Costos pueden ver pagos del personal
+if st.session_state.get("rol", "") not in ["Admin", "Programador", "Costos"]:
+    st.error("🚫 Acceso denegado. Este módulo contiene datos de pagos confidenciales.")
+    st.stop()
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Dashboard de Raleo", page_icon="📈", layout="wide")
 st.title("📈 Dashboard de Rendimiento de Raleo")
 st.write("Analiza el rendimiento del personal, calcula los pagos y visualiza el avance por fecha y sector.")
 
-# --- CONSTANTES ---
-# Define la tarifa que se paga por cada racimo real contado.
-TARIFA_POR_RACIMO = 0.07
+# --- CONSTANTES (configurables desde el sidebar) ---
+# La tarifa real se asigna en el sidebar para que Admin pueda ajustarla sin tocar el código
+TARIFA_POR_RACIMO_DEFAULT = 0.07
 
 # --- FUNCIÓN DE CONEXIÓN SEGURA A SUPABASE ---
 @st.cache_resource
@@ -46,10 +51,10 @@ def cargar_datos_raleo_supabase():
         if df.empty:
             return pd.DataFrame()
 
-        # Limpieza y procesamiento de datos
-        df['Fecha'] = pd.to_datetime(df['Fecha'])
-        # --- MODIFICADO: Usamos 'Racimos_Reales' para el cálculo del pago ---
-        df['Pago_Calculado_S'] = df['Racimos_Reales'] * TARIFA_POR_RACIMO
+        # ✅ FIX: Rellenar NaN antes de calcular
+        df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
+        df['Racimos_Reales'] = pd.to_numeric(df['Racimos_Reales'], errors='coerce').fillna(0)
+        df['Tandas_Equivalentes'] = pd.to_numeric(df['Tandas_Equivalentes'], errors='coerce').fillna(0)
         return df
     except Exception as e:
         st.error(f"Error al cargar los datos de raleo: {e}")
@@ -71,6 +76,19 @@ if df_raleo.empty:
 
 st.sidebar.header("Filtros del Dashboard")
 
+# ✅ NUEVO: Tarifa dinámica — el Admin puede cambiarla sin tocar el código
+st.sidebar.write("---")
+st.sidebar.subheader("💵 Configuración de Tarifa")
+TARIFA_POR_RACIMO = st.sidebar.number_input(
+    "Tarifa por Racimo (S/)",
+    min_value=0.01, max_value=1.00,
+    value=TARIFA_POR_RACIMO_DEFAULT,
+    step=0.01, format="%.2f",
+    help="Monto en soles que se paga al trabajador por cada racimo contado"
+)
+df_raleo['Pago_Calculado_S'] = df_raleo['Racimos_Reales'] * TARIFA_POR_RACIMO
+
+st.sidebar.write("---")
 # Filtro de Fechas
 today = datetime.now().date()
 fecha_inicio = st.sidebar.date_input("Fecha de Inicio", today - timedelta(days=7))
@@ -112,22 +130,20 @@ else:
 
     st.divider()
 
-    # --- MODIFICADO: Gráficos con Racimos_Reales ---
-    # --- MODIFICADO: Gráficos a 3 columnas para incluir Análisis de Costos ---
-    col_graf1, col_graf2, col_graf3 = st.columns(3)
-    
+    # --- GRÁFICOS: 2 columnas (legibles) + pie abajo ---
+    col_graf1, col_graf2 = st.columns(2)
+
     with col_graf1:
         st.subheader("🏆 Ranking de Personal")
         df_ranking = df_filtrado.groupby('Nombre_del_Trabajador').agg(
             Total_Racimos=('Racimos_Reales', 'sum')
-        ).sort_values(by='Total_Racimos', ascending=False).reset_index().head(10) # Top 10 para no saturar
-
+        ).sort_values(by='Total_Racimos', ascending=True).reset_index().tail(10)
         fig_ranking = px.bar(
             df_ranking, x='Total_Racimos', y='Nombre_del_Trabajador', orientation='h',
             title='Top 10: Racimos por Persona', text='Total_Racimos',
             color_discrete_sequence=['#2ecc71']
         )
-        fig_ranking.update_layout(yaxis={'categoryorder':'total ascending'})
+        fig_ranking.update_layout(height=360)
         st.plotly_chart(fig_ranking, use_container_width=True)
 
     with col_graf2:
@@ -138,17 +154,19 @@ else:
             title='Avance Total por Día', markers=True,
             color_discrete_sequence=['#e74c3c']
         )
+        fig_evolucion.update_layout(height=360)
         st.plotly_chart(fig_evolucion, use_container_width=True)
 
-    with col_graf3:
-        st.subheader("💰 Inversión por Sector")
-        df_sector_costo = df_filtrado.groupby('Sector')['Pago_Calculado_S'].sum().reset_index()
-        fig_sector = px.pie(
-            df_sector_costo, values='Pago_Calculado_S', names='Sector', 
-            title='Distribución de Pago por Lote', hole=0.4,
-            color_discrete_sequence=px.colors.qualitative.Prism
-        )
-        st.plotly_chart(fig_sector, use_container_width=True)
+    # Pie chart a ancho completo
+    st.subheader("💰 Inversión por Sector")
+    df_sector_costo = df_filtrado.groupby('Sector')['Pago_Calculado_S'].sum().reset_index()
+    fig_sector = px.pie(
+        df_sector_costo, values='Pago_Calculado_S', names='Sector',
+        title='Distribución de Pago por Lote', hole=0.4,
+        color_discrete_sequence=px.colors.qualitative.Prism
+    )
+    fig_sector.update_layout(height=380)
+    st.plotly_chart(fig_sector, use_container_width=True)
     
     st.divider()
 

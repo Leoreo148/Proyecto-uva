@@ -11,8 +11,8 @@ if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
     st.warning("⚠️ Por favor, inicie sesión en la página principal.")
     st.stop()
 
-# Solo el Evaluador ve su propio panel
-if st.session_state.get("rol") not in ["Evaluador"]:
+# Solo el Evaluador (y Programador para soporte técnico) ven este panel
+if st.session_state.get("rol") not in ["Evaluador", "Programador"]:
     st.error("🚫 Acceso denegado. Este es el panel exclusivo del Evaluador de Campo.")
     st.stop()
 

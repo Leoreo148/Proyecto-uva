@@ -1,15 +1,18 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, timezone
 from supabase import create_client
+
+# Zona horaria de Perú (UTC-5, sin horario de verano)
+ZONA_PERU = timezone(timedelta(hours=-5))
 
 # 🚨 CANDADO DE SEGURIDAD
 if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
     st.warning("⚠️ Por favor, inicie sesión en la página principal.")
     st.stop()
 
-# Solo Evaluador, Admin y Programador pueden ver este dashboard
-if st.session_state.get("rol") not in ["Evaluador", "Admin", "Programador"]:
+# Solo el Evaluador ve su propio panel
+if st.session_state.get("rol") not in ["Evaluador"]:
     st.error("🚫 Acceso denegado. Este es el panel exclusivo del Evaluador de Campo.")
     st.stop()
 
@@ -74,7 +77,8 @@ def cargar_mis_tareas():
 
 # --- INTERFAZ ---
 nombre_user = st.session_state.get("nombre", "Evaluador")
-hora_actual = datetime.now().hour
+ahora_peru = datetime.now(ZONA_PERU)
+hora_actual = ahora_peru.hour
 if hora_actual < 12:
     saludo = "☀️ Buenos días"
 elif hora_actual < 18:
@@ -83,13 +87,13 @@ else:
     saludo = "🌙 Buenas noches"
 
 st.markdown(f'<div class="saludo-header">{saludo}, {nombre_user}</div>', unsafe_allow_html=True)
-st.caption(f"📅 {date.today().strftime('%A %d de %B, %Y')} — Tu panel de tareas del día")
+st.caption(f"📅 {ahora_peru.strftime('%A %d de %B, %Y')} — Tu panel de tareas del día")
 st.divider()
 
 df_tareas = cargar_mis_tareas()
 
-# Filtrar tareas de hoy
-hoy_str = str(date.today())
+# Filtrar tareas de hoy (usando fecha de Perú)
+hoy_str = str(ahora_peru.date())
 if not df_tareas.empty:
     df_hoy = df_tareas[df_tareas['Fecha'] == hoy_str].copy()
     df_pendientes = df_hoy[df_hoy['Estado'] == 'Pendiente'] if not df_hoy.empty else pd.DataFrame()

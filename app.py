@@ -113,7 +113,7 @@ else:
         paginas = {
             "Control Central": [p_dash_general, p_clima],
             "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo, p_cosecha],
-            "Gestión de Equipo": [p_asignar_tareas, p_dash_evaluador],
+            "Gestión de Equipo": [p_asignar_tareas],
             "Logística y Almacén": [p_kardex, p_ingreso, p_mezclas],
             "Maquinaria": [p_tractor],
             "Reportes y Finanzas": [p_dash_finanzas, p_rend_raleo, p_dash_sanidad],
@@ -142,7 +142,7 @@ else:
         paginas = {
             "Control Central": [p_dash_general, p_clima],
             "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo, p_cosecha],
-            "Gestión de Equipo": [p_asignar_tareas, p_dash_evaluador],
+            "Gestión de Equipo": [p_asignar_tareas],
             "Logística y Almacén": [p_kardex, p_ingreso, p_mezclas],
             "Maquinaria": [p_tractor],
             "Reportes y Finanzas": [p_dash_finanzas, p_rend_raleo, p_dash_sanidad],

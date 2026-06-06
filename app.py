@@ -104,19 +104,27 @@ else:
     p_carga_masiva = st.Page("modulos/99_Carga_Masiva.py", title="Carga Masiva", icon="🚀")
     p_clima = st.Page("modulos/7_Dashboard_Clima.py", title="Estación Meteorológica", icon="🌤️")
 
+    # NUEVO: Módulos de Tareas
+    p_asignar_tareas = st.Page("modulos/8_Asignar_Tareas.py", title="Asignar Tareas", icon="📋")
+    p_dash_evaluador = st.Page("modulos/8_Dashboard_Evaluador.py", title="Mi Panel de Tareas", icon="🎯")
+
     # 2. Armar el menú inteligente y en ruteo por cada Rol
     if rol == "Programador":
         paginas = {
             "Control Central": [p_dash_general, p_clima],
             "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo, p_cosecha],
+            "Gestión de Equipo": [p_asignar_tareas, p_dash_evaluador],
             "Logística y Almacén": [p_kardex, p_ingreso, p_mezclas],
             "Maquinaria": [p_tractor],
-            "Reportes y Finanzas": [p_dash_finanzas, p_rend_raleo, p_dash_sanidad], # 💡 FIX: Eliminado p_cosecha duplicado aquí
+            "Reportes y Finanzas": [p_dash_finanzas, p_rend_raleo, p_dash_sanidad],
             "Mantenimiento BD": [p_carga_masiva]
         }
 
     elif rol == "Sanidad":
-        paginas = [p_dash_sanidad, p_clima]
+        paginas = {
+            "Mi Panel": [p_dash_sanidad, p_clima],
+            "Gestión de Equipo": [p_asignar_tareas],
+        }
         
     elif rol == "Logistica":
         paginas = [p_kardex, p_ingreso, p_mezclas, p_cosecha]
@@ -125,15 +133,19 @@ else:
         paginas = [p_dash_finanzas, p_rend_raleo, p_kardex]
         
     elif rol == "Evaluador":
-        paginas = [p_sanidad, p_mosca, p_fenologia, p_baya]
+        paginas = {
+            "🎯 Mis Tareas": [p_dash_evaluador],
+            "Módulos de Evaluación": [p_sanidad, p_mosca, p_fenologia, p_baya],
+        }
         
     elif rol == "Admin":
         paginas = {
             "Control Central": [p_dash_general, p_clima],
             "Operaciones Campo": [p_sanidad, p_mosca, p_fenologia, p_baya, p_raleo, p_cosecha],
+            "Gestión de Equipo": [p_asignar_tareas, p_dash_evaluador],
             "Logística y Almacén": [p_kardex, p_ingreso, p_mezclas],
             "Maquinaria": [p_tractor],
-            "Reportes y Finanzas": [p_dash_finanzas, p_rend_raleo, p_dash_sanidad], # 💡 FIX: Eliminado p_cosecha duplicado aquí
+            "Reportes y Finanzas": [p_dash_finanzas, p_rend_raleo, p_dash_sanidad],
             "Mantenimiento": [p_carga_masiva]
         }
     else:

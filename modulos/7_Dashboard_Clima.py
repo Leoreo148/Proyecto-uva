@@ -164,13 +164,13 @@ if df_clima is None or df_clima.empty:
     
     # --- DIAGNÓSTICO DETALLADO ---
     with st.expander("🔬 Ver Diagnóstico Técnico"):
-        st.write("**Probando Supabase...**")
+        st.write("**Probando Supabase (tabla `clima`)...**")
         try:
-            res = supabase.table("Clima").select("*").limit(1).execute()
+            res = supabase.table("clima").select("*").limit(1).execute()
             if res.data:
-                st.success(f"✅ Supabase tiene datos: {res.data[0]}")
+                st.success(f"✅ Supabase conecta y tiene datos: `{res.data[0]}`")
             else:
-                st.warning("⚠️ Supabase conecta bien pero la tabla 'Clima' está VACÍA.")
+                st.warning("⚠️ Supabase conecta bien, pero la tabla `clima` está **VACÍA** — no se ha registrado ningún dato del sensor todavía.")
         except Exception as e:
             st.error(f"❌ Error en Supabase: {e}")
 
@@ -185,7 +185,9 @@ if df_clima is None or df_clima.empty:
             )
             st.write(f"HTTP Status: `{r.status_code}`")
             if r.status_code == 200:
-                st.success(f"✅ Open-Meteo responde OK. Primeros datos: `{str(r.json()['hourly']['time'][:3])}`")
+                st.success(f"✅ Open-Meteo responde OK. Datos disponibles desde satélite.")
+            elif r.status_code == 429:
+                st.warning("⏳ Open-Meteo: Límite diario de peticiones gratuitas agotado. Se restablece mañana automáticamente.")
             else:
                 st.error(f"❌ Open-Meteo devuelve error: `{r.text[:300]}`")
         except Exception as e:

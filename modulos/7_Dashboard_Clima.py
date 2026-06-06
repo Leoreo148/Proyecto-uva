@@ -38,6 +38,7 @@ def obtener_datos_clima_supabase():
             st.sidebar.warning(f"⚠️ Supabase Clima: {e}")
     return pd.DataFrame()
 
+# ── FUENTE 2: Open-Meteo ──────────────────────
 @st.cache_data(ttl=3600)
 def _fetch_open_meteo():
     lat, lon = -7.156903, -79.445073
@@ -60,25 +61,94 @@ def _fetch_open_meteo():
                 "radiacion_solar":data["hourly"]["shortwave_radiation"],
             })
         elif r.status_code == 429:
-            # Límite diario excedido — NO limpiar caché para no gastar más peticiones
-            st.sidebar.warning("⏳ Límite diario de Open-Meteo alcanzado. Datos del satélite disponibles mañana.")
+            pass  # Límite excedido, no mostrar error ruidoso, caerá al siguiente fallback
         else:
-            st.sidebar.error(f"Error Open-Meteo: {r.status_code}")
-    except Exception as e:
-        st.sidebar.error(f"Error de red API Clima: {e}")
+            pass
+    except:
+        pass
     return pd.DataFrame()
 
-def obtener_datos_clima_satelite():
+def obtener_datos_clima_openmeteo():
     df = _fetch_open_meteo()
-    # Solo limpiar caché si el error NO es 429 (límite de cuota)
     if df.empty:
         try:
             r_check = requests.get("https://api.open-meteo.com/v1/forecast?latitude=-7.156903&longitude=-79.445073&hourly=temperature_2m&past_days=1&forecast_days=1&timezone=auto", timeout=5)
             if r_check.status_code != 429:
-                _fetch_open_meteo.clear()  # Solo limpiar si NO es problema de cuota
+                _fetch_open_meteo.clear()
         except:
             pass
     return df
+
+# ── FUENTE 3: NASA POWER (sin API key, gratis, agroclimático) ──────
+@st.cache_data(ttl=21600)  # 6 horas
+def obtener_datos_nasa_power():
+    """API de la NASA para datos agroclimáticos — sin clave, sin límites estrictos."""
+    lat, lon = -7.156903, -79.445073
+    hoy = datetime.now()
+    inicio = (hoy - timedelta(days=14)).strftime("%Y%m%d")
+    fin = hoy.strftime("%Y%m%d")
+    url = (
+        f"https://power.larc.nasa.gov/api/temporal/hourly/point"
+        f"?parameters=T2M,RH2M,PRECTOTCORR,WS10M,ALLSKY_SFC_SW_DWN"
+        f"&community=AG&longitude={lon}&latitude={lat}"
+        f"&start={inicio}&end={fin}&format=JSON"
+    )
+    try:
+        r = requests.get(url, timeout=25)
+        if r.status_code == 200:
+            data = r.json()
+            props = data.get("properties", {}).get("parameter", {})
+            if props:
+                fechas = list(props["T2M"].keys())
+                df = pd.DataFrame({
+                    "fecha_hora":     pd.to_datetime(fechas, format="%Y%m%d%H"),
+                    "temp_out":       list(props["T2M"].values()),
+                    "hum_out":        list(props["RH2M"].values()),
+                    "lluvia_mm":      list(props["PRECTOTCORR"].values()),
+                    "viento_vel":     list(props["WS10M"].values()),
+                    "radiacion_solar":list(props["ALLSKY_SFC_SW_DWN"].values()),
+                })
+                # NASA usa -999 como valor nulo
+                df.replace(-999, np.nan, inplace=True)
+                df.dropna(subset=["temp_out"], inplace=True)
+                return df.sort_values("fecha_hora").reset_index(drop=True)
+    except:
+        pass
+    return pd.DataFrame()
+
+# ── FUENTE 4: MODO DEMO (datos sintéticos realistas para exposiciones) ──
+def generar_datos_demo():
+    """Genera 14 días de clima realista para la costa norte del Perú (Trujillo/Pacanguilla)."""
+    np.random.seed(42)
+    horas = pd.date_range(end=datetime.now(), periods=24*14, freq="h")
+    hora_del_dia = horas.hour
+
+    # Temperatura: ciclo diurno costero (fresco de madrugada, pico al mediodía)
+    temp_base = 22 + 4 * np.sin((hora_del_dia - 6) * np.pi / 12)
+    temp = temp_base + np.random.normal(0, 0.8, len(horas))
+
+    # Humedad: inversamente relacionada con temp (alta de noche, baja al mediodía)
+    hum_base = 85 - 12 * np.sin((hora_del_dia - 6) * np.pi / 12)
+    hum = np.clip(hum_base + np.random.normal(0, 3, len(horas)), 55, 98)
+
+    # Radiación solar: solo de día (6am-6pm)
+    rad = np.where((hora_del_dia >= 6) & (hora_del_dia <= 18),
+                   600 * np.sin((hora_del_dia - 6) * np.pi / 12) + np.random.normal(0, 40, len(horas)),
+                   0)
+    rad = np.clip(rad, 0, 900)
+
+    # Viento y lluvia
+    viento = np.abs(np.random.normal(8, 3, len(horas)))
+    lluvia = np.where(np.random.random(len(horas)) < 0.02, np.random.uniform(0.2, 2.5, len(horas)), 0)
+
+    return pd.DataFrame({
+        "fecha_hora":     horas,
+        "temp_out":       temp.round(1),
+        "hum_out":        hum.round(1),
+        "lluvia_mm":      lluvia.round(2),
+        "viento_vel":     viento.round(1),
+        "radiacion_solar":rad.round(0),
+    })
 
 # ─────────────────────────────────────────────
 # 3. FUNCIÓN DPV (Déficit de Presión de Vapor)
@@ -150,13 +220,23 @@ def calcular_riesgo_plagas(df_pasado):
 # ─────────────────────────────────────────────
 # CARGA DE DATOS + DIAGNÓSTICO
 # ─────────────────────────────────────────────
+# ── CADENA DE FALLBACK: Supabase → Open-Meteo → NASA POWER → Demo ──
 df_clima = obtener_datos_clima_supabase()
-origen_datos = "Estación Física (WeatherLink)"
+origen_datos = "🌡️ Estación Física (WeatherLink)"
 
 if df_clima.empty:
-    # Fallback a satélite
-    df_clima = obtener_datos_clima_satelite()
-    origen_datos = "Satélite (Open-Meteo)"
+    df_clima = obtener_datos_clima_openmeteo()
+    origen_datos = "🛰️ Satélite (Open-Meteo)"
+
+if df_clima.empty:
+    with st.spinner("Consultando NASA POWER (puede tardar ~15s)..."):
+        df_clima = obtener_datos_nasa_power()
+    origen_datos = "🚀 NASA POWER (Agroclimático)"
+
+if df_clima.empty:
+    df_clima = generar_datos_demo()
+    origen_datos = "🎭 Modo Demo (datos sintéticos realistas)"
+    st.warning("⚠️ **Modo Demo activo.** No hay conexión a fuentes de datos reales. Los datos mostrados son sintéticos y representativos del clima de Pacanguilla para fines de exposición.")
 
 if df_clima is None or df_clima.empty:
     st.error("❌ No hay datos climáticos disponibles en este momento.")

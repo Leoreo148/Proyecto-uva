@@ -39,7 +39,7 @@ def obtener_datos_clima_supabase():
     return pd.DataFrame()
 
 @st.cache_data(ttl=3600)
-def obtener_datos_clima_satelite():
+def _fetch_open_meteo():
     lat, lon = -7.156903, -79.445073
     url = (
         f"https://api.open-meteo.com/v1/forecast?"
@@ -59,9 +59,17 @@ def obtener_datos_clima_satelite():
                 "viento_vel":     data["hourly"]["wind_speed_10m"],
                 "radiacion_solar":data["hourly"]["shortwave_radiation"],
             })
-    except:
-        pass
-    return None
+        else:
+            st.sidebar.error(f"Error Open-Meteo: {r.status_code}")
+    except Exception as e:
+        st.sidebar.error(f"Error de red API Clima: {e}")
+    return pd.DataFrame()
+
+def obtener_datos_clima_satelite():
+    df = _fetch_open_meteo()
+    if df.empty:
+        _fetch_open_meteo.clear() # Evitar cachear errores
+    return df
 
 # ─────────────────────────────────────────────
 # 3. FUNCIÓN DPV (Déficit de Presión de Vapor)

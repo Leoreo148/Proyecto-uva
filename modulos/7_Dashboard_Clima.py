@@ -139,18 +139,47 @@ def calcular_riesgo_plagas(df_pasado):
     }
 
 # ─────────────────────────────────────────────
-# CARGA DE DATOS
+# CARGA DE DATOS + DIAGNÓSTICO
 # ─────────────────────────────────────────────
-df_clima    = obtener_datos_clima_supabase()
+df_clima = obtener_datos_clima_supabase()
 origen_datos = "Estación Física (WeatherLink)"
 
 if df_clima.empty:
-    st.info("💡 Sin datos en Supabase. Usando satélite (Open-Meteo) temporalmente.")
-    df_clima    = obtener_datos_clima_satelite()
+    # Fallback a satélite
+    df_clima = obtener_datos_clima_satelite()
     origen_datos = "Satélite (Open-Meteo)"
 
 if df_clima is None or df_clima.empty:
-    st.error("No hay datos disponibles en este momento.")
+    st.error("❌ No hay datos disponibles en este momento.")
+    
+    # --- DIAGNÓSTICO DETALLADO ---
+    with st.expander("🔬 Ver Diagnóstico Técnico"):
+        st.write("**Probando Supabase...**")
+        try:
+            res = supabase.table("Clima").select("*").limit(1).execute()
+            if res.data:
+                st.success(f"✅ Supabase tiene datos: {res.data[0]}")
+            else:
+                st.warning("⚠️ Supabase conecta bien pero la tabla 'Clima' está VACÍA.")
+        except Exception as e:
+            st.error(f"❌ Error en Supabase: {e}")
+
+        st.write("**Probando Open-Meteo (satélite)...**")
+        try:
+            import requests as req
+            r = req.get(
+                "https://api.open-meteo.com/v1/forecast"
+                "?latitude=-7.156903&longitude=-79.445073"
+                "&hourly=temperature_2m,relative_humidity_2m&past_days=1&forecast_days=1&timezone=auto",
+                timeout=10
+            )
+            st.write(f"HTTP Status: `{r.status_code}`")
+            if r.status_code == 200:
+                st.success(f"✅ Open-Meteo responde OK. Primeros datos: `{str(r.json()['hourly']['time'][:3])}`")
+            else:
+                st.error(f"❌ Open-Meteo devuelve error: `{r.text[:300]}`")
+        except Exception as e:
+            st.error(f"❌ No se puede alcanzar Open-Meteo: `{e}`")
     st.stop()
 
 # Calcular DPV en todo el dataframe

@@ -29,13 +29,13 @@ supabase = init_supabase()
 def obtener_datos_clima_supabase():
     if supabase:
         try:
-            res = supabase.table("Clima").select("*").order("fecha_hora", desc=True).limit(500).execute()
+            res = supabase.table("clima").select("*").order("fecha_hora", desc=True).limit(500).execute()
             if res.data:
                 df = pd.DataFrame(res.data)
                 df['fecha_hora'] = pd.to_datetime(df['fecha_hora'])
                 return df.sort_values('fecha_hora')
-        except:
-            pass
+        except Exception as e:
+            st.sidebar.warning(f"⚠️ Supabase Clima: {e}")
     return pd.DataFrame()
 
 @st.cache_data(ttl=3600)
@@ -59,6 +59,9 @@ def _fetch_open_meteo():
                 "viento_vel":     data["hourly"]["wind_speed_10m"],
                 "radiacion_solar":data["hourly"]["shortwave_radiation"],
             })
+        elif r.status_code == 429:
+            # Límite diario excedido — NO limpiar caché para no gastar más peticiones
+            st.sidebar.warning("⏳ Límite diario de Open-Meteo alcanzado. Datos del satélite disponibles mañana.")
         else:
             st.sidebar.error(f"Error Open-Meteo: {r.status_code}")
     except Exception as e:
@@ -67,8 +70,14 @@ def _fetch_open_meteo():
 
 def obtener_datos_clima_satelite():
     df = _fetch_open_meteo()
+    # Solo limpiar caché si el error NO es 429 (límite de cuota)
     if df.empty:
-        _fetch_open_meteo.clear() # Evitar cachear errores
+        try:
+            r_check = requests.get("https://api.open-meteo.com/v1/forecast?latitude=-7.156903&longitude=-79.445073&hourly=temperature_2m&past_days=1&forecast_days=1&timezone=auto", timeout=5)
+            if r_check.status_code != 429:
+                _fetch_open_meteo.clear()  # Solo limpiar si NO es problema de cuota
+        except:
+            pass
     return df
 
 # ─────────────────────────────────────────────
@@ -150,7 +159,8 @@ if df_clima.empty:
     origen_datos = "Satélite (Open-Meteo)"
 
 if df_clima is None or df_clima.empty:
-    st.error("❌ No hay datos disponibles en este momento.")
+    st.error("❌ No hay datos climáticos disponibles en este momento.")
+    st.info("💡 **Posibles causas:** La tabla `clima` en Supabase está vacía, o el límite diario de la API de satélites (Open-Meteo) fue excedido. Vuelve a intentarlo mañana o sube datos manualmente a Supabase.")
     
     # --- DIAGNÓSTICO DETALLADO ---
     with st.expander("🔬 Ver Diagnóstico Técnico"):

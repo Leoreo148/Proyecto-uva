@@ -25,7 +25,7 @@ columnas_racimo1 = ["Racimo 1 - Superior", "Racimo 1 - Medio", "Racimo 1 - Infer
 columnas_racimo2 = ["Racimo 2 - Superior", "Racimo 2 - Medio", "Racimo 2 - Inferior"]
 columnas_medicion = columnas_racimo1 + columnas_racimo2
 # --- CORRECCIÓN: Nombres de columna para la base de datos ---
-columnas_db = [c.replace(' ', '_').replace(' - ', '_') for c in columnas_medicion]
+columnas_db = [c.replace(' - ', '_').replace(' ', '_') for c in columnas_medicion]
 mapeo_columnas = dict(zip(columnas_medicion, columnas_db))
 
 # --- Conexión a Supabase ---
@@ -62,10 +62,11 @@ def to_excel(df):
     return output.getvalue()
 
 def calcular_tasa_crecimiento(df):
-    if df.shape[0] < 2 or not all(c in df.columns for c in columnas_db):
+    columnas_reales = [c for c in df.columns if c.startswith('Racimo_')]
+    if df.shape[0] < 2 or not columnas_reales:
         return pd.DataFrame()
 
-    df['Diametro_Prom_Planta'] = df[columnas_db].mean(axis=1)
+    df['Diametro_Prom_Planta'] = df[columnas_reales].mean(axis=1)
     tasas = []
     for sector in df['Sector'].unique():
         df_sector = df[df['Sector'] == sector].copy()
@@ -223,9 +224,13 @@ else:
     
     if sectores_a_graficar:
         df_filtrado = df_historial[df_historial['Sector'].isin(sectores_a_graficar)]
-        df_melted = df_filtrado.melt(id_vars=['Fecha', 'Sector'], value_vars=columnas_db, var_name='Posicion', value_name='Diametro')
-        df_melted = df_melted[df_melted['Diametro'] > 0]
-        df_tendencia = df_melted.groupby(['Fecha', 'Sector'])['Diametro'].mean().reset_index()
+        columnas_reales = [c for c in df_filtrado.columns if c.startswith('Racimo_')]
+        if columnas_reales:
+            df_melted = df_filtrado.melt(id_vars=['Fecha', 'Sector'], value_vars=columnas_reales, var_name='Posicion', value_name='Diametro')
+            df_melted = df_melted[df_melted['Diametro'] > 0]
+            df_tendencia = df_melted.groupby(['Fecha', 'Sector'])['Diametro'].mean().reset_index()
+        else:
+            df_tendencia = pd.DataFrame()
         
         if not df_tendencia.empty:
             st.write("Tabla de Diámetro Promedio (mm):")

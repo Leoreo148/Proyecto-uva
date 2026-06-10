@@ -58,6 +58,7 @@ def cargar_datos_maestros():
     df_raleo = fetch_table('Control_Raleo')
     df_ots = fetch_table('Ordenes_de_Trabajo')
     df_diam = fetch_table('Diametro_Baya')
+    df_feno = fetch_table('Evaluaciones_Fenologicas')
     df_clima = fetch_table('Clima')
     
     # Procesamiento básico si hay datos
@@ -65,10 +66,11 @@ def cargar_datos_maestros():
     if not df_raleo.empty: df_raleo['Fecha'] = pd.to_datetime(df_raleo['Fecha'])
     if not df_ots.empty: df_ots['Fecha_Programada'] = pd.to_datetime(df_ots['Fecha_Programada'])
     if not df_diam.empty: df_diam['Fecha'] = pd.to_datetime(df_diam['Fecha'])
+    if not df_feno.empty: df_feno['Fecha'] = pd.to_datetime(df_feno['Fecha'])
     
-    return df_mosca, df_raleo, df_ots, df_diam, df_clima
+    return df_mosca, df_raleo, df_ots, df_diam, df_feno, df_clima
 
-df_mosca, df_raleo, df_ots, df_diam, df_clima = cargar_datos_maestros()
+df_mosca, df_raleo, df_ots, df_diam, df_feno, df_clima = cargar_datos_maestros()
 
 # --- 4. CÁLCULO DE KPIs ---
 TARIFA_POR_RACIMO = 0.07
@@ -227,3 +229,56 @@ with col_alert2:
             st.info("No hay aplicaciones finalizadas recientes.")
     else:
         st.write("Sin datos de órdenes de trabajo.")
+
+st.divider()
+
+# FILA 4: CRECIMIENTO Y DESARROLLO (NUEVO)
+st.subheader("🌱 Crecimiento y Desarrollo")
+col_crec1, col_crec2 = st.columns(2)
+
+with col_crec1:
+    st.markdown("**📏 Evolución del Diámetro de Baya (mm)**")
+    if not df_diam.empty:
+        # Extraemos las columnas numéricas de medición
+        cols_medicion = [c for c in df_diam.columns if c.startswith('Racimo_')]
+        if cols_medicion:
+            # Calculamos el promedio de la planta en esa fila
+            df_diam['Promedio_Planta'] = df_diam[cols_medicion].mean(axis=1)
+            # Agrupamos por Fecha y Sector
+            df_diam_hist = df_diam.groupby(['Fecha', 'Sector'])['Promedio_Planta'].mean().reset_index()
+            
+            fig_diam = px.line(
+                df_diam_hist, x='Fecha', y='Promedio_Planta', color='Sector',
+                markers=True, title="Crecimiento de Baya por Sector"
+            )
+            fig_diam.update_layout(yaxis_title="Diámetro Promedio (mm)", xaxis_title="")
+            st.plotly_chart(fig_diam, use_container_width=True)
+        else:
+            st.info("Formato de datos de diámetro no reconocido.")
+    else:
+        st.info("Aún no hay mediciones de Diámetro de Baya.")
+
+with col_crec2:
+    st.markdown("**🌿 Último Estado Fenológico**")
+    if not df_feno.empty:
+        # Solo tomamos la evaluación más reciente por sector
+        ultima_fecha = df_feno['Fecha'].max()
+        df_feno_reciente = df_feno[df_feno['Fecha'] == ultima_fecha]
+        
+        # Columnas de fenología
+        cols_feno = ['Punta_algodon', 'Punta_verde', 'Salida_de_hojas', 'Hojas_extendidas', 'Racimos_visibles']
+        df_feno_resumen = df_feno_reciente.groupby('Sector')[cols_feno].sum().reset_index()
+        
+        # Transformar para plotly (Melt)
+        df_feno_melt = df_feno_resumen.melt(id_vars=['Sector'], value_vars=cols_feno, var_name='Etapa', value_name='Conteo')
+        
+        fig_feno = px.bar(
+            df_feno_melt, x='Sector', y='Conteo', color='Etapa',
+            title=f"Estado Fenológico (Al {ultima_fecha.strftime('%d/%m/%Y')})",
+            barmode='stack',
+            color_discrete_sequence=px.colors.qualitative.Pastel
+        )
+        fig_feno.update_layout(xaxis_title="Sector", yaxis_title="Cantidad de Plantas")
+        st.plotly_chart(fig_feno, use_container_width=True)
+    else:
+        st.info("Aún no hay evaluaciones fenológicas registradas.")

@@ -43,7 +43,7 @@ supabase = init_supabase()
 
 # --- 3. EXTRACCIÓN DE DATOS GLOBALES (Caché de 5 mins para rendimiento) ---
 @st.cache_data(ttl=300)
-def cargar_datos_maestros():
+def cargar_datos_maestros_v2():
     hoy = date.today()
     hace_30_dias = hoy - timedelta(days=30)
     
@@ -70,7 +70,7 @@ def cargar_datos_maestros():
     
     return df_mosca, df_raleo, df_ots, df_diam, df_feno, df_clima
 
-df_mosca, df_raleo, df_ots, df_diam, df_feno, df_clima = cargar_datos_maestros()
+df_mosca, df_raleo, df_ots, df_diam, df_feno, df_clima = cargar_datos_maestros_v2()
 
 # --- 4. CÁLCULO DE KPIs ---
 TARIFA_POR_RACIMO = 0.07

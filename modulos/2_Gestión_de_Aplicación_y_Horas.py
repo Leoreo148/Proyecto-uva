@@ -65,7 +65,82 @@ with stylable_container(key="green_title", css_styles="{ background-color: #1e3d
         st.write(f"Bienvenido, **{nombre_sesion}**. Aquí están tus órdenes asignadas para aplicar.")
 
 # --- 6. TAREAS PENDIENTES ---
-st.subheader("📋 Mis Órdenes Asignadas")
+st.markdown("""
+    <style>
+    /* === TARJETAS DE TURNO === */
+    .turno-header {
+        font-size: 1.3rem;
+        font-weight: 800;
+        padding: 10px 18px;
+        border-radius: 10px;
+        margin: 20px 0 10px 0;
+        letter-spacing: 0.5px;
+    }
+    .turno-dia   { background: #FFF8E1; color: #E65100; border-left: 6px solid #FF8F00; }
+    .turno-tarde { background: #E8F5E9; color: #1B5E20; border-left: 6px solid #2E7D32; }
+    .turno-noche { background: #EDE7F6; color: #311B92; border-left: 6px solid #4527A0; }
+
+    .ot-card {
+        background: white;
+        border-radius: 14px;
+        padding: 20px 22px;
+        margin-bottom: 18px;
+        box-shadow: 0 3px 12px rgba(0,0,0,0.10);
+        border-left: 7px solid #3498db;
+    }
+    .ot-card-header {
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: #1a252f;
+        margin-bottom: 6px;
+    }
+    .ot-badge {
+        display: inline-block;
+        font-size: 0.82rem;
+        font-weight: 600;
+        padding: 3px 10px;
+        border-radius: 20px;
+        background: #EBF5FB;
+        color: #2980b9;
+        margin-right: 6px;
+        margin-bottom: 8px;
+    }
+    .ot-mezcla {
+        background: #FDF5E6;
+        border-left: 4px solid #f39c12;
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 1rem;
+        margin: 10px 0;
+        color: #7D4800;
+        line-height: 1.6;
+    }
+    .ot-instruc {
+        background: #E8F8F5;
+        border-left: 4px solid #1abc9c;
+        border-radius: 8px;
+        padding: 12px 14px;
+        font-size: 1rem;
+        line-height: 1.8;
+        margin: 10px 0;
+        color: #1a252f;
+    }
+    .ot-obs {
+        background: #EBF5FB;
+        border-left: 4px solid #3498db;
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 0.95rem;
+        color: #1F618D;
+        margin: 10px 0;
+    }
+    /* Botones más grandes en móvil */
+    div[data-testid="stButton"] > button {
+        font-size: 1.05rem !important;
+        padding: 0.6rem 1rem !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 if df_ord.empty:
     st.info("No hay órdenes de aplicación pendientes. Descansa. ☕")
@@ -75,146 +150,153 @@ else:
     dict_personal = {r['nombre_completo']: r['id'] for _, r in df_pers.iterrows()}
     dict_maquina  = {r['nombre']: r['id'] for _, r in df_maqu.iterrows()}
 
-    tareas_mostradas = 0
-
+    # --- Filtrar órdenes relevantes ---
+    ordenes_filtradas = []
     for _, tarea in df_ord.iterrows():
         tipo_app = str(tarea.get('Tipo_Aplicacion', ''))
         if "Fertirriego" in tipo_app:
-            continue  # Las de riego van para el casetero
-
-        # ✅ MEJORA: Filtrar por operario logueado (supervisores ven todo)
+            continue
         if not es_supervisor and mi_personal_id is not None:
             oper_id_orden = tarea.get('operador_id')
             if oper_id_orden is not None and int(oper_id_orden) != mi_personal_id:
-                continue   # No es tu orden, la saltamos
+                continue
+        ordenes_filtradas.append(tarea)
 
-        tareas_mostradas += 1
-        nombre_objetivo = tarea.get('Objetivo', "General")
-        exp_title = f"📦 OT: {tarea['ID_Orden_Personalizado']} | Sector: {tarea.get('Sector_Aplicacion','')} | 🎯 {nombre_objetivo}"
+    if not ordenes_filtradas:
+        if not es_supervisor and mi_personal_id is None:
+            st.warning(f"⚠️ Tu nombre '{nombre_sesion}' no coincide con ningún operario en la tabla Personal.")
+        else:
+            st.info("No tienes órdenes de aplicación pendientes asignadas a ti. Descansa. ☕")
+    else:
+        # --- Ordenar por turno: Día → Tarde → Noche ---
+        orden_turno = {"Día": 0, "Tarde": 1, "Noche": 2}
+        def get_turno(t):
+            dt = t.get('Datos_Tecnicos') or {}
+            return dt.get('Turno', 'Día') if isinstance(dt, dict) else 'Día'
 
-        with st.expander(exp_title, expanded=False):
+        ordenes_filtradas.sort(key=lambda t: orden_turno.get(get_turno(t), 0))
 
-            # Datos que el tractorista debe leer
-            receta_str = ", ".join([f"{i['p']} ({i['c']})" for i in tarea.get('Receta_Mezcla_Lotes', [])])
-            st.markdown(f'<div class="receta-box"><b>🧪 MEZCLA AUTORIZADA:</b> {receta_str}</div>', unsafe_allow_html=True)
+        turno_iconos = {
+            "Día":   ("☀️ TURNO DÍA",   "turno-dia"),
+            "Tarde": ("🌤️ TURNO TARDE", "turno-tarde"),
+            "Noche": ("🌙 TURNO NOCHE", "turno-noche"),
+        }
+        turno_color_card = {
+            "Día":   "#FF8F00",
+            "Tarde": "#2E7D32",
+            "Noche": "#4527A0",
+        }
 
-            # --- PARSEO DE INSTRUCCIONES DEL INGENIERO ---
-            # Extraemos la información que viene concatenada en 'Observaciones_Aplicacion'
+        turno_actual_mostrado = None
+
+        for tarea in ordenes_filtradas:
+            turno_ot = get_turno(tarea)
+
+            # --- Encabezado de turno cuando cambia ---
+            if turno_ot != turno_actual_mostrado:
+                turno_actual_mostrado = turno_ot
+                label, css_class = turno_iconos.get(turno_ot, ("📋 SIN TURNO", "turno-dia"))
+                st.markdown(f'<div class="turno-header {css_class}">{label}</div>', unsafe_allow_html=True)
+
+            color_card = turno_color_card.get(turno_ot, "#3498db")
+            sector     = tarea.get('Sector_Aplicacion', '-')
+            objetivo   = tarea.get('Objetivo', 'General')
+            id_orden   = tarea.get('ID_Orden_Personalizado', tarea.get('id', ''))
+
+            # --- Parser de instrucciones ---
             inst_raw = str(tarea.get('Observaciones_Aplicacion', ''))
-            
-            # Valores por defecto en caso de que no existan las etiquetas
-            metodo = "N/A"
-            calibracion = "N/A"
-            agua = "N/A"
-            boquillas = "N/A"
-            obs_pura = "Sin notas adicionales."
-
-            # Parser manual simple basado en las etiquetas
-            import re
-            
-            def extract_tag(texto, tag_start, tag_end_list):
+            def xtag(texto, tag_start, tag_end_list):
                 if tag_start in texto:
-                    start_idx = texto.find(tag_start) + len(tag_start)
-                    # Buscar cuál es la etiqueta de cierre que ocurre primero
-                    end_idxs = [texto.find(t, start_idx) for t in tag_end_list if texto.find(t, start_idx) != -1]
-                    end_idx = min(end_idxs) if end_idxs else len(texto)
-                    return texto[start_idx:end_idx].strip(' |').strip()
+                    si = texto.find(tag_start) + len(tag_start)
+                    ends = [texto.find(t, si) for t in tag_end_list if texto.find(t, si) != -1]
+                    ei = min(ends) if ends else len(texto)
+                    return texto[si:ei].strip(' |').strip()
                 return "N/A"
 
-            if "[MÉTODO]:" in inst_raw:
-                metodo = extract_tag(inst_raw, "[MÉTODO]:", ["[AGUA]:", "[CALIBRACIÓN]:", "[BOQUILLAS]:", "[EQUIPO]:", "[OBSERVACIONES]:"])
-            if "[CALIBRACIÓN]:" in inst_raw:
-                calibracion = extract_tag(inst_raw, "[CALIBRACIÓN]:", ["[BOQUILLAS]:", "[EQUIPO]:", "[OBSERVACIONES]:"])
-            if "[AGUA]:" in inst_raw:
-                agua = extract_tag(inst_raw, "[AGUA]:", ["[CALIBRACIÓN]:", "[BOQUILLAS]:", "[EQUIPO]:", "[OBSERVACIONES]:"])
-            if "[BOQUILLAS]:" in inst_raw:
-                boquillas = extract_tag(inst_raw, "[BOQUILLAS]:", ["[EQUIPO]:", "[OBSERVACIONES]:"])
+            metodo     = xtag(inst_raw, "[MÉTODO]:",    ["[AGUA]:", "[CALIBRACIÓN]:", "[BOQUILLAS]:", "[EQUIPO]:", "[OBSERVACIONES]:"])
+            calibracion= xtag(inst_raw, "[CALIBRACIÓN]:",["[BOQUILLAS]:", "[EQUIPO]:", "[OBSERVACIONES]:"])
+            agua       = xtag(inst_raw, "[AGUA]:",      ["[CALIBRACIÓN]:", "[BOQUILLAS]:", "[EQUIPO]:", "[OBSERVACIONES]:"])
+            boquillas  = xtag(inst_raw, "[BOQUILLAS]:", ["[EQUIPO]:", "[OBSERVACIONES]:"])
+            obs_pura   = ""
             if "[OBSERVACIONES]:" in inst_raw:
                 obs_pura = inst_raw[inst_raw.find("[OBSERVACIONES]:") + len("[OBSERVACIONES]:"):].strip()
-            elif inst_raw and not any(tag in inst_raw for tag in ["[MÉTODO]:", "[CALIBRACIÓN]:", "[AGUA]:", "[BOQUILLAS]:", "[EQUIPO]:"]):
-                # Por si es un texto antiguo sin formato de etiquetas
-                obs_pura = inst_raw
 
+            # Receta mezcla
+            receta_items = tarea.get('Receta_Mezcla_Lotes', []) or []
+            receta_str = " &nbsp;|&nbsp; ".join([f"<b>{i['p']}</b> ({i['c']})" for i in receta_items]) if receta_items else "Sin mezcla registrada"
+
+            # --- Tarjeta visual ---
             st.markdown(f"""
-                <div class="instrucciones-box">
-                    <b>📝 CONFIGURACIÓN DEL TRACTOR (Mandato del Ingeniero):</b><br><br>
-                    🚜 <b>Método de Aplicación:</b> {metodo}<br>
-                    ⚙️ <b>Calibración:</b> {calibracion}<br>
-                    💧 <b>Manejo de Agua:</b> {agua}<br>
-                    🚰 <b>Boquillas:</b> {boquillas}
+                <div class="ot-card" style="border-left-color:{color_card}">
+                    <div class="ot-card-header">📋 {id_orden}</div>
+                    <span class="ot-badge">📍 Sector: {sector}</span>
+                    <span class="ot-badge">🎯 {objetivo}</span>
+                    <div class="ot-mezcla">🧪 <b>Mezcla autorizada:</b><br>{receta_str}</div>
+                    <div class="ot-instruc">
+                        🚜 <b>Método:</b> {metodo}<br>
+                        ⚙️ <b>Calibración:</b> {calibracion}<br>
+                        💧 <b>Agua:</b> {agua}<br>
+                        🚰 <b>Boquillas:</b> {boquillas}
+                    </div>
+                    {"<div class='ot-obs'>📝 <b>Nota del Ingeniero:</b> " + obs_pura + "</div>" if obs_pura else ""}
                 </div>
             """, unsafe_allow_html=True)
 
-            if obs_pura and obs_pura != "Sin notas adicionales.":
-                st.info(f"**Nota del Ingeniero:** {obs_pura}")
+            # --- Formulario de reporte (dentro de expander compacto) ---
+            with st.expander("✅ Registrar reporte de campo para esta OT", expanded=False):
+                with st.form(key=f"form_horometro_{tarea['id']}"):
+                    c1, c2, c3 = st.columns(3)
+                    op_sel    = c1.selectbox("Soy el Operador:", options=list(dict_personal.keys()))
+                    tract_sel = c2.selectbox("Tractor Utilizado:", options=list(dict_maquina.keys()))
+                    turno_sel = c3.selectbox("Turno:", options=["Día", "Tarde", "Noche"],
+                                             index=["Día","Tarde","Noche"].index(turno_ot) if turno_ot in ["Día","Tarde","Noche"] else 0)
 
-            st.write("---")
-            st.write("✅ **Rellena los datos físicos al terminar la labor:**")
+                    c4, c5, c6 = st.columns(3)
+                    horometro_ini = c4.number_input("Horómetro INICIAL", min_value=0.0, step=0.1, format="%.1f")
+                    horometro_fin = c5.number_input("Horómetro FINAL",   min_value=0.0, step=0.1, format="%.1f")
+                    agua_total    = c6.number_input("Agua Usada (Litros)", min_value=0, step=100)
 
-            # Formulario de cierre
-            with st.form(key=f"form_horometro_{tarea['id']}"):
-                c1, c2, c3 = st.columns(3)
-                op_sel    = c1.selectbox("Soy el Operador:", options=list(dict_personal.keys()))
-                tract_sel = c2.selectbox("Tractor Utilizado:", options=list(dict_maquina.keys()))
-                # ✅ MEJORA: Campo de Turno añadido al formulario
-                turno_sel = c3.selectbox("Turno:", options=["Día", "Tarde", "Noche"])
+                    obs = st.text_area("📝 Novedades en campo (Opcional)", placeholder="Ej: Se tapó boquilla derecha.")
 
-                c4, c5, c6 = st.columns(3)
-                horometro_ini = c4.number_input("Horómetro INICIAL", min_value=0.0, step=0.1, format="%.1f")
-                horometro_fin = c5.number_input("Horómetro FINAL",   min_value=0.0, step=0.1, format="%.1f")
-                agua_total    = c6.number_input("Total Agua Usada (Litros)", min_value=0, step=100)
+                    if st.form_submit_button("💾 ENVIAR REPORTE AL INGENIERO", use_container_width=True, type="primary"):
+                        if horometro_fin < horometro_ini:
+                            st.error("❌ El horómetro final no puede ser menor al inicial.")
+                        else:
+                            horas_trabajadas = horometro_fin - horometro_ini
+                            try:
+                                obs_ant       = tarea.get('Observaciones_Aplicacion', '')
+                                reporte_final = f"{obs_ant}\n[OPERADOR]: Usó {agua_total} Lts. Turno: {turno_sel}. Notas: {obs}"
+                                data_horas = {
+                                    "Fecha":             str(date.today()),
+                                    "Turno":             turno_sel,
+                                    "personal_id":       int(dict_personal[op_sel]),
+                                    "maquinaria_id":     int(dict_maquina[tract_sel]),
+                                    "Implemento":        tarea.get('Tipo_Aplicacion', 'Pulverizador'),
+                                    "Labor_Realizada":   f"Aplicación {objetivo}",
+                                    "Sector":            sector,
+                                    "Horometro_Inicial": float(horometro_ini),
+                                    "Horometro_Final":   float(horometro_fin),
+                                    "Total_Horas":       round(horas_trabajadas, 2),
+                                    "Observaciones":     f"Agua: {agua_total}L | Turno: {turno_sel} | Notas: {obs}"
+                                }
+                                supabase.table('Registro_Horas_Tractor').insert(data_horas).execute()
+                                dt = tarea.get('Datos_Tecnicos', {}) or {}
+                                dt['Agua_Real_Lts']        = agua_total
+                                dt['Horas_Maquina_Reales'] = round(horas_trabajadas, 2)
+                                dt['Turno']                = turno_sel
+                                supabase.table('Ordenes_de_Trabajo').update({
+                                    "Status":                      "Aplicada en Campo",
+                                    "Aplicacion_Completada_Fecha": datetime.now().isoformat(),
+                                    "Datos_Tecnicos":              dt,
+                                    "Observaciones_Aplicacion":    reporte_final
+                                }).eq('id', tarea['id']).execute()
+                                st.success(f"¡Reporte enviado! {round(horas_trabajadas,2)} hrs | Turno: {turno_sel}")
+                                cargar_datos_operacion.clear()
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error al enviar: {e}")
 
-                obs = st.text_area("📝 Novedades en campo (Opcional)", placeholder="Limpié filtros 2 veces. / Se tapó boquilla derecha.")
 
-                if st.form_submit_button("💾 ENVIAR REPORTE AL INGENIERO", use_container_width=True, type="primary"):
-                    if horometro_fin < horometro_ini:
-                        st.error("❌ El horómetro final no puede ser menor al inicial.")
-                    else:
-                        horas_trabajadas = horometro_fin - horometro_ini
-                        try:
-                            obs_ant      = tarea.get('Observaciones_Aplicacion', '')
-                            reporte_final = f"{obs_ant}\n[OPERADOR]: Usó {agua_total} Lts. Turno: {turno_sel}. Notas: {obs}"
-
-                            data_horas = {
-                                "Fecha":             str(date.today()),
-                                "Turno":             turno_sel,    # ✅ Ahora sí guarda el turno real
-                                "personal_id":       int(dict_personal[op_sel]),
-                                "maquinaria_id":     int(dict_maquina[tract_sel]),
-                                "Implemento":        tarea.get('Tipo_Aplicacion', 'Pulverizador'),
-                                "Labor_Realizada":   f"Aplicación {nombre_objetivo}",
-                                "Sector":            tarea.get('Sector_Aplicacion', ''),
-                                "Horometro_Inicial": float(horometro_ini),
-                                "Horometro_Final":   float(horometro_fin),
-                                "Total_Horas":       round(horas_trabajadas, 2),
-                                "Observaciones":     f"Agua: {agua_total}L | Turno: {turno_sel} | Notas: {obs}"
-                            }
-                            supabase.table('Registro_Horas_Tractor').insert(data_horas).execute()
-
-                            # ✅ FIX ESTADO: Cambiamos a "Aplicada en Campo" para no romper el historial de costos
-                            dt = tarea.get('Datos_Tecnicos', {}) or {}
-                            dt['Agua_Real_Lts']       = agua_total
-                            dt['Horas_Maquina_Reales'] = round(horas_trabajadas, 2)
-                            dt['Turno']               = turno_sel
-
-                            supabase.table('Ordenes_de_Trabajo').update({
-                                "Status":                       "Aplicada en Campo",
-                                "Aplicacion_Completada_Fecha":  datetime.now().isoformat(),
-                                "Datos_Tecnicos":               dt,
-                                "Observaciones_Aplicacion":     reporte_final
-                            }).eq('id', tarea['id']).execute()
-
-                            st.success(f"¡Reporte enviado! Horas registradas: **{round(horas_trabajadas, 2)} hrs** | Turno: **{turno_sel}**")
-                            # ✅ Caché específica
-                            cargar_datos_operacion.clear()
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al enviar: {e}")
-
-    if tareas_mostradas == 0:
-        if not es_supervisor and mi_personal_id is None:
-            st.warning(f"⚠️ Tu nombre '{nombre_sesion}' no coincide con ningún operario registrado en la tabla Personal. Contacta al administrador.")
-        else:
-            st.info("No tienes órdenes de aplicación pendientes asignadas a ti. Descansa. ☕")
 
 # --- 7. HISTORIAL DE LABORES Y DESCARGA ---
 st.divider()
